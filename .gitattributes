@@ -1,0 +1,11 @@
+# Store and check out text with LF on every OS. Generated files (TypeScript types, design
+# tokens, the quirk table) are compared byte for byte in CI, so CRLF on Windows would break them.
+* text=auto eol=lf
+
+# Binary assets and fixtures: never convert.
+*.png binary
+*.jpg binary
+*.glb binary
+*.bin binary
+*.woff2 binary
+*.eucr binary
