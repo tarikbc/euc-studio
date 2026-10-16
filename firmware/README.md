@@ -7,11 +7,12 @@ A clean C11 rewrite of the Begode Extreme controller firmware. One CMake tree bu
 - **host**: unit tests, and a software-in-the-loop (SIL) shared library that the simulator loads in place
   of the emulated image.
 
-Status: milestone M1, step F1. Core has the BLE protocol: telemetry frames and the command parser
-(`core/protocol/`, described in [docs/protocol/begode.md](../docs/protocol/begode.md)), tested against a real
-capture. The image links core but does not call it yet, configures no peripheral and drives no pin. It is not
-meant for a wheel: nothing in this tree is flashed before the gates in the project plan (sim dry-run,
-stock-first flash, SWD backup) are in place.
+Status: milestone M1, steps F1 and F2. Core has the BLE protocol (`core/protocol/`, described in
+[docs/protocol/begode.md](../docs/protocol/begode.md), tested against a real capture) and the balance task:
+attitude estimation (`core/attitude/`), balance law, tiltbacks, cut-offs and recovery (`core/balance/`), with
+our own fdlibm-derived math (`core/math/`) so host and target compute the same bits. The image links core but
+does not call it yet, configures no peripheral and drives no pin. It is not meant for a wheel: nothing in this
+tree is flashed before the gates in the project plan (sim dry-run, stock-first flash, SWD backup) are in place.
 
 ## Layout and layer rules
 

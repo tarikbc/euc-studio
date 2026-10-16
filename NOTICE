@@ -12,6 +12,14 @@ registries or pinned releases and keep their own licenses:
   versions and sha256 checks; see firmware/README.md.
 - EUC Studio app: npm packages and fonts, see app/THIRD_PARTY.md.
 
+One file adapts third-party source: firmware/core/math/libm.c derives its asin, atan and atan2 from fdlibm,
+under this notice (kept in the file):
+
+  Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+  Developed at SunPro, a Sun Microsystems, Inc. business.
+  Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice
+  is preserved.
+
 Binary releases include the full license texts of everything they bundle.
 
 Trademarks

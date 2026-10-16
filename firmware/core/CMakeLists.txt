@@ -11,6 +11,12 @@ target_include_directories(euc_core_headers INTERFACE
 # target images, run-time switches on the host (the SIL port owns the mask and provides
 # euc_quirk_is_active(), so host consumers link euc_port_sim too).
 add_library(euc_core STATIC
+    attitude/attitude.c
+    balance/balance.c
+    balance/cutoff.c
+    balance/law.c
+    balance/tiltback.c
+    math/libm.c
     protocol/commands.c
     protocol/telemetry.c)
 euc_target_defaults(euc_core)

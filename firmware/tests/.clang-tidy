@@ -1,0 +1,5 @@
+---
+# Tests: the firmware rules, minus the complexity metric. A test function is a list of Unity assertions, and
+# each assertion macro expands to a branch, so the metric says nothing useful about test code.
+InheritParentConfig: true
+Checks: '-readability-function-cognitive-complexity'

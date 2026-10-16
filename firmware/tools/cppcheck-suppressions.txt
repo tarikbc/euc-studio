@@ -9,6 +9,10 @@
 # read than one return at the end.
 misra-c2012-15.5
 
+# 7.3 (no lowercase l suffix): the cppcheck addon also flags identifiers that end in "l" (accel, cell). The
+# rule itself holds everywhere: clang-tidy readability-uppercase-literal-suffix enforces upper-case suffixes.
+misra-c2012-7.3
+
 # --- core -------------------------------------------------------------------------------------------------
 
 # 20.1, 20.5, 20.10 (#include after code, #undef, # and ##): the quirk list is an X-macro. config/quirks.def
@@ -34,6 +38,22 @@ misra-c2012-8.7:*/core/protocol/*
 # asserts at build time that the compiler shifts arithmetically.
 misra-c2012-10.1:*/core/include/euc/math/fixed.h
 shiftNegativeLHS:*/core/include/euc/math/fixed.h
+
+# 19.2 (advisory, no union): reading the bits of a float is how the stock rounding (denormal flush, fast
+# inverse square root) is reproduced; C11 defines type punning through a union.
+misra-c2012-19.2:*/core/include/euc/math/float_ops.h
+misra-c2012-19.2:*/core/math/libm.c
+
+# libm.c is derived from fdlibm and kept close to it, so the two can be read side by side:
+#   8.9 (advisory): constants stay at file scope, as in fdlibm.
+#   10.1, 10.7, 10.8: the functions work on the integer words of IEEE doubles (sign, exponent, mantissa).
+misra-c2012-8.9:*/core/math/libm.c
+misra-c2012-10.1:*/core/math/libm.c
+misra-c2012-10.7:*/core/math/libm.c
+misra-c2012-10.8:*/core/math/libm.c
+
+# 8.7 (advisory): the balance steps are public so a lock-step harness can compare each with its stock function.
+misra-c2012-8.7:*/core/balance/*
 
 # --- ports/sim ----------------------------------------------------------------------------------------------
 

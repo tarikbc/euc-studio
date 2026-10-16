@@ -42,3 +42,15 @@ euc_add_unit_test(test_telemetry
 euc_add_unit_test(test_commands
     SOURCES unit/test_commands.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_math
+    SOURCES unit/test_math.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_attitude
+    SOURCES unit/test_attitude.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_balance
+    SOURCES unit/test_balance.c
+    LIBRARIES euc_port_sim)

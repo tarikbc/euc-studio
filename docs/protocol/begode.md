@@ -343,6 +343,12 @@ changes only these behaviours (`firmware/docs/quirks.md`):
 In clean, a speed-alarm command that arrives before the wheel has stood still for 0.2 s gets the "stop first"
 reply instead of waiting.
 
+**Debug text.** Our firmware sends no debug text in either profile: no power-on messages, no Chinese
+speed-alarm messages, no `k` dump (quirk `DEBUG_PRINTF`, compat 0). The parser still reports these events to the
+rest of the firmware (for example to beep), but they put no bytes on the UART. The only text our firmware sends is
+the `V` and `N` identity replies. When our image runs in lock-step with the stock one, the comparator checks the
+frames and the `V` / `N` replies byte for byte, and marks any other stock text as "debug text, ignored".
+
 ## Open questions
 
 1. Meaning of `W M`, frame `01` bytes 4-5 and 14-15, frame `04` bytes 16-17 (`0012`), and BMS reply bytes 42-43.

@@ -1,7 +1,8 @@
 /*
  * Quirk list: every known place where the stock Begode Extreme firmware behaves in a way we would not choose.
- * The compat profile reproduces each one so our image can run in lock-step with the stock binary; the clean
- * profile fixes them. Code tests a quirk with `if (EUC_QUIRK(ID))` (core/include/euc/quirks.h).
+ * The compat profile reproduces them so our image can run in lock-step with the stock binary; the clean
+ * profile fixes them. Code tests a quirk with `if (EUC_QUIRK(ID))` (core/include/euc/quirks.h). An entry with
+ * COMPAT 0 records a stock behaviour that neither profile keeps.
  *
  * X-macro, one entry per quirk:
  *
@@ -31,6 +32,8 @@ EUC_QUIRK_DEF(FAST_INV_SQRT, 1, 0, "0x080070AC invSqrt",
               "Normalisation uses the 0x5F3759DF inverse square root with one Newton step.")
 EUC_QUIRK_DEF(KEIL_FTZ, 1, 0, "Keil soft-float library (every float and double operation)",
               "Float and double results that would be denormal are flushed to zero, as in the Keil library.")
+EUC_QUIRK_DEF(DT_500HZ, 1, 0, "0x080037A8 ahrs_update",
+              "The attitude filter integrates with a 2.000 ms step; the tick is 2.016 ms (rates 0.8 % low).")
 
 /* Commands and telemetry (USART1, BLE module) */
 EUC_QUIRK_DEF(CMD_LAST_BYTE_WINS, 1, 0, "0x08009A94 usart1_isr_body",
@@ -41,6 +44,8 @@ EUC_QUIRK_DEF(W_ARM_STICKY, 1, 0, "0x08008460..0x08008778 W command parsers",
               "A 'W' arms every W sub-command until it completes, so a much later letter can complete it.")
 EUC_QUIRK_DEF(WC_DEAD, 1, 1, "0x080086A8 cmd_WC_digit",
               "'W' 'C' d is stored, saved and echoed in frame 07, but nothing uses it; clean keeps it.")
+EUC_QUIRK_DEF(DEBUG_PRINTF, 0, 0, "printf on USART1 (boot, speed-alarm replies, k dump)",
+              "Stock prints GBK debug text between the frames; our firmware sends none, in both profiles.")
 EUC_QUIRK_DEF(DEFERRED_TILTBACK_OFF, 1, 0, "0x08007498 cmd_tiltback_off",
               "'\"' sent while moving stays pending and turns tiltback off later, when the wheel slows.")
 

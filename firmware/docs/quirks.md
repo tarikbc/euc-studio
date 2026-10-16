@@ -17,41 +17,43 @@ The bit is the quirk's position in the SIL mask.
 | 1 | `SEQ_QUAT_UPDATE` | on | off | 0x080037A8 ahrs_update | The quaternion is integrated in place, so q1..q3 use components already updated in this step. |
 | 2 | `FAST_INV_SQRT` | on | off | 0x080070AC invSqrt | Normalisation uses the 0x5F3759DF inverse square root with one Newton step. |
 | 3 | `KEIL_FTZ` | on | off | Keil soft-float library (every float and double operation) | Float and double results that would be denormal are flushed to zero, as in the Keil library. |
+| 4 | `DT_500HZ` | on | off | 0x080037A8 ahrs_update | The attitude filter integrates with a 2.000 ms step; the tick is 2.016 ms (rates 0.8 % low). |
 
 ## Commands and telemetry (USART1, BLE module)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 4 | `CMD_LAST_BYTE_WINS` | on | off | 0x08009A94 usart1_isr_body | One pending command byte: a new byte replaces one that no task has consumed yet. |
-| 5 | `TLM_HOLDOFF` | on | off | 0x08008038 telemetry_task | Each received byte pauses telemetry for two groups; a V, N or k reply then replaces a group. |
-| 6 | `W_ARM_STICKY` | on | off | 0x08008460..0x08008778 W command parsers | A 'W' arms every W sub-command until it completes, so a much later letter can complete it. |
-| 7 | `WC_DEAD` | on | on | 0x080086A8 cmd_WC_digit | 'W' 'C' d is stored, saved and echoed in frame 07, but nothing uses it; clean keeps it. |
-| 8 | `DEFERRED_TILTBACK_OFF` | on | off | 0x08007498 cmd_tiltback_off | '"' sent while moving stays pending and turns tiltback off later, when the wheel slows. |
+| 5 | `CMD_LAST_BYTE_WINS` | on | off | 0x08009A94 usart1_isr_body | One pending command byte: a new byte replaces one that no task has consumed yet. |
+| 6 | `TLM_HOLDOFF` | on | off | 0x08008038 telemetry_task | Each received byte pauses telemetry for two groups; a V, N or k reply then replaces a group. |
+| 7 | `W_ARM_STICKY` | on | off | 0x08008460..0x08008778 W command parsers | A 'W' arms every W sub-command until it completes, so a much later letter can complete it. |
+| 8 | `WC_DEAD` | on | on | 0x080086A8 cmd_WC_digit | 'W' 'C' d is stored, saved and echoed in frame 07, but nothing uses it; clean keeps it. |
+| 9 | `DEBUG_PRINTF` | off | off | printf on USART1 (boot, speed-alarm replies, k dump) | Stock prints GBK debug text between the frames; our firmware sends none, in both profiles. |
+| 10 | `DEFERRED_TILTBACK_OFF` | on | off | 0x08007498 cmd_tiltback_off | '"' sent while moving stays pending and turns tiltback off later, when the wheel slows. |
 
 ## Motor drive and protection
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 9 | `NO_OVERCURRENT_TRIP` | on | off | 0x08007C04 phase current check | Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off. |
-| 10 | `PHASE_SAT_SWAPPED` | on | off | 0x08007B4C phase current read | Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale). |
+| 11 | `NO_OVERCURRENT_TRIP` | on | off | 0x08007C04 phase current check | Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off. |
+| 12 | `PHASE_SAT_SWAPPED` | on | off | 0x08007B4C phase current read | Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale). |
 
 ## Alarms and user interface
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 11 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
+| 13 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
 
 ## Settings storage (flash journal at 0x0800F000)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 12 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
-| 13 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
-| 14 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
+| 14 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
+| 15 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
+| 16 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
 
 ## Platform
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 15 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
-| 16 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 17 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
+| 18 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
