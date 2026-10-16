@@ -165,7 +165,7 @@ Older app specs call bits 1 and 2 speed alarms. In this firmware they are hardwa
 All 380 frames of the capture (76 groups) decode with this map. The wheel stood still:
 129.70 V, speed 0, range 117 km, trip 6 m, phase current 0.5..1.9 A, board 25.3 °C, turn compensation 5,
 pedal trim 5, PWM tiltback on, drive mode 1, volume 9, PWM alarm 80 %, BMS current −0.1..0.0 A,
-BMS temperatures 23 / 22 °C, all blocks `7D01`, cells 4.070..4.076 V, odometer 1,468,670 m, pedal hard,
+BMS temperatures 23 / 22 °C, all blocks `7D01`, cells 4.067..4.076 V, odometer 1,468,670 m, pedal hard,
 speed-alarm mode 2, roll mode 0, km, auto power-off 7079 → 7056 s, tiltback 69 km/h, `W M` 1, no alerts,
 lights off, PWM −1..0 %. The firmware test `tests/unit/test_telemetry.c` decodes every frame and re-encodes it
 byte for byte.
@@ -284,7 +284,7 @@ Rules:
 | Class | Bytes | Rule for apps |
 |---|---|---|
 | read | `V`, `N` | safe; send alone, wait 1 s for the reply |
-| comfort | `b`, `Q`, `E`, `T`, `g`, `m`, `W` `B` | safe while riding |
+| comfort | `b`, `Q`, `E`, `T`, `g`, `m`, `p`, `W` `B` | safe while riding |
 | ride setting | `h` `f` `s`, `o` `u` `i` `I`, `<` `=` `>`, `e` `x`, `"`, `W` `Y`, `W` `P`, `W` `R`, `W` `U`, `W` `C`, `W` `X`, `W` `M` | change how the wheel behaves; send at standstill only, and confirm with the frames |
 | debug | `k` | hidden; prints text that interrupts telemetry; not for apps |
 | **never send** | `+` `-`, `c` `y`, `!` `@` | stop the motor; `+` `-` also powers off; `!` `@` leaves the wheel in its bootloader. Only a dedicated, gated tool (EUC Studio's flasher) may send `!` `@`, never with a rider on board |

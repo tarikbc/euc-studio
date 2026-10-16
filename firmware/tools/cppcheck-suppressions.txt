@@ -65,6 +65,19 @@ misra-c2012-8.7:*/core/balance/*
 misra-c2012-2.5:*/core/include/euc/motor/*
 misra-c2012-8.7:*/core/motor/*
 
+# Settings, alarms, power, lights, BMS: the same two reasons. 2.5: alert bits and limits defined for the app
+# and telemetry. 8.7: entry points called by the app (F5 wires them), the SIL port and tests.
+misra-c2012-2.5:*/core/include/euc/alarms/*
+misra-c2012-2.5:*/core/include/euc/bms/*
+misra-c2012-2.5:*/core/include/euc/lights/*
+misra-c2012-2.5:*/core/include/euc/power/*
+misra-c2012-2.5:*/core/include/euc/settings/*
+misra-c2012-8.7:*/core/alarms/*
+misra-c2012-8.7:*/core/bms/*
+misra-c2012-8.7:*/core/lights/*
+misra-c2012-8.7:*/core/power/*
+misra-c2012-8.7:*/core/settings/*
+
 # --- boards -------------------------------------------------------------------------------------------------
 
 # 2.5 (advisory, unused macro): board.h records each fact about the board once it is known; the drivers that

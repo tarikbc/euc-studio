@@ -23,19 +23,25 @@ set_source_files_properties("${EUC_MOTOR_TABLES_C}" PROPERTIES SKIP_LINTING ON)
 # target images, run-time switches on the host (the SIL port owns the mask and provides
 # euc_quirk_is_active(), so host consumers link euc_port_sim too).
 add_library(euc_core STATIC
+    alarms/alarms.c
     attitude/attitude.c
     balance/balance.c
     balance/cutoff.c
     balance/law.c
     balance/tiltback.c
+    bms/bms.c
+    lights/lights.c
     math/libm.c
     motor/current.c
     motor/foc_math.c
     motor/hall.c
     motor/motor.c
     motor/pid.c
+    power/power.c
     protocol/commands.c
     protocol/telemetry.c
+    settings/settings.c
+    settings/storage.c
     "${EUC_MOTOR_TABLES_C}")
 euc_target_defaults(euc_core)
 target_link_libraries(euc_core PUBLIC euc_core_headers)

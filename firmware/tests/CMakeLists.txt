@@ -74,3 +74,19 @@ euc_add_unit_test(test_hall
 euc_add_unit_test(test_motor
     SOURCES unit/test_motor.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_settings
+    SOURCES unit/test_settings.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_alarms
+    SOURCES unit/test_alarms.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_power
+    SOURCES unit/test_power.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_bms
+    SOURCES unit/test_bms.c
+    LIBRARIES euc_port_sim)
