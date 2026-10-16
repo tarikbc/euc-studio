@@ -1,0 +1,19 @@
+[package]
+name = "euc-stm32f1"
+description = "Register-level models of the STM32F1 high-density peripherals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-core.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

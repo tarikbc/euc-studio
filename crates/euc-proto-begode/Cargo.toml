@@ -1,0 +1,16 @@
+[package]
+name = "euc-proto-begode"
+description = "The Begode (Gotway) BLE protocol: telemetry frames, commands and text replies"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+encoding_rs.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

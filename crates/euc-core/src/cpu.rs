@@ -1,6 +1,38 @@
+use std::ptr::NonNull;
+
 use thiserror::Error;
 
 use crate::{Bus, BusFault, CoreRegs};
+
+/// One region of the guest address space, as the engine lays it out for a CPU backend.
+///
+/// Backends execute plain memory in place (no copy, no callback) and send everything else to
+/// the [`Bus`]. The engine owns the memory; [`RegionKind::Memory`] only lends a pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+    /// First address.
+    pub base: u32,
+    /// Size in bytes.
+    pub size: u32,
+    /// What backs it.
+    pub kind: RegionKind,
+}
+
+/// What backs a [`Region`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionKind {
+    /// Engine-owned bytes the backend reads, writes and executes directly. The engine keeps
+    /// them alive and in place for the backend's lifetime and touches them during a run only
+    /// from inside the run's [`Bus`] callbacks.
+    Memory {
+        /// Start of the buffer of `size` bytes.
+        ptr: NonNull<u8>,
+        /// Stores allowed; a store to read-only memory is a bus fault.
+        writable: bool,
+    },
+    /// Every access goes to the [`Bus`].
+    Mmio,
+}
 
 /// A CPU backend: our ARMv7-M interpreter, or Unicorn as the test oracle.
 ///
@@ -19,7 +51,9 @@ pub trait Cpu {
     /// through (the bootloader's, or the app's when no bootloader is modeled).
     fn reset(&mut self, sp: u32, reset_vector: u32);
 
-    /// Executes at most `max_instr` instructions against `bus`.
+    /// Executes about `max_instr` instructions against `bus`: exactly that many on an exact
+    /// backend, or up to the next block boundary on a block-granular one. [`Cpu::retired`]
+    /// says how many ran.
     fn run(&mut self, bus: &mut dyn Bus, max_instr: u32) -> Exit;
 
     /// The register file.
@@ -31,6 +65,11 @@ pub trait Cpu {
     /// Instructions retired since the backend was created. It never resets, so the engine
     /// measures a run as a difference.
     fn retired(&self) -> u64;
+
+    /// Reports, through [`Bus::reached`], the first time execution reaches each of `addrs`.
+    /// Replaces any earlier list; an empty list stops watching. Watching must cost nothing once
+    /// the list is empty, since milestones are only interesting during boot.
+    fn watch(&mut self, addrs: &[u32]);
 
     /// Drops anything decoded or translated from `addr..addr + len`.
     ///
@@ -45,15 +84,11 @@ pub trait Cpu {
 /// otherwise, every other register already holds the instruction's results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exit {
-    /// `max_instr` instructions retired.
+    /// The instruction budget was used (see [`Cpu::run`]).
     Budget,
-    /// The bus asked for the run loop ([`Bus::take_yield`]) after the last retired instruction.
+    /// The bus asked for the run loop ([`Bus::take_yield`]). Backends that cannot count every
+    /// instruction (Unicorn) may have retired some instructions they do not report.
     Yield,
-    /// A handler loaded an `EXC_RETURN` value into PC (`BX LR`, `POP {.., PC}`, `LDR PC, ..`).
-    ///
-    /// The branch retired (a `POP` already moved SP) and PC is meaningless until the engine
-    /// unstacks the frame or tail-chains into the next handler.
-    ExceptionReturn(u32),
     /// `SVC #imm` retired; PC is the return address the exception frame needs.
     Svc(u8),
     /// `BKPT #imm` did not retire; PC points at it.
@@ -86,6 +121,9 @@ pub enum Fault {
     /// `SDIV` or `UDIV` by zero with `CCR.DIV_0_TRP` set (`DIVBYZERO`).
     #[error("division by zero")]
     DivideByZero,
+    /// The backend reported an exception it cannot classify (its own number, e.g. Unicorn's).
+    #[error("unclassified CPU exception {0}")]
+    Unknown(u32),
 }
 
 #[cfg(test)]
@@ -137,6 +175,8 @@ mod tests {
         fn take_yield(&mut self) -> bool {
             std::mem::take(&mut self.yield_pending)
         }
+
+        fn exception_return(&mut self, _regs: &mut CoreRegs, _exc_return: u32) {}
     }
 
     /// A toy core that knows four encodings, enough to exercise the `Exit` contract.
@@ -194,6 +234,8 @@ mod tests {
         fn retired(&self) -> u64 {
             self.retired
         }
+
+        fn watch(&mut self, _addrs: &[u32]) {}
 
         fn invalidate(&mut self, _addr: u32, _len: u32) {}
     }

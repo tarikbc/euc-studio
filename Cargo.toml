@@ -1,5 +1,18 @@
 [workspace]
 members = ["crates/*"]
+# Everything but euc-unicorn: Unicorn is GPL-2.0, a development and CI oracle that never ships,
+# so a plain `cargo build` or `cargo test` does not compile it.
+default-members = [
+    "crates/euc-cli",
+    "crates/euc-core",
+    "crates/euc-devices",
+    "crates/euc-fwsource",
+    "crates/euc-image",
+    "crates/euc-profile",
+    "crates/euc-proto-begode",
+    "crates/euc-sim",
+    "crates/euc-stm32f1",
+]
 # The Tauri app has its own workspace until the engine crates it embeds settle.
 exclude = ["app/src-tauri"]
 resolver = "3"
@@ -14,9 +27,14 @@ publish = false
 
 [workspace.dependencies]
 euc-core = { path = "crates/euc-core" }
+euc-devices = { path = "crates/euc-devices" }
 euc-fwsource = { path = "crates/euc-fwsource" }
 euc-image = { path = "crates/euc-image" }
 euc-profile = { path = "crates/euc-profile" }
+euc-proto-begode = { path = "crates/euc-proto-begode" }
+euc-sim = { path = "crates/euc-sim" }
+euc-stm32f1 = { path = "crates/euc-stm32f1" }
+euc-unicorn = { path = "crates/euc-unicorn" }
 
 anstream = "1.0"
 anstyle = "1.0"
@@ -24,6 +42,7 @@ anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
 crc32fast = "1.5"
 directories = "6.0"
+encoding_rs = "0.8"
 hex = "0.4"
 object = { version = "0.40", default-features = false, features = ["read_core", "elf", "std"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -32,6 +51,9 @@ sha2 = "0.11"
 tempfile = "3.27"
 thiserror = "2.0"
 toml = "1.1"
+# GPL-2.0, used only by euc-unicorn (deny.toml enforces that). Pinned: its QEMU core is the
+# same 2.1.4 release as the Python reference harness, so both emulate identically.
+unicorn-engine = { version = "=2.1.5", default-features = false, features = ["arch_arm"] }
 # rustls with the bundled Mozilla roots: the same trust store on every OS, no OpenSSL.
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 
@@ -46,6 +68,8 @@ pedantic = { level = "warn", priority = -1 }
 # Register and bus code narrows integers on purpose; these lints would flag nearly every line.
 cast_possible_truncation = "allow"
 cast_possible_wrap = "allow"
+# Cycle counts become seconds for reports and pacing; they stay far below 2^52.
+cast_precision_loss = "allow"
 cast_sign_loss = "allow"
 missing_errors_doc = "allow"
 module_name_repetitions = "allow"

@@ -163,6 +163,7 @@ pub struct BusFault {
 ///         let lane = Lane::new(addr, Size::Half);
 ///         Ok(lane.extract(*self.slot(lane.word, Access::Fetch)?) as u16)
 ///     }
+///     fn exception_return(&mut self, _regs: &mut euc_core::CoreRegs, _exc_return: u32) {}
 /// }
 ///
 /// let mut ram = Ram(vec![0; 256]);
@@ -194,6 +195,26 @@ pub trait Bus {
     /// fast-forward, a reset request, an exception pended by a register write.
     fn take_yield(&mut self) -> bool {
         false
+    }
+
+    /// A handler loaded an `EXC_RETURN` value into PC (`BX LR`, `POP {.., PC}`, `LDR PC`).
+    ///
+    /// The backend calls this in the middle of [`Cpu::run`](crate::Cpu::run), with `regs`
+    /// current, and resumes at `regs.pc` afterwards without ending the run: the engine's
+    /// exception unit unstacks the frame or tail-chains into the next handler. Handling it inline
+    /// keeps quantum accounting identical across backends.
+    fn exception_return(&mut self, regs: &mut crate::CoreRegs, exc_return: u32);
+
+    /// The address of the instruction making the next bus access, for traces and diagnostics
+    /// (a poll loop's PC). Backends that know it cheaply report it; the default ignores it.
+    fn note_pc(&mut self, pc: u32) {
+        let _ = pc;
+    }
+
+    /// Execution reached an address passed to [`Cpu::watch`](crate::Cpu::watch), for the first
+    /// time. Boot milestones use it; the default ignores it.
+    fn reached(&mut self, addr: u32) {
+        let _ = addr;
     }
 }
 

@@ -1,0 +1,16 @@
+[package]
+name = "euc-devices"
+description = "Off-chip devices of an EUC controller board: IMU, smart BMS, display, LED strip, buzzer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-core.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true
