@@ -12,6 +12,7 @@ on:
     paths:
       - "firmware/**"
       - ".github/workflows/ci-firmware.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
