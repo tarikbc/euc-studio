@@ -137,6 +137,9 @@ covers the motor gates):
   three electrical turns, rebuilds the state from the other two lines, raises error bit 0x40 (fault beeps),
   lowers the speed tiltback to 10 km/h and allows no automatic restart after the next stop
   (`HALL_SINGLE_LINE_UNDETECTED`). The 62.5 ms invalid-state fault stays on the lines as read.
+- **Service sequences.** `!@`, `cy` and `+-` come from an unpaired BLE link. Clean runs one only when nobody
+  rides (the balance is not running) and the power button gets a short press within 10 s; it replies
+  `SERVICE:CONFIRM`, `SERVICE:OK` or `SERVICE:DENIED` (`SERVICE_WITHOUT_CONFIRM`, docs/protocol/begode.md).
 
 ## Size budget
 

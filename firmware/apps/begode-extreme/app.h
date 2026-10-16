@@ -66,6 +66,7 @@ struct app {
     volatile bool bootloader_request;
     volatile bool erase_calibration_request;
     volatile bool storage_write_pending;
+    volatile uint8_t service_reply; /* enum euc_service_reply, sent at the next telemetry group */
     struct euc_storage_write storage_write;
 
     /* RTC tick -> FOC */

@@ -19,6 +19,11 @@ repository.
    about them. Protective gear, an empty area, low speed, and someone nearby.
 6. **Do not change the drive mode or dead time** without knowing the gate driver of your board. The stock firmware has
    a hidden command that switches the motor drive mode; the flasher and the app never send it.
+7. **Service commands need a hand on the wheel.** The wheel's BLE link has no pairing: any phone in range can send
+   the service sequences (firmware update, IMU calibration, drive-mode toggle), and the stock firmware stops the
+   motor at once, even under a rider. Our clean firmware runs them only when nobody rides (the wheel is off, on
+   its side, or cut with the handle button) and the power button is pressed within 10 s. Flashing a wheel that
+   runs our clean firmware therefore needs that press.
 
 ## Reporting a safety problem
 

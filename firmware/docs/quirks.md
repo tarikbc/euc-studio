@@ -30,57 +30,58 @@ The bit is the quirk's position in the SIL mask.
 | 9 | `DEBUG_PRINTF` | off | off | printf on USART1 (boot, speed-alarm replies, k dump) | Stock prints GBK debug text between the frames; our firmware sends none, in both profiles. |
 | 10 | `SETTINGS_WHILE_MOVING` | on | off | 0x08009A94 usart1_isr_body, W command parsers | Roll modes, 'e'/'x' and W R/U/X/C/M apply at any speed, from any unpaired BLE client. |
 | 11 | `DEFERRED_TILTBACK_OFF` | on | off | 0x08007498 cmd_tiltback_off | '"' sent while moving stays pending and turns tiltback off later, when the wheel slows. |
+| 12 | `SERVICE_WITHOUT_CONFIRM` | on | off | 0x08006FA8 service_requests | '!@', 'cy' and '+-' from any unpaired BLE client cut the motor at once, even with a rider on. |
 
 ## Motor drive and protection
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 12 | `NO_OVERCURRENT_TRIP` | on | off | 0x08007C04 phase current check | Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off. |
-| 13 | `PHASE_SAT_SWAPPED` | on | off | 0x08007B4C phase current read | Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale). |
-| 14 | `NAN_FAIL_OPEN` | on | off | 0x0800678C balance task, 0x08006B24 output limit | A NaN or infinity passes the float clamps of the balance task (NaN compares false). |
-| 15 | `INT16_WRAP` | on | off | 0x08004104 Clarke, 0x08006EEC Park, 0x080075C8 Rev_Park, 0x08007B4C | Out-of-range FOC results and raw phase currents wrap around to 16 bits instead of saturating. |
-| 16 | `IQ_MA_WRAP` | on | off | 0x08004668 FOC_Model | The low-passed Iq in mA uses a 32-bit product that wraps above 65.5 A (balance feedback). |
-| 17 | `IB_OFFSET_FROM_ADC1` | on | off | 0x08007A68 current offset calibration | Phase B's offset is measured on ADC1 but phase B is read on ADC2 (offset mismatch = error). |
-| 18 | `BKP_CURRENT_OFFSETS` | on | off | 0x08007A68 current offset calibration | From the tenth power-on, offsets in BKP DR12/DR13 (written by nothing) replace measured ones. |
-| 19 | `HALL_SPEED_1_2X` | on | off | 0x0800539C hall_update | The hall-period speed assumes 24 kHz calls, so in voltage mode (20 kHz) it reads 1.2 x high. |
-| 20 | `HALL_SPEED_FILTER_STALL` | on | off | 0x0800539C hall_update | The hall-period speed filter truncates, so it settles up to 999 counts short of its input. |
-| 21 | `HALL_INVALID_ANGLE_RUN` | on | off | 0x0800539C hall_update | In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault. |
-| 22 | `MODE0_DEAD_TIME` | on | off | 0x08007CD4 SVPWM_IcsInit | Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns. |
-| 23 | `HALL_SINGLE_LINE_UNDETECTED` | on | off | 0x0800539C hall_update | One stuck hall line is never detected: the motor runs on with a wrong angle in two sectors of six. |
+| 13 | `NO_OVERCURRENT_TRIP` | on | off | 0x08007C04 phase current check | Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off. |
+| 14 | `PHASE_SAT_SWAPPED` | on | off | 0x08007B4C phase current read | Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale). |
+| 15 | `NAN_FAIL_OPEN` | on | off | 0x0800678C balance task, 0x08006B24 output limit | A NaN or infinity passes the float clamps of the balance task (NaN compares false). |
+| 16 | `INT16_WRAP` | on | off | 0x08004104 Clarke, 0x08006EEC Park, 0x080075C8 Rev_Park, 0x08007B4C | Out-of-range FOC results and raw phase currents wrap around to 16 bits instead of saturating. |
+| 17 | `IQ_MA_WRAP` | on | off | 0x08004668 FOC_Model | The low-passed Iq in mA uses a 32-bit product that wraps above 65.5 A (balance feedback). |
+| 18 | `IB_OFFSET_FROM_ADC1` | on | off | 0x08007A68 current offset calibration | Phase B's offset is measured on ADC1 but phase B is read on ADC2 (offset mismatch = error). |
+| 19 | `BKP_CURRENT_OFFSETS` | on | off | 0x08007A68 current offset calibration | From the tenth power-on, offsets in BKP DR12/DR13 (written by nothing) replace measured ones. |
+| 20 | `HALL_SPEED_1_2X` | on | off | 0x0800539C hall_update | The hall-period speed assumes 24 kHz calls, so in voltage mode (20 kHz) it reads 1.2 x high. |
+| 21 | `HALL_SPEED_FILTER_STALL` | on | off | 0x0800539C hall_update | The hall-period speed filter truncates, so it settles up to 999 counts short of its input. |
+| 22 | `HALL_INVALID_ANGLE_RUN` | on | off | 0x0800539C hall_update | In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault. |
+| 23 | `MODE0_DEAD_TIME` | on | off | 0x08007CD4 SVPWM_IcsInit | Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns. |
+| 24 | `HALL_SINGLE_LINE_UNDETECTED` | on | off | 0x0800539C hall_update | One stuck hall line is never detected: the motor runs on with a wrong angle in two sectors of six. |
 
 ## Sensors
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 24 | `NTC_REFERENCE_298_5` | on | off | 0x08005218 ntc_temperature_measure | The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high. |
+| 25 | `NTC_REFERENCE_298_5` | on | off | 0x08005218 ntc_temperature_measure | The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high. |
 
 ## Alarms and user interface
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 25 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
-| 26 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
-| 27 | `STRIP_BREATH_PER_PASS` | on | off | 0x08005A3C led_update_flag, 0x08005A5C led_strip_effects | The strip effects run on every main-loop pass, so the standstill breathing speed follows the CPU load. |
+| 26 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
+| 27 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
+| 28 | `STRIP_BREATH_PER_PASS` | on | off | 0x08005A3C led_update_flag, 0x08005A5C led_strip_effects | The strip effects run on every main-loop pass, so the standstill breathing speed follows the CPU load. |
 
 ## BMS link (USART3)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 28 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
-| 29 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
+| 29 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
+| 30 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
 
 ## Settings storage (flash journal at 0x0800F000)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 30 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
-| 31 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
-| 32 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
-| 33 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
+| 31 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
+| 32 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
+| 33 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
+| 34 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
 
 ## Platform
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 34 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
-| 35 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 35 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
+| 36 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |

@@ -19,7 +19,8 @@
  *     reorder before the first release.
  *   - Never reuse an ID for a different behaviour.
  *   - Neither profile changes telemetry frame bytes, command letters, the `!@` update entry, the flash map or
- *     USART1 (PA9/PA10, 115200 8N1). Those are contracts with apps and the bootloader, not quirks.
+ *     USART1 (PA9/PA10, 115200 8N1). Those are contracts with apps and the bootloader, not quirks. The one
+ *     exception is SERVICE_WITHOUT_CONFIRM: clean runs `!@`, `cy` and `+-` only after a power-button press.
  *   - After an edit, regenerate the table: cmake --build --preset <any> --target quirks-doc
  */
 
@@ -50,6 +51,8 @@ EUC_QUIRK_DEF(SETTINGS_WHILE_MOVING, 1, 0, "0x08009A94 usart1_isr_body, W comman
               "Roll modes, 'e'/'x' and W R/U/X/C/M apply at any speed, from any unpaired BLE client.")
 EUC_QUIRK_DEF(DEFERRED_TILTBACK_OFF, 1, 0, "0x08007498 cmd_tiltback_off",
               "'\"' sent while moving stays pending and turns tiltback off later, when the wheel slows.")
+EUC_QUIRK_DEF(SERVICE_WITHOUT_CONFIRM, 1, 0, "0x08006FA8 service_requests",
+              "'!@', 'cy' and '+-' from any unpaired BLE client cut the motor at once, even with a rider on.")
 
 /* Motor drive and protection */
 EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 0, "0x08007C04 phase current check",

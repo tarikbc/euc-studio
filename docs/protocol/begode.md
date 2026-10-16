@@ -279,6 +279,26 @@ Rules:
   while the wheel moves faster than 0.09 m/s.
 - Sending the first byte again restarts the gap.
 
+**No authentication (stock weakness).** The BLE module has no pairing, so any phone in range can send a service
+sequence. The stock firmware runs it at once: `+` `-` or `c` `y` stop the motor under a rider who balances at a
+standstill (a traffic light), and `!` `@` also enters the unsigned vendor bootloader. Our clean profile runs a
+sequence only when both hold (quirk `SERVICE_WITHOUT_CONFIRM`):
+
+1. **No rider:** the balance is not running (start-up, fallen, tipped on its side, handle cut, any soft
+   disable). Lay the wheel on its side, or cut it with the handle button, first.
+2. **A press on the wheel:** a short press of the power button (22 to 440 ms) within 10 s of the sequence. The
+   press must start after the sequence. While the wheel waits, it beeps three short beeps every 2 s, and the press
+   does not change the light mode.
+
+| Reply (clean only, text at the next telemetry group) | When |
+|---|---|
+| `SERVICE:CONFIRM` CR LF | the wheel waits for the power-button press |
+| `SERVICE:OK` CR LF | the press accepted the sequence; the motor stops now and the action follows (one 0.2 s beep) |
+| `SERVICE:DENIED` CR LF | a rider was on (at the sequence or during the wait), or 10 s passed without a press; nothing happens |
+
+The motor never stops before both conditions hold. A new sequence replaces one that waits. A flasher that
+updates a wheel running our clean firmware must ask the user to press the power button after `!` `@`.
+
 ### Safety classes
 
 | Class | Bytes | Rule for apps |

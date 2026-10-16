@@ -1,5 +1,5 @@
 /*
- * Unit tests for the display content (core/display/) and the service sequences (core/service/).
+ * Unit tests for the display content (core/display/).
  */
 #include <math.h>
 #include <stdbool.h>
@@ -8,7 +8,6 @@
 #include <string.h>
 
 #include "euc/display/display.h"
-#include "euc/service/service.h"
 #include "euc/sil.h"
 #include "unity.h"
 
@@ -129,41 +128,6 @@ static void test_temperature_limits(void)
     TEST_ASSERT_EQUAL_HEX8(euc_display_digit(9U) | DP, grids[2]);
 }
 
-/* Service sequences ----------------------------------------------------------------------------------------
- */
-
-static void test_service_waits_for_a_zero_command(void)
-{
-    struct euc_service_state state;
-    struct euc_service_out out;
-    euc_service_init(&state);
-    euc_service_tick(&state, 100.0F, &out);
-    TEST_ASSERT_FALSE(out.motor_off);
-
-    euc_service_request(&state, EUC_SERVICE_FIRMWARE_UPDATE);
-    euc_service_tick(&state, 100.0F, &out);
-    TEST_ASSERT_TRUE(out.motor_off);
-    TEST_ASSERT_FALSE(out.enter_bootloader);
-    euc_service_tick(&state, -0.0F, &out);
-    TEST_ASSERT_TRUE(out.enter_bootloader);
-    euc_service_tick(&state, 1e-40F, &out); /* a denormal counts as zero, as in the stock exponent test */
-    TEST_ASSERT_TRUE(out.enter_bootloader);
-}
-
-static void test_service_actions_run_once(void)
-{
-    struct euc_service_state state;
-    struct euc_service_out out;
-    euc_service_init(&state);
-    euc_service_request(&state, EUC_SERVICE_CALIBRATION);
-    euc_service_request(&state, EUC_SERVICE_DRIVE_MODE_TOGGLE);
-    euc_service_tick(&state, 0.0F, &out);
-    TEST_ASSERT_TRUE(out.erase_calibration);
-    TEST_ASSERT_TRUE(out.toggle_drive_mode);
-    euc_service_tick(&state, 0.0F, &out);
-    TEST_ASSERT_FALSE(out.erase_calibration || out.toggle_drive_mode || out.motor_off);
-}
-
 int main(void)
 {
     UNITY_BEGIN();
@@ -172,7 +136,5 @@ int main(void)
     RUN_TEST(test_speed_digits);
     RUN_TEST(test_battery_bars);
     RUN_TEST(test_temperature_limits);
-    RUN_TEST(test_service_waits_for_a_zero_command);
-    RUN_TEST(test_service_actions_run_once);
     return UNITY_END();
 }

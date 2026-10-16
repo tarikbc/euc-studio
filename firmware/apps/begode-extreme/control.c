@@ -311,8 +311,16 @@ static void balance(void)
 
 static void service(void)
 {
+    const bool no_rider = (app.balance.start_state != 1) || app.balance.motor_disabled;
+    const struct euc_service_in in = {app.balance.command, no_rider, app_power_button_pressed()};
     struct euc_service_out out;
-    euc_service_tick(&app.service, app.balance.command, &out);
+    euc_service_tick(&app.service, &in, &out);
+    if (out.reply != EUC_SERVICE_REPLY_NONE) {
+        app.service_reply = (uint8_t)out.reply;
+    }
+    if (out.beep_ticks != 0U) {
+        euc_beeper_beep(&app.alarms.beeper, out.beep_ticks);
+    }
     if (out.motor_off) {
         app.foc_hard_cut_request = true;
         app.disable_request = true;
@@ -362,8 +370,10 @@ static void alarms(void)
 static void lights_and_buttons(void)
 {
     const bool locked = app.settings.lock_state == EUC_SETTINGS_LOCKED;
-    const struct euc_lights_in light_in = {app_power_button_pressed(), app.balance.speed_dm_per_s,
-                                           app.alarm_out.time_base, locked};
+    /* A press that confirms a service sequence is not a light-mode press. */
+    const bool light_press = app_power_button_pressed() && !euc_service_confirming(&app.service);
+    const struct euc_lights_in light_in = {light_press, app.balance.speed_dm_per_s, app.alarm_out.time_base,
+                                           locked};
     euc_lights_tick(&app.lights, &light_in, &app.lights_out);
     if (app.lights_out.wm_changed) {
         app.settings.wm_value = app.lights_out.strip_pattern;
@@ -447,6 +457,25 @@ static void send_reply(enum euc_cmd_reply reply)
     }
 }
 
+/* Clean service-sequence replies (euc/service/service.h). */
+static void send_service_reply(void)
+{
+    static const char confirm[] = EUC_SERVICE_REPLY_CONFIRM_TEXT;
+    static const char ok[] = EUC_SERVICE_REPLY_OK_TEXT;
+    static const char denied[] = EUC_SERVICE_REPLY_DENIED_TEXT;
+    const uint8_t reply = app.service_reply;
+    app.service_reply = (uint8_t)EUC_SERVICE_REPLY_NONE;
+    if (reply == (uint8_t)EUC_SERVICE_REPLY_CONFIRM) {
+        (void)stm32f1_ble_send((const uint8_t *)confirm, sizeof(confirm) - 1U);
+    } else if (reply == (uint8_t)EUC_SERVICE_REPLY_OK) {
+        (void)stm32f1_ble_send((const uint8_t *)ok, sizeof(ok) - 1U);
+    } else if (reply == (uint8_t)EUC_SERVICE_REPLY_DENIED) {
+        (void)stm32f1_ble_send((const uint8_t *)denied, sizeof(denied) - 1U);
+    } else {
+        /* nothing to send */
+    }
+}
+
 static void telemetry_inputs(struct euc_tlm_in *in)
 {
     const struct euc_settings *s = &app.settings;
@@ -500,6 +529,7 @@ static void telemetry(void)
     struct euc_cmd_slot_out slot;
     euc_cmd_telemetry_slot(&app.commands, &slot);
     send_reply(slot.reply);
+    send_service_reply();
     if (slot.send_frames) {
         static struct euc_tlm_in in;
         static struct euc_tlm_group group;
