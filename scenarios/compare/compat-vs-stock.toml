@@ -78,6 +78,11 @@ distance_m = 0.2      # 0.088 m measured
 [scenario.hill-climb-low-battery.channels_rms]
 battery_a = 2.0
 
+[scenario.coasting-stop]
+note = "A 38 s run: the rider coasts to a stop and then creeps backwards, so a small speed difference adds up to distance at the end (0.101 m in CI against the 0.1 m default; speed within 0.25 km/h throughout)."
+[scenario.coasting-stop.channels]
+distance_m = 0.3      # 0.101 m measured
+
 [scenario.pothole-20kmh]
 note = "Timing-sensitive: the impact at the far edge (about 19.8 s) decides the outcome within 0.1 s, so a few cycles of timing part the runs from there; in one build compat's firmware also cut the drive at 19.9 s while stock's did not. Judged until the impact."
 until_s = 19.5
