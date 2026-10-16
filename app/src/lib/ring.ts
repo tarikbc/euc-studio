@@ -7,6 +7,7 @@ export class RingBuffer {
   private readonly data: Float64Array;
   private head = 0; // next write position
   private count = 0;
+  private writes = 0;
 
   constructor(capacity: number) {
     if (!Number.isInteger(capacity) || capacity <= 0) {
@@ -20,10 +21,16 @@ export class RingBuffer {
     return this.count;
   }
 
+  /** Changes on every write or clear; readers skip redrawing when it has not moved. */
+  get version(): number {
+    return this.writes;
+  }
+
   push(value: number): void {
     this.data[this.head] = value;
     this.head = (this.head + 1) % this.capacity;
     if (this.count < this.capacity) this.count++;
+    this.writes++;
   }
 
   /** Appends a batch (for example one columnar channel of an engine frame). */
@@ -69,5 +76,6 @@ export class RingBuffer {
   clear(): void {
     this.head = 0;
     this.count = 0;
+    this.writes++;
   }
 }

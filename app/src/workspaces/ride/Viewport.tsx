@@ -7,10 +7,13 @@ import { useLive } from "../../sim/engine.ts";
 import { type CameraMode, useUi } from "../../state/ui.ts";
 import { Gauge } from "../../ui/Gauge.tsx";
 import { Crosshair, Orbit } from "../../ui/icons.tsx";
+import { Pill } from "../../ui/Pill.tsx";
 import { RollingNumber } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
+import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
 
 function HudCard({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -105,7 +108,8 @@ function Pitch() {
 export function Viewport({ active }: { active: boolean }) {
   const camera = useUi((s) => s.camera);
   const setCamera = useUi((s) => s.setCamera);
-  const [ready, setReady] = useState(false);
+  const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
+  const ready = scene !== null;
 
   return (
     <div
@@ -113,7 +117,7 @@ export function Viewport({ active }: { active: boolean }) {
       data-testid="viewport"
     >
       <div className="absolute inset-0">
-        <Scene active={active} onReady={() => setReady(true)} />
+        <Scene active={active} onReady={setScene} />
       </div>
 
       <AnimatePresence>
@@ -164,6 +168,18 @@ export function Viewport({ active }: { active: boolean }) {
             <Pwm />
             <Battery />
           </HudCard>
+          {scene?.quality === "low" && (
+            <Tooltip
+              side="top"
+              content={`No GPU acceleration (${scene.renderer.split(" (")[0] || "software WebGL"}). The 3D view draws at ${LOW_FPS} fps without shadows; telemetry is unaffected.`}
+            >
+              <span className="pointer-events-auto">
+                <Pill tone="neutral" size="md">
+                  Reduced 3D quality
+                </Pill>
+              </span>
+            </Tooltip>
+          )}
         </div>
       </div>
     </div>

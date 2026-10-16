@@ -27,14 +27,21 @@ async function shot(page: Page, name: string, project: string) {
 }
 
 async function openRide(page: Page) {
-  // preroll fills the scopes with 14 s of the ride scenario (cruising at 20 km/h).
-  await page.goto("/?preroll=14#/ride");
+  // preroll fills the scopes with 14 s of the ride scenario (cruising at 20 km/h). Headless
+  // browsers render WebGL in software, so the app picks reduced 3D quality; README screenshots
+  // force full quality instead.
+  const quality = process.env.DOCS_SCREENSHOTS ? "&quality=high" : "";
+  await page.goto(`/?preroll=14${quality}#/ride`);
   await expect(page.getByTestId("viewport").locator("canvas")).toBeVisible();
   await expect(page.getByText("Building the scene")).toHaveCount(0, { timeout: 30_000 });
   await page.waitForTimeout(1200);
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browserName }) => {
+  if (process.env.PW_SLOW && browserName === "chromium") {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.PW_SLOW) || 4 });
+  }
   // Start each test from defaults, but keep storage across reloads within the test.
   await page.addInitScript(() => {
     if (!sessionStorage.getItem("e2e-cleared")) {

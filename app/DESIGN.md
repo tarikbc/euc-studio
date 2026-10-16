@@ -89,6 +89,11 @@ Four tokens, nothing else.
   again before its roll ends swaps in place (see decisions).
 - Reduced motion: `MotionConfig reducedMotion="user"` drops transforms; digits cross-fade; the
   follow camera cuts instead of easing; CSS transitions and animations shrink to 1 ms.
+- Low power: when WebGL runs on a CPU rasterizer (SwiftShader, llvmpipe, Microsoft Basic Render
+  Driver) the 3D view drops to reduced quality (1x pixel ratio, no shadow maps, a static contact
+  shadow, no camera sway, 20 fps and only while the sim moves) and says so with a "Reduced 3D
+  quality" pill. The shared frame loop and the scopes cap at 30 fps and digits cross-fade. Scopes
+  and sparklines never redraw without new samples. `?quality=high|low` overrides the detection.
 
 ## States
 
@@ -159,20 +164,22 @@ behind the same interface.
 
 ## Decisions log
 
-| Date       | Decision                                                                                | Why                                                                                                  |
-| ---------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 2026-10-16 | Spacing classes are named by pixel value (`p-16`), Tailwind's scale removed             | Only seven values are allowed; the name is the value, so a review can spot a stray one               |
-| 2026-10-16 | Text-safe variants `fg-2-safe`, `danger-text`, pink `accent-text`                       | The brief's colors fail AA on `raised`, `track` or their tints; the originals stay for fills         |
-| 2026-10-16 | Danger buttons are tinted (`danger-tint` + `danger-text`); solid red carries black text | White on `#FF3B30` is 3.3:1                                                                          |
-| 2026-10-16 | A digit that changes again within 0.34 s swaps in place instead of rolling              | At 8 Hz a tenths digit would stay mid-blur forever and be unreadable                                 |
-| 2026-10-16 | Segmented controls and the scope window picker are pill-shaped                          | Concentric radii with a 2 px inset need a 6 px knob radius, which is not a token; pills nest cleanly |
-| 2026-10-16 | Docks are separate cards in 8 px gutters; separators show only on hover and drag        | Reads as distinct instruments; no permanent divider lines                                            |
-| 2026-10-16 | The slider shows its value in the header (accent while dragging), no bubble             | A bubble covered the label row in a dense panel                                                      |
-| 2026-10-16 | Command palette matches word prefixes, title above keywords                             | cmdk's fuzzy scoring ranked "Open component gallery" first for "accent green"                        |
-| 2026-10-16 | Workspaces stay mounted after the first visit                                           | The 3D scene and scope history survive switching; rendering pauses while hidden                      |
-| 2026-10-16 | Signal colors are fixed and independent of the UI accent                                | A trace must keep its meaning when someone changes the accent                                        |
-| 2026-10-16 | Lucide (ISC) for general icons, four custom glyphs in the same grid                     | Consistent stroke quality; no unicycle or flashing glyph exists upstream                             |
-| 2026-10-16 | The demo engine is labeled in the status bar and its tooltip                            | No screen may suggest real firmware is running before M1                                             |
-| 2026-10-16 | Empty workspaces name their milestone and show an illustrative preview                  | They explain what will live there; disabled actions say what they wait for                           |
-| 2026-10-16 | The 3D scene uses in-scene Lightformers for reflections, no HDR file                    | Works offline and ships no third-party assets                                                        |
-| 2026-10-16 | TypeScript 6.0 and Vitest 4                                                             | typescript-eslint supports TS < 6.1; Vitest 5 needs Node 22, the dev machines run Node 20.19+        |
+| Date       | Decision                                                                                     | Why                                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-16 | Spacing classes are named by pixel value (`p-16`), Tailwind's scale removed                  | Only seven values are allowed; the name is the value, so a review can spot a stray one                                                                    |
+| 2026-10-16 | Text-safe variants `fg-2-safe`, `danger-text`, pink `accent-text`                            | The brief's colors fail AA on `raised`, `track` or their tints; the originals stay for fills                                                              |
+| 2026-10-16 | Danger buttons are tinted (`danger-tint` + `danger-text`); solid red carries black text      | White on `#FF3B30` is 3.3:1                                                                                                                               |
+| 2026-10-16 | A digit that changes again within 0.34 s swaps in place instead of rolling                   | At 8 Hz a tenths digit would stay mid-blur forever and be unreadable                                                                                      |
+| 2026-10-16 | Segmented controls and the scope window picker are pill-shaped                               | Concentric radii with a 2 px inset need a 6 px knob radius, which is not a token; pills nest cleanly                                                      |
+| 2026-10-16 | Docks are separate cards in 8 px gutters; separators show only on hover and drag             | Reads as distinct instruments; no permanent divider lines                                                                                                 |
+| 2026-10-16 | The slider shows its value in the header (accent while dragging), no bubble                  | A bubble covered the label row in a dense panel                                                                                                           |
+| 2026-10-16 | Command palette matches word prefixes, title above keywords                                  | cmdk's fuzzy scoring ranked "Open component gallery" first for "accent green"                                                                             |
+| 2026-10-16 | Workspaces stay mounted after the first visit                                                | The 3D scene and scope history survive switching; rendering pauses while hidden                                                                           |
+| 2026-10-16 | Signal colors are fixed and independent of the UI accent                                     | A trace must keep its meaning when someone changes the accent                                                                                             |
+| 2026-10-16 | Lucide (ISC) for general icons, four custom glyphs in the same grid                          | Consistent stroke quality; no unicycle or flashing glyph exists upstream                                                                                  |
+| 2026-10-16 | The demo engine is labeled in the status bar and its tooltip                                 | No screen may suggest real firmware is running before M1                                                                                                  |
+| 2026-10-16 | Empty workspaces name their milestone and show an illustrative preview                       | They explain what will live there; disabled actions say what they wait for                                                                                |
+| 2026-10-16 | The 3D scene uses in-scene Lightformers for reflections, no HDR file                         | Works offline and ships no third-party assets                                                                                                             |
+| 2026-10-16 | TypeScript 6.0 and Vitest 4                                                                  | typescript-eslint supports TS < 6.1; Vitest 5 needs Node 22, the dev machines run Node 20.19+                                                             |
+| 2026-10-16 | Low-power mode when WebGL has no GPU                                                         | Full quality on SwiftShader used about 9 CPU cores and kept the main thread near 100 % busy; the first Linux CI run timed out on keyboard and DOM actions |
+| 2026-10-16 | Under browser automation, toasts stay until dismissed and the reduced 3D view draws at 5 fps | A slow runner must not miss a confirmation that came and went; tests need the picture, not smooth motion                                                  |

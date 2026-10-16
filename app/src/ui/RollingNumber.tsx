@@ -3,6 +3,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { digitEnter, digitExit } from "../design/motion.ts";
 import { digits } from "../design/tokens.ts";
 import { cx } from "../lib/cx.ts";
+import { useLowPower } from "../lib/power.ts";
 import { formatNumber, throttleDelay, toSlots } from "./rolling.ts";
 
 type Dir = 1 | -1;
@@ -77,7 +78,8 @@ export interface RollingTextProps {
 /** Each digit has its own slot and rolls when it changes; other characters stay still. */
 export function RollingText({ text, direction = 1, instant = NONE, className }: RollingTextProps) {
   const reduce = useReducedMotion();
-  const variants = reduce ? fading : rolling;
+  const lowPower = useLowPower();
+  const variants = reduce || lowPower ? fading : rolling;
   return (
     <span className={cx("num relative inline-flex whitespace-pre", className)}>
       <span className="sr-only">{text}</span>

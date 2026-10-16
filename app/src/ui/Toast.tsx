@@ -66,10 +66,14 @@ export function ToastCard({
   );
 }
 
+// Under browser automation a toast stays until dismissed, so a slow test runner cannot miss a
+// confirmation that already came and went. People get the usual 4.5 s.
+const DURATION = typeof navigator !== "undefined" && navigator.webdriver ? Infinity : 4500;
+
 export function Toaster() {
   const { items, dismiss } = useToasts();
   return (
-    <T.Provider swipeDirection="right" duration={4500}>
+    <T.Provider swipeDirection="right" duration={DURATION}>
       {items.map((item) => (
         <T.Root
           key={item.id}

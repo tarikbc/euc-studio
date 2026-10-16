@@ -119,8 +119,10 @@ export function Sparkline({
     if (!ring) return;
     const buf = new Float64Array(win);
     let last = 0;
+    let drawn = -1;
     return onFrame((now) => {
-      if (now - last < 1000 / fps) return;
+      if (ring.version === drawn || now - last < 1000 / fps) return;
+      drawn = ring.version;
       last = now;
       const n = ring.copyTo(buf, win);
       draw(canvas, buf, n, resolved, min, max);

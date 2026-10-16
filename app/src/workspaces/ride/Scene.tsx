@@ -1,13 +1,15 @@
 import { ContactShadows, Environment, Grid, Lightformer, OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "motion/react";
-import { type ComponentRef, Suspense, useEffect, useMemo, useRef } from "react";
+import { type ComponentRef, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { accents, surface } from "../../design/tokens.ts";
 import { engine } from "../../sim/engine.ts";
 import type { CameraMode } from "../../state/ui.ts";
 import { useUi } from "../../state/ui.ts";
+import { setLowPower } from "../../lib/power.ts";
 import { EucModel } from "./EucModel.tsx";
+import { LOW_FPS, type Quality, chooseQuality, qualityOverride, rendererName } from "./quality.ts";
 
 const TARGET = new THREE.Vector3(0.02, 0.34, 0);
 const FOLLOW_OFFSET = new THREE.Vector3(1.05, 0.52, 1.95);
@@ -71,9 +73,10 @@ function Spot() {
 
 /**
  * Follow: the camera eases to a three-quarter view and breathes with speed. Orbit: free orbit
- * with damping. With reduced motion, camera moves cut instead of easing.
+ * with damping. With reduced motion, camera moves cut instead of easing. `still` (low quality)
+ * drops the idle sway so a paused scene needs no redraws.
  */
-function CameraRig({ mode }: { mode: CameraMode }) {
+function CameraRig({ mode, still }: { mode: CameraMode; still: boolean }) {
   const camera = useThree((s) => s.camera);
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const reduce = useReducedMotion();
@@ -88,8 +91,12 @@ function CameraRig({ mode }: { mode: CameraMode }) {
     desired.current
       .copy(FOLLOW_OFFSET)
       .multiplyScalar(1 + pull)
-      .add(sway.set(Math.sin(t * 0.17) * 0.06, Math.sin(t * 0.23) * 0.025, 0));
-    if (reduce || first.current) {
+      .add(
+        still
+          ? sway.set(0, 0, 0)
+          : sway.set(Math.sin(t * 0.17) * 0.06, Math.sin(t * 0.23) * 0.025, 0),
+      );
+    if (reduce || still || first.current) {
       camera.position.copy(desired.current);
       first.current = false;
     } else {
@@ -166,20 +173,51 @@ function Lights() {
   );
 }
 
-export function Scene({ active, onReady }: { active: boolean; onReady?: () => void }) {
+/**
+ * In low quality the scene redraws on a fixed clock, and only when the simulation moved. Orbit
+ * drags still redraw at once (the controls invalidate on change).
+ */
+function Ticker({ fps }: { fps: number }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    let drawnAt = Number.NaN;
+    const id = window.setInterval(() => {
+      if (engine.latest.t === drawnAt) return;
+      drawnAt = engine.latest.t;
+      invalidate();
+    }, 1000 / fps);
+    return () => window.clearInterval(id);
+  }, [fps, invalidate]);
+  return null;
+}
+
+export interface SceneProps {
+  active: boolean;
+  onReady?: (info: { quality: Quality; renderer: string }) => void;
+}
+
+export function Scene({ active, onReady }: SceneProps) {
   const camera = useUi((s) => s.camera);
   const accent = useUi((s) => s.accent);
+  const [override] = useState(() => qualityOverride(location.search));
+  const [quality, setQuality] = useState<Quality>(override ?? "high");
+  const high = quality === "high";
+
   return (
     <Canvas
-      shadows
-      dpr={[1, 2]}
-      frameloop={active ? "always" : "never"}
+      shadows={high}
+      dpr={high ? [1, 2] : 1}
+      frameloop={!active ? "never" : high ? "always" : "demand"}
       camera={{ position: FOLLOW_OFFSET.toArray(), fov: 30, near: 0.05, far: 60 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.05;
-        onReady?.();
+        const renderer = rendererName(gl.getContext());
+        const chosen = chooseQuality(renderer, override);
+        setQuality(chosen);
+        setLowPower(chosen === "low");
+        onReady?.({ quality: chosen, renderer });
       }}
       aria-label="3D view of the wheel"
     >
@@ -190,16 +228,19 @@ export function Scene({ active, onReady }: { active: boolean; onReady?: () => vo
         <Floor />
         <EucModel accent={accents[accent].accent} />
         <ContactShadows
+          // The key: a new component when quality changes, so `frames` applies from the start.
+          key={quality}
           position={[0, 0.001, 0]}
           opacity={0.75}
           scale={3}
           blur={2.2}
           far={0.9}
-          resolution={512}
-          frames={Infinity}
+          resolution={high ? 512 : 256}
+          frames={high ? Infinity : 1}
         />
       </Suspense>
-      <CameraRig mode={camera} />
+      <CameraRig mode={camera} still={!high} />
+      {active && !high && <Ticker fps={LOW_FPS} />}
     </Canvas>
   );
 }

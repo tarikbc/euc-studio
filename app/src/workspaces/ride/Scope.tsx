@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import { font } from "../../design/tokens.ts";
 import { resolveColor, withAlpha } from "../../lib/canvas.ts";
 import { onFrame } from "../../lib/frameloop.ts";
+import { isLowPower } from "../../lib/power.ts";
 import type { RingBuffer } from "../../lib/ring.ts";
 import { SAMPLE_RATE } from "../../sim/synthetic.ts";
 
@@ -114,7 +115,15 @@ export function Scope({
     });
     ro.observe(el);
 
-    const off = onFrame(() => {
+    // Redraw only when new samples arrived (a paused run costs nothing), and at most 30 times a
+    // second when the machine renders without a GPU.
+    let drawn = -1;
+    let lastAt = 0;
+    const off = onFrame((frameAt) => {
+      if (time.version === drawn) return;
+      if (isLowPower() && frameAt - lastAt < 1000 / 30) return;
+      drawn = time.version;
+      lastAt = frameAt;
       const n = Math.min(time.copyTo(xs, cap), values.copyTo(ys, cap));
       const now = n > 0 ? (xs[n - 1] as number) : 0;
       for (let i = 0; i < n; i++) xs[i] = (xs[i] as number) - now;
