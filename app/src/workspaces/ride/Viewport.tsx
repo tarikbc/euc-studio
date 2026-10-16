@@ -3,10 +3,11 @@ import { useState } from "react";
 import { smooth } from "../../design/motion.ts";
 import { series } from "../../design/tokens.ts";
 import { cx } from "../../lib/cx.ts";
-import { useLive } from "../../sim/engine.ts";
+import { engine, useEngineVersion, useLive } from "../../engine/index.ts";
 import { type CameraMode, useUi } from "../../state/ui.ts";
 import { Gauge } from "../../ui/Gauge.tsx";
-import { Crosshair, Orbit } from "../../ui/icons.tsx";
+import { Crosshair, Orbit, RotateCcw } from "../../ui/icons.tsx";
+import { Button } from "../../ui/Button.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { RollingNumber } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -15,6 +16,49 @@ import { Wait } from "../../ui/Wait.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
 import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
+import { WheelOutputs } from "./WheelOutputs.tsx";
+
+/** While the live engine starts or after it failed: what it is doing, or why it stopped. */
+function EngineOverlay() {
+  useEngineVersion();
+  const { state, message } = engine.status;
+  const show =
+    engine.kind === "live" && (state === "starting" || state === "error" || state === "halted");
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.div
+          className="absolute inset-0 z-20 grid place-items-center bg-bg/70 backdrop-blur-[2px]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={smooth}
+        >
+          {state === "starting" ? (
+            <Wait
+              step={message || "Starting the simulator"}
+              detail="The stock firmware boots in the simulated controller"
+              onRetry={() => engine.restart()}
+              onCancel={() => engine.setPlaying(false)}
+            />
+          ) : (
+            <div className="flex w-[360px] flex-col gap-8 rounded-12 border border-hairline-strong bg-card p-16">
+              <span className="text-13 font-semibold text-fg">
+                {state === "halted" ? "The firmware stopped" : "The engine could not start"}
+              </span>
+              <span className="text-12 break-words text-fg-2">{message}</span>
+              <div className="flex gap-8 pt-8">
+                <Button size="sm" icon={<RotateCcw />} onClick={() => engine.restart()}>
+                  Restart the run
+                </Button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 function HudCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -120,6 +164,8 @@ export function Viewport({ active }: { active: boolean }) {
         <Scene active={active} onReady={setScene} />
       </div>
 
+      <EngineOverlay />
+
       <AnimatePresence>
         {!ready && (
           <motion.div
@@ -168,18 +214,21 @@ export function Viewport({ active }: { active: boolean }) {
             <Pwm />
             <Battery />
           </HudCard>
-          {scene?.quality === "low" && (
-            <Tooltip
-              side="top"
-              content={`No GPU acceleration (${scene.renderer.split(" (")[0] || "software WebGL"}). The 3D view draws at ${LOW_FPS} fps without shadows; telemetry is unaffected.`}
-            >
-              <span className="pointer-events-auto">
-                <Pill tone="neutral" size="md">
-                  Reduced 3D quality
-                </Pill>
-              </span>
-            </Tooltip>
-          )}
+          <div className="flex flex-col items-end gap-8">
+            {scene?.quality === "low" && (
+              <Tooltip
+                side="top"
+                content={`No GPU acceleration (${scene.renderer.split(" (")[0] || "software WebGL"}). The 3D view draws at ${LOW_FPS} fps without shadows; telemetry is unaffected.`}
+              >
+                <span className="pointer-events-auto">
+                  <Pill tone="neutral" size="md">
+                    Reduced 3D quality
+                  </Pill>
+                </span>
+              </Tooltip>
+            )}
+            <WheelOutputs className="pointer-events-auto max-w-[360px]" />
+          </div>
         </div>
       </div>
     </div>

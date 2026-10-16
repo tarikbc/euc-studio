@@ -5,7 +5,7 @@ import { resolveColor, withAlpha } from "../../lib/canvas.ts";
 import { onFrame } from "../../lib/frameloop.ts";
 import { isLowPower } from "../../lib/power.ts";
 import type { RingBuffer } from "../../lib/ring.ts";
-import { SAMPLE_RATE } from "../../sim/synthetic.ts";
+import { SAMPLE_RATE } from "../../engine/types.ts";
 
 export interface ScopeProps {
   time: RingBuffer;

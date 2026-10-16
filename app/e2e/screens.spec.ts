@@ -54,7 +54,7 @@ test.beforeEach(async ({ page, browserName }) => {
 test("ride workspace: viewport, telemetry, events", async ({ page }, info) => {
   await openRide(page);
   await expect(page.getByRole("radiogroup", { name: "Firmware" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Telemetry" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Telemetry" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
   await expect(page.getByText("First telemetry frame").first()).toBeVisible();
   await shot(page, "ride", info.project.name);
@@ -113,6 +113,25 @@ test("command palette and shortcuts sheet", async ({ page }, info) => {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
+test("phone tab explains that it needs the live engine", async ({ page }, info) => {
+  await openRide(page);
+  await page.getByRole("tab", { name: "Phone" }).click();
+  await expect(page.getByText("The phone needs the live engine")).toBeVisible();
+  await shot(page, "phone-demo", info.project.name);
+});
+
+test("the event list fills again after a restart", async ({ page }, info) => {
+  await openRide(page);
+  const list = page.getByRole("heading", { name: "Events" }).locator("xpath=ancestor::section[1]");
+  await expect(list.getByText("First telemetry frame")).toBeVisible();
+  await page.keyboard.press("r");
+  // The demo re-runs from 0 s: its boot events come back and their rows must show.
+  await expect(list.getByText("First telemetry frame")).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(3000);
+  await expect(list.getByText("First telemetry frame")).toBeVisible();
+  await shot(page, "events-after-restart", info.project.name);
+});
+
 test("play, pause and the real-time factor", async ({ page }) => {
   await openRide(page);
   await page.getByRole("button", { name: "Pause simulation" }).click();
@@ -151,6 +170,6 @@ test("gallery", async ({ page }, info) => {
 test("reduced motion still renders the shell", async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await openRide(page);
-  await expect(page.getByRole("heading", { name: "Telemetry" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Telemetry" })).toBeVisible();
   await shot(page, "ride-reduced-motion", info.project.name);
 });

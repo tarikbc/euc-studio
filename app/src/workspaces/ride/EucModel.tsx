@@ -3,7 +3,8 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { series } from "../../design/tokens.ts";
-import { engine } from "../../sim/engine.ts";
+import { engine } from "../../engine/index.ts";
+import { DisplayDecal } from "./DisplayDecal.tsx";
 
 // A stylized electric unicycle built from primitives, about the size of a Begode Extreme
 // (22 inch tire). Units are meters; the wheel rolls about z and travels along +x. The shell is
@@ -102,6 +103,53 @@ function useSideShell() {
   }, []);
 }
 
+/** LEDs per side of the shell (the Extreme's strip has 32: 16 a side, order INFERRED). */
+const LEDS_PER_SIDE = 16;
+const LED_OFF = new THREE.Color("#141416");
+const ledColor = new THREE.Color();
+
+/**
+ * One side's light strip as 16 emissive cells. Colours come from the engine's board outputs on
+ * every frame (no React render); without outputs (the demo) the strip glows in the UI accent.
+ */
+function LedStrip({ side, fallback }: { side: number; fallback: THREE.Color }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const placed = useRef(false);
+  useFrame(() => {
+    const m = mesh.current;
+    if (!m) return;
+    if (!placed.current) {
+      const at = new THREE.Matrix4();
+      for (let i = 0; i < LEDS_PER_SIDE; i++) {
+        at.makeTranslation(-0.15 + (0.3 * (i + 0.5)) / LEDS_PER_SIDE, 0, 0);
+        m.setMatrixAt(i, at);
+      }
+      m.instanceMatrix.needsUpdate = true;
+      placed.current = true;
+    }
+    const leds = engine.outputs?.leds;
+    for (let i = 0; i < LEDS_PER_SIDE; i++) {
+      // The right side (z > 0) takes the first half of the strip (INFERRED order).
+      const rgb = leds?.[(side > 0 ? 0 : LEDS_PER_SIDE) + i];
+      if (!leds) ledColor.copy(fallback);
+      else if (!rgb || rgb[0] + rgb[1] + rgb[2] === 0) ledColor.copy(LED_OFF);
+      else ledColor.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+      m.setColorAt(i, ledColor);
+    }
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  });
+  return (
+    <instancedMesh
+      ref={mesh}
+      args={[undefined, undefined, LEDS_PER_SIDE]}
+      position={[0, -0.17, side * 0.0262]}
+    >
+      <boxGeometry args={[(0.3 / LEDS_PER_SIDE) * 0.82, 0.014, 0.002]} />
+      <meshBasicMaterial toneMapped={false} />
+    </instancedMesh>
+  );
+}
+
 function ShellMaterial() {
   return (
     <meshPhysicalMaterial
@@ -114,6 +162,121 @@ function ShellMaterial() {
   );
 }
 
+/** Tire, tread, rim and hub motor, centred on the axle (axle along local z). */
+export function WheelVisual() {
+  return (
+    <>
+      <mesh castShadow receiveShadow>
+        <torusGeometry args={[TIRE_R - TIRE_TUBE, TIRE_TUBE, 32, 120]} />
+        <meshStandardMaterial color="#111113" roughness={0.85} />
+      </mesh>
+      <TreadBlocks />
+      <mesh>
+        <torusGeometry args={[TIRE_R - TIRE_TUBE * 1.95, 0.011, 12, 96]} />
+        <meshStandardMaterial color="#AEAEB2" roughness={0.25} metalness={0.95} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.155, 0.155, 0.09, 64]} />
+        <meshStandardMaterial color="#2C2C2E" roughness={0.35} metalness={0.85} />
+      </mesh>
+      {/* Hub caps with a slot so the spin reads even at rest. */}
+      {[1, -1].map((s) => (
+        <group key={s} position={[0, 0, s * 0.047]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.075, 0.075, 0.006, 48]} />
+            <meshStandardMaterial color="#636366" roughness={0.3} metalness={0.95} />
+          </mesh>
+          <mesh position={[0.04, 0, s * 0.0035]}>
+            <boxGeometry args={[0.05, 0.01, 0.002]} />
+            <meshStandardMaterial color="#111113" roughness={0.7} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Shell, pedals and lights around the axle (local frame: x forward, y up, axle along z). The
+ * light strip follows the UI accent until the emulated firmware drives the LEDs.
+ */
+export function ShellVisual({ accent }: { accent: string }) {
+  const led = useMemo(() => new THREE.Color(accent), [accent]);
+  const sideShell = useSideShell();
+  return (
+    <>
+      {[1, -1].map((s) => (
+        <group key={s} position={[0, 0.16, s * SHELL_Z]}>
+          <mesh geometry={sideShell} castShadow receiveShadow>
+            <ShellMaterial />
+          </mesh>
+          {/* Light strip: the firmware's WS2812 colours when the engine drives them, else the accent. */}
+          <LedStrip side={s} fallback={led} />
+          {/* Vent detail. */}
+          {[0, 1, 2, 3].map((i) => (
+            <mesh key={i} position={[-0.09 + i * 0.06, 0.14, s * 0.0262]}>
+              <boxGeometry args={[0.035, 0.006, 0.002]} />
+              <meshStandardMaterial color="#0A0A0B" roughness={1} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {/* Fairing over the tire and the top bridge with the trolley handle. */}
+      <RoundedBox
+        args={[SHELL_W - 0.04, 0.12, 0.14]}
+        radius={0.04}
+        smoothness={4}
+        position={[0, 0.34, 0]}
+        castShadow
+      >
+        <ShellMaterial />
+      </RoundedBox>
+      <mesh position={[0, 0.405, 0]} castShadow>
+        <torusGeometry args={[0.085, 0.013, 12, 40, Math.PI]} />
+        <meshStandardMaterial color="#48484A" roughness={0.35} metalness={0.7} />
+      </mesh>
+      <DisplayDecal />
+      {/* Headlight on the front of the fairing, tail light behind. */}
+      <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
+        <boxGeometry args={[0.004, 0.036, 0.1]} />
+        <meshStandardMaterial
+          color="#F2F2F7"
+          emissive="#F2F2F7"
+          emissiveIntensity={1.4}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
+        <boxGeometry args={[0.004, 0.024, 0.08]} />
+        <meshStandardMaterial
+          color={series.current}
+          emissive={series.current}
+          emissiveIntensity={1.1}
+          toneMapped={false}
+        />
+      </mesh>
+      {/* Pedals: grip plate, edge and hinge bracket. */}
+      {[1, -1].map((s) => (
+        <group key={s} position={[0.01, -0.12, s * 0.17]}>
+          <mesh castShadow>
+            <boxGeometry args={[0.15, 0.018, 0.105]} />
+            <meshStandardMaterial color="#2C2C2E" roughness={0.6} metalness={0.5} />
+          </mesh>
+          <mesh position={[0, 0.0095, 0]}>
+            <boxGeometry args={[0.14, 0.002, 0.095]} />
+            <meshStandardMaterial color="#0E0E10" roughness={1} />
+          </mesh>
+          <mesh position={[0, 0.03, -s * 0.05]} castShadow>
+            <boxGeometry args={[0.05, 0.06, 0.016]} />
+            <meshStandardMaterial color="#48484A" roughness={0.4} metalness={0.7} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  );
+}
+
+/** The demo's kinematic wheel: rolls by distance, pitches and rolls with the demo signals. */
 export function EucModel({ accent }: { accent: string }) {
   const spin = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
@@ -127,117 +290,13 @@ export function EucModel({ accent }: { accent: string }) {
     if (root.current) root.current.rotation.x = l.roll * DEG;
   });
 
-  const led = useMemo(() => new THREE.Color(accent), [accent]);
-  const sideShell = useSideShell();
-
   return (
     <group ref={root} position={[0, TIRE_R, 0]}>
-      {/* Rotating parts: tire, tread, rim, hub motor. */}
       <group ref={spin}>
-        <mesh castShadow receiveShadow>
-          <torusGeometry args={[TIRE_R - TIRE_TUBE, TIRE_TUBE, 32, 120]} />
-          <meshStandardMaterial color="#111113" roughness={0.85} />
-        </mesh>
-        <TreadBlocks />
-        <mesh>
-          <torusGeometry args={[TIRE_R - TIRE_TUBE * 1.95, 0.011, 12, 96]} />
-          <meshStandardMaterial color="#AEAEB2" roughness={0.25} metalness={0.95} />
-        </mesh>
-        <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
-          <cylinderGeometry args={[0.155, 0.155, 0.09, 64]} />
-          <meshStandardMaterial color="#2C2C2E" roughness={0.35} metalness={0.85} />
-        </mesh>
-        {/* Hub caps with a slot so the spin reads even at rest. */}
-        {[1, -1].map((s) => (
-          <group key={s} position={[0, 0, s * 0.047]}>
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.075, 0.075, 0.006, 48]} />
-              <meshStandardMaterial color="#636366" roughness={0.3} metalness={0.95} />
-            </mesh>
-            <mesh position={[0.04, 0, s * 0.0035]}>
-              <boxGeometry args={[0.05, 0.01, 0.002]} />
-              <meshStandardMaterial color="#111113" roughness={0.7} />
-            </mesh>
-          </group>
-        ))}
+        <WheelVisual />
       </group>
-
-      {/* Shell, pedals and lights pitch together around the axle. */}
       <group ref={body}>
-        {[1, -1].map((s) => (
-          <group key={s} position={[0, 0.16, s * SHELL_Z]}>
-            <mesh geometry={sideShell} castShadow receiveShadow>
-              <ShellMaterial />
-            </mesh>
-            {/* Light strip: follows the UI accent until the emulated firmware drives the LEDs. */}
-            <mesh position={[0, -0.17, s * 0.0262]}>
-              <boxGeometry args={[0.3, 0.014, 0.002]} />
-              <meshStandardMaterial
-                color={led}
-                emissive={led}
-                emissiveIntensity={1.1}
-                toneMapped={false}
-              />
-            </mesh>
-            {/* Vent detail. */}
-            {[0, 1, 2, 3].map((i) => (
-              <mesh key={i} position={[-0.09 + i * 0.06, 0.14, s * 0.0262]}>
-                <boxGeometry args={[0.035, 0.006, 0.002]} />
-                <meshStandardMaterial color="#0A0A0B" roughness={1} />
-              </mesh>
-            ))}
-          </group>
-        ))}
-        {/* Fairing over the tire and the top bridge with the trolley handle. */}
-        <RoundedBox
-          args={[SHELL_W - 0.04, 0.12, 0.14]}
-          radius={0.04}
-          smoothness={4}
-          position={[0, 0.34, 0]}
-          castShadow
-        >
-          <ShellMaterial />
-        </RoundedBox>
-        <mesh position={[0, 0.405, 0]} castShadow>
-          <torusGeometry args={[0.085, 0.013, 12, 40, Math.PI]} />
-          <meshStandardMaterial color="#48484A" roughness={0.35} metalness={0.7} />
-        </mesh>
-        {/* Headlight on the front of the fairing, tail light behind. */}
-        <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
-          <boxGeometry args={[0.004, 0.036, 0.1]} />
-          <meshStandardMaterial
-            color="#F2F2F7"
-            emissive="#F2F2F7"
-            emissiveIntensity={1.4}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
-          <boxGeometry args={[0.004, 0.024, 0.08]} />
-          <meshStandardMaterial
-            color={series.current}
-            emissive={series.current}
-            emissiveIntensity={1.1}
-            toneMapped={false}
-          />
-        </mesh>
-        {/* Pedals: grip plate, edge and hinge bracket. */}
-        {[1, -1].map((s) => (
-          <group key={s} position={[0.01, -0.12, s * 0.17]}>
-            <mesh castShadow>
-              <boxGeometry args={[0.15, 0.018, 0.105]} />
-              <meshStandardMaterial color="#2C2C2E" roughness={0.6} metalness={0.5} />
-            </mesh>
-            <mesh position={[0, 0.0095, 0]}>
-              <boxGeometry args={[0.14, 0.002, 0.095]} />
-              <meshStandardMaterial color="#0E0E10" roughness={1} />
-            </mesh>
-            <mesh position={[0, 0.03, -s * 0.05]} castShadow>
-              <boxGeometry args={[0.05, 0.06, 0.016]} />
-              <meshStandardMaterial color="#48484A" roughness={0.4} metalness={0.7} />
-            </mesh>
-          </group>
-        ))}
+        <ShellVisual accent={accent} />
       </group>
     </group>
   );

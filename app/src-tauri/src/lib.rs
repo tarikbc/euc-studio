@@ -1,20 +1,7 @@
-//! EUC Studio desktop shell. M0 hosts the web UI only; the simulation engine (`euc-sim`) is wired
-//! in at M1 through an `EngineClient` behind Tauri commands and binary IPC channels.
+//! EUC Studio desktop shell: the web UI plus the live engine (`engine`), which runs the real
+//! firmware in the simulator on its own thread and streams telemetry to the web view.
 
-use serde::Serialize;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AppInfo {
-    version: &'static str,
-    engine: &'static str,
-}
-
-/// Lets the UI show which engine it is talking to.
-#[tauri::command]
-fn app_info() -> AppInfo {
-    AppInfo { version: env!("CARGO_PKG_VERSION"), engine: "demo" }
-}
+mod engine;
 
 /// Web view errors and warnings, printed where the app was started (WKWebView and WebView2 keep
 /// their consoles to themselves).
@@ -26,10 +13,25 @@ fn frontend_log(level: String, message: String) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(engine::EngineState::default())
+        .setup(|_app| {
+            // EUC_STUDIO_CONTROL: drive the run from a file (dev builds only, see engine::control).
+            #[cfg(dev)]
+            engine::control::spawn(_app.handle().clone());
+            Ok(())
+        })
         .on_page_load(|webview, payload| {
             eprintln!("[page] {:?} {}", payload.event(), webview.url().map(|u| u.to_string()).unwrap_or_default());
         })
-        .invoke_handler(tauri::generate_handler![app_info, frontend_log])
+        .invoke_handler(tauri::generate_handler![
+            frontend_log,
+            engine::engine_connect,
+            engine::engine_play,
+            engine::engine_step,
+            engine::engine_set_rtf,
+            engine::engine_restart,
+            engine::engine_send,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running EUC Studio");
 }

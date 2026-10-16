@@ -3,9 +3,9 @@ name: app
 on:
   push:
     branches: [main]
-    paths: ["app/**", ".github/workflows/ci-app.yml"]
+    paths: ["app/**", "crates/**", "profiles/**", "tools/fetch-mujoco/**", ".github/workflows/ci-app.yml"]
   pull_request:
-    paths: ["app/**", ".github/workflows/ci-app.yml"]
+    paths: ["app/**", "crates/**", "profiles/**", "tools/fetch-mujoco/**", ".github/workflows/ci-app.yml"]
   workflow_dispatch:
 
 permissions:
@@ -92,6 +92,40 @@ jobs:
         with:
           workspaces: app/src-tauri
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The engine's physics (euc-sim -> euc-physics) links the MuJoCo release dynamically.
+      - name: MuJoCo native library
+        working-directory: .
+        run: python tools/fetch-mujoco/fetch.py --github
+
       - name: cargo check
         working-directory: app/src-tauri
         run: cargo check --locked --all-targets
+
+      - name: cargo test
+        working-directory: app/src-tauri
+        run: cargo test --locked
+
+      # Unicorn (GPL-2.0) is for `tauri dev` only. A bundle build enables Tauri's custom protocol,
+      # and the app must then refuse to compile with the `unicorn` feature.
+      - name: Unicorn never compiles into a bundle
+        if: runner.os == 'Linux'
+        working-directory: app/src-tauri
+        shell: bash
+        run: |
+          if cargo check --locked --features unicorn,tauri/custom-protocol 2> guard.log; then
+            echo "::error::the app compiled with Unicorn in bundle mode"; exit 1
+          fi
+          grep -q "must never be part of a bundle" guard.log && echo "refused, as it must be"
+
+      - name: Licenses of the app's dependency tree
+        if: runner.os == 'Linux'
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: app/src-tauri/Cargo.toml
+          command: check licenses bans
+          # deny.toml at the repository root (the action's working directory) is the policy.
+          arguments: --all-features

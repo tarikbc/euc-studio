@@ -3,18 +3,24 @@ name = "euc-studio-app"
 version = "0.1.0"
 description = "EUC Studio: run electric unicycle firmware in a 3D simulation"
 authors = ["Tarik Caramanico"]
-license = "PolyForm-Noncommercial-1.0.0"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/tarikbc/euc-studio"
-edition = "2021"
-rust-version = "1.85"
+edition = "2024"
+rust-version = "1.99"
 publish = false
 
-# The app is its own cargo workspace; the engine workspace at the repo root excludes app/src-tauri.
+# The app is its own cargo workspace and uses the engine crates by path: the engine workspace's CI
+# never needs the web view's system libraries, and the app pins its own Tauri versions.
 [workspace]
 
 [lib]
 name = "euc_studio_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# The Unicorn CPU backend: GPL-2.0, for development only. `pnpm tauri dev` turns it on
+# (scripts/tauri.mjs); a bundle refuses to compile with it (see src/engine/cpu.rs).
+unicorn = ["dep:euc-unicorn"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -23,6 +29,18 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
+
+euc-core = { path = "../../crates/euc-core" }
+euc-devices = { path = "../../crates/euc-devices" }
+euc-display = { path = "../../crates/euc-display" }
+euc-fwsource = { path = "../../crates/euc-fwsource" }
+euc-profile = { path = "../../crates/euc-profile" }
+euc-proto-begode = { path = "../../crates/euc-proto-begode" }
+euc-sim = { path = "../../crates/euc-sim" }
+euc-stm32f1 = { path = "../../crates/euc-stm32f1" }
+euc-telemetry = { path = "../../crates/euc-telemetry" }
+euc-unicorn = { path = "../../crates/euc-unicorn", optional = true }
 
 [profile.release]
 codegen-units = 1
@@ -30,3 +48,7 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# The emulator is too slow to ride in real time unoptimized; keep dev builds of the engine fast.
+[profile.dev.package."*"]
+opt-level = 3

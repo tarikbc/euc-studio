@@ -7,6 +7,7 @@ export const WORKSPACE_IDS: WorkspaceId[] = ["ride", "tune", "compare", "flash"]
 export type Route = WorkspaceId | "gallery";
 export type CameraMode = "follow" | "orbit";
 export type DockId = "right" | "bottom";
+export type RightTab = "telemetry" | "phone";
 
 type DockState = Record<DockId, boolean>;
 
@@ -18,6 +19,8 @@ interface UiState {
   camera: CameraMode;
   docks: Record<WorkspaceId, DockState>;
   paletteOpen: boolean;
+  /** What the right dock shows in Ride. */
+  rightTab: RightTab;
   shortcutsOpen: boolean;
   /** Bumped to ask the dock layout to reset to defaults. */
   layoutEpoch: number;
@@ -28,6 +31,7 @@ interface UiState {
   toggleDock: (dock: DockId, open?: boolean) => void;
   resetLayout: () => void;
   setPaletteOpen: (open: boolean) => void;
+  setRightTab: (tab: RightTab) => void;
   setShortcutsOpen: (open: boolean) => void;
 }
 
@@ -63,6 +67,7 @@ export const useUi = create<UiState>((set, get) => ({
     flash: DEFAULT_DOCKS,
   }),
   paletteOpen: false,
+  rightTab: readStored<RightTab>("rightTab", "telemetry") === "phone" ? "phone" : "telemetry",
   shortcutsOpen: false,
   layoutEpoch: 0,
 
@@ -95,6 +100,10 @@ export const useUi = create<UiState>((set, get) => ({
     set({ docks: next, layoutEpoch: layoutEpoch + 1 });
   },
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setRightTab: (rightTab) => {
+    writeStored("rightTab", rightTab);
+    set({ rightTab });
+  },
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
 }));
 

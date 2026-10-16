@@ -8,3 +8,5 @@ src-tauri/gen
 src-tauri/icons
 src/design/tokens.css
 docs/screenshots
+src/engine/telemetry.gen.ts
+src/engine/fixtures

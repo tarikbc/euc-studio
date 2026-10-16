@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from "react";
 import { comboFromEvent } from "../lib/keys.ts";
+import { BUDGET_MS, formatStats, measureFrames } from "../lib/perf.ts";
 import { accents, type AccentName } from "../design/tokens.ts";
-import { engine, useEngineVersion } from "../sim/engine.ts";
-import { FIRMWARES, SCENARIOS } from "../sim/synthetic.ts";
+import { engine, useEngineVersion } from "../engine/index.ts";
 import { WORKSPACE_IDS, useUi } from "../state/ui.ts";
 import type { PaletteCommand } from "../ui/CommandPalette.tsx";
 import {
@@ -16,6 +16,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  StepForward,
   Timer,
   Waves,
 } from "../ui/icons.tsx";
@@ -76,6 +77,18 @@ export function useCommands(): PaletteCommand[] {
         run: () => engine.restart(),
       },
       {
+        id: "sim.step",
+        title: "Step one frame (while paused)",
+        group: "Simulation",
+        icon: <StepForward />,
+        shortcut: ".",
+        keywords: ["frame", "advance", "next"],
+        run: () => {
+          if (engine.playing) engine.setPlaying(false);
+          else engine.step();
+        },
+      },
+      {
         id: "sim.slower",
         title: "Slower (halve the real-time factor)",
         group: "Simulation",
@@ -93,22 +106,25 @@ export function useCommands(): PaletteCommand[] {
         keywords: ["speed", "rtf", "fast forward"],
         run: () => stepRtf(1),
       },
-      ...FIRMWARES.map((f) => ({
-        id: `firmware.${f.id}`,
-        title: `Run ${f.label} firmware`,
-        group: "Simulation",
-        icon: <Cpu />,
-        keywords: ["firmware", f.detail],
-        hint: engine.firmware === f.id ? "Current" : undefined,
-        run: () => engine.setFirmware(f.id),
-      })),
-      ...SCENARIOS.map((s) => ({
+      ...engine
+        .firmwares()
+        .filter((f) => !f.disabledReason)
+        .map((f) => ({
+          id: `firmware.${f.id}`,
+          title: `Run ${f.label} firmware`,
+          group: "Simulation",
+          icon: <Cpu />,
+          keywords: ["firmware", f.detail],
+          hint: engine.firmware === f.id ? "Current" : undefined,
+          run: () => engine.setFirmware(f.id),
+        })),
+      ...engine.scenarios().map((s) => ({
         id: `scenario.${s.id}`,
         title: `Scenario: ${s.label}`,
         group: "Simulation",
         icon: <Waves />,
         keywords: ["scenario", s.detail],
-        hint: engine.scenario.id === s.id ? "Current" : undefined,
+        hint: engine.scenarioId === s.id ? "Current" : undefined,
         run: () => engine.setScenario(s.id),
       })),
       {
@@ -165,6 +181,29 @@ export function useCommands(): PaletteCommand[] {
           toast({ tone: "success", title: `Accent changed to ${accents[a].label}` });
         },
       })),
+      {
+        id: "dev.frames",
+        title: "Measure frame time (10 s)",
+        group: "Help",
+        icon: <Timer />,
+        keywords: ["performance", "fps", "frame", "p95"],
+        run: () => {
+          toast({
+            tone: "info",
+            title: "Measuring frame time",
+            description: "Keep the window in front for 10 s.",
+          });
+          void measureFrames(10).then((s) => {
+            const ok = s.work.p95 <= BUDGET_MS;
+            toast({
+              tone: ok ? "success" : "caution",
+              title: `Frame time p95 ${s.work.p95.toFixed(1)} ms`,
+              description: formatStats(s),
+            });
+            console.warn(`PERF ${formatStats(s)}`);
+          });
+        },
+      },
       {
         id: "help.shortcuts",
         title: "Keyboard shortcuts",

@@ -252,6 +252,29 @@
   }
 }
 
+/*
+ * A new timeline row slides in from above. Transform only: WebKit holds animations while the
+ * window is hidden, and a row held at the first keyframe must still be readable.
+ */
+@keyframes row-in {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.row-in {
+  animation: row-in var(--dur-smooth) var(--ease-smooth) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-in {
+    animation: none;
+  }
+}
+
 @keyframes pop-out {
   from {
     opacity: 1;

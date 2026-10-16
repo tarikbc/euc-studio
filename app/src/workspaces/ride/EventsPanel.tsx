@@ -1,10 +1,7 @@
-import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { smooth } from "../../design/motion.ts";
 import { cx } from "../../lib/cx.ts";
 import { onFrame } from "../../lib/frameloop.ts";
-import { engine, useEngineVersion } from "../../sim/engine.ts";
-import type { EventKind, SimEvent } from "../../sim/synthetic.ts";
+import { type EventKind, type SimEvent, engine, useEngineVersion } from "../../engine/index.ts";
 import { Flag } from "../../ui/icons.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { Pill, type PillTone } from "../../ui/Pill.tsx";
@@ -16,12 +13,29 @@ const WINDOW = 30; // seconds on the strip
 
 const KIND: Record<EventKind, { label: string; tone: PillTone; dot: string }> = {
   firmware: { label: "Firmware", tone: "info", dot: "bg-info" },
-  ride: { label: "Ride", tone: "neutral", dot: "bg-fg-2-safe" },
+  scenario: { label: "Ride", tone: "neutral", dot: "bg-fg-2-safe" },
   command: { label: "Command", tone: "accent", dot: "bg-accent" },
   alarm: { label: "Alarm", tone: "caution", dot: "bg-caution" },
+  tiltback: { label: "Tiltback", tone: "caution", dot: "bg-caution" },
+  cutoff: { label: "Cutoff", tone: "danger", dot: "bg-danger" },
+  fault: { label: "Fault", tone: "danger", dot: "bg-danger" },
 };
 
-type Filter = "all" | EventKind;
+/** Tabs group kinds: everything the firmware does to protect the rider sits under Safety. */
+const GROUPS = {
+  all: null,
+  safety: ["alarm", "tiltback", "cutoff", "fault"],
+  firmware: ["firmware"],
+  scenario: ["scenario"],
+  command: ["command"],
+} as const satisfies Record<string, readonly EventKind[] | null>;
+
+type Filter = keyof typeof GROUPS;
+
+const inGroup = (filter: Filter, e: SimEvent) => {
+  const kinds = GROUPS[filter] as readonly EventKind[] | null;
+  return kinds === null || kinds.includes(e.kind);
+};
 
 /** Markers ride a 30 s strip; one CSS variable per frame moves them, React never re-renders. */
 function Strip({ events }: { events: SimEvent[] }) {
@@ -66,14 +80,31 @@ function Strip({ events }: { events: SimEvent[] }) {
   );
 }
 
+/** One timeline row; a row that arrives while the window is in view slides in. */
+function EventRow({ event: e, fresh }: { event: SimEvent; fresh: boolean }) {
+  const [slide] = useState(() => fresh && !document.hidden);
+  return (
+    <li className={cx(slide && "row-in")}>
+      <div className="grid h-[32px] grid-cols-[64px_80px_1fr] items-center gap-8 rounded-8 px-8 hover:bg-raised">
+        <span className="num text-12 text-fg-2">{formatClock(e.t)}</span>
+        <span>
+          <Pill tone={KIND[e.kind].tone}>{KIND[e.kind].label}</Pill>
+        </span>
+        <span className="truncate text-13 text-fg">{e.title}</span>
+      </div>
+    </li>
+  );
+}
+
 export function EventsPanel() {
   useEngineVersion();
   const [filter, setFilter] = useState<Filter>("all");
   const all = engine.events;
-  const shown = (filter === "all" ? all : all.filter((e) => e.kind === filter))
-    .slice(-60)
-    .reverse();
-  const count = (k: EventKind) => all.filter((e) => e.kind === k).length;
+  const visible = all.filter((e) => inGroup(filter, e));
+  const shown = visible.slice(-60).reverse();
+  // Rows that arrive after the panel mounted slide in; the ones already there do not.
+  const [firstNew] = useState(() => (all.at(-1)?.id ?? 0) + 1);
+  const count = (f: Filter) => all.filter((e) => inGroup(f, e)).length;
 
   return (
     <Panel
@@ -88,41 +119,24 @@ export function EventsPanel() {
           onValueChange={setFilter}
           tabs={[
             { value: "all", label: "All", count: all.length },
+            { value: "safety", label: "Safety", count: count("safety") },
             { value: "firmware", label: "Firmware", count: count("firmware") },
-            { value: "ride", label: "Ride", count: count("ride") },
-            { value: "alarm", label: "Alarms", count: count("alarm") },
+            { value: "scenario", label: "Ride", count: count("scenario") },
             { value: "command", label: "Commands", count: count("command") },
           ]}
           className="-mb-px h-(--dock-header) [&>div]:h-full"
         />
       }
     >
-      <Strip events={filter === "all" ? all : all.filter((e) => e.kind === filter)} />
+      <Strip events={visible} />
       <ul className="min-h-0 flex-1 overflow-y-auto px-8 pb-8">
-        <AnimatePresence initial={false}>
-          {shown.map((e) => (
-            <motion.li
-              key={e.id}
-              layout="position"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 32 }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={smooth}
-              className="overflow-hidden"
-            >
-              <div className="grid h-[32px] grid-cols-[64px_80px_1fr] items-center gap-8 rounded-8 px-8 hover:bg-raised">
-                <span className="num text-12 text-fg-2">{formatClock(e.t)}</span>
-                <span>
-                  <Pill tone={KIND[e.kind].tone}>{KIND[e.kind].label}</Pill>
-                </span>
-                <span className="truncate text-13 text-fg">{e.title}</span>
-              </div>
-            </motion.li>
-          ))}
-        </AnimatePresence>
+        {shown.map((e) => (
+          <EventRow key={e.id} event={e} fresh={e.id >= firstNew} />
+        ))}
         {shown.length === 0 && (
           <li className="px-8 py-16 text-13 text-fg-2">
-            No {filter === "all" ? "" : KIND[filter].label.toLowerCase()} events yet in this run.
+            No {filter === "all" ? "" : `${filter === "scenario" ? "ride" : filter} `}events yet in
+            this run.
           </li>
         )}
       </ul>

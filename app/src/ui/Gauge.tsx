@@ -59,7 +59,8 @@ export function Gauge({
   const stroke = Math.max(4, Math.round(size / 14));
   const r = size / 2 - stroke / 2 - 1;
   const c = size / 2;
-  const frac = Math.min(1, Math.max(0, (value - min) / (max - min)));
+  // An unmodelled value (NaN) shows an empty arc.
+  const frac = Number.isFinite(value) ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
   const length = (Math.PI * 2 * r * SWEEP) / 360;
   const active = [...zones].sort((a, b) => b.from - a.from).find((z) => value >= z.from);
   const arcColor = active ? toneColor[active.tone] : color;
@@ -72,7 +73,7 @@ export function Gauge({
       role="meter"
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={Number(value.toFixed(decimals))}
+      aria-valuenow={Number.isFinite(value) ? Number(value.toFixed(decimals)) : undefined}
       aria-label={typeof label === "string" ? label : undefined}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0">

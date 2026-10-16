@@ -41,7 +41,8 @@ export function PitchProtractor({
   const cy = h + 6;
   const r = width / 2 - 14;
   const k = ARC / range;
-  const clamped = Math.max(-range, Math.min(range, pitch));
+  // An unmodelled pitch (NaN) parks the needle at level.
+  const clamped = Number.isFinite(pitch) ? Math.max(-range, Math.min(range, pitch)) : 0;
   const tone =
     Math.abs(pitch) >= danger
       ? "var(--color-danger)"
@@ -87,7 +88,9 @@ export function PitchProtractor({
     <div
       className={cx("flex flex-col items-center", className)}
       role="img"
-      aria-label={`Pitch ${pitch.toFixed(1)} degrees`}
+      aria-label={
+        Number.isFinite(pitch) ? `Pitch ${pitch.toFixed(1)} degrees` : "Pitch not modelled"
+      }
     >
       <svg
         width={width}

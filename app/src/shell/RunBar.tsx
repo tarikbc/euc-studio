@@ -2,11 +2,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
 import { snappy } from "../design/motion.ts";
 import { cx } from "../lib/cx.ts";
-import { engine, useEngineVersion, useLive } from "../sim/engine.ts";
-import { FIRMWARES, SCENARIOS, type FirmwareId, type ScenarioId } from "../sim/synthetic.ts";
+import { type FirmwareId, engine, useEngineVersion, useLive } from "../engine/index.ts";
 import { useUi } from "../state/ui.ts";
 import { IconButton } from "../ui/Button.tsx";
-import { Check, LogoMark, Pause, Play, RotateCcw, Search } from "../ui/icons.tsx";
+import { Check, LogoMark, Pause, Play, RotateCcw, Search, StepForward } from "../ui/icons.tsx";
 import { Shortcut } from "../ui/Kbd.tsx";
 import { RollingNumber } from "../ui/RollingNumber.tsx";
 import { formatClock } from "../ui/rolling.ts";
@@ -104,6 +103,20 @@ function SimClock() {
   );
 }
 
+/** One frame forward while paused (1/60 s of simulated time). */
+function StepButton() {
+  useEngineVersion();
+  return (
+    <IconButton
+      label="Step one frame"
+      shortcut="."
+      icon={<StepForward />}
+      onClick={() => engine.step()}
+      {...(engine.playing ? { disabledReason: "Pause the run to step it" } : {})}
+    />
+  );
+}
+
 function PlayButton() {
   useEngineVersion();
   const playing = engine.playing;
@@ -160,14 +173,19 @@ export function RunBar() {
         aria-label="Firmware"
         value={engine.firmware}
         onValueChange={(v) => engine.setFirmware(v)}
-        options={FIRMWARES.map((f) => ({ value: f.id, label: f.label, tooltip: f.detail }))}
+        options={engine.firmwares().map((f) => ({
+          value: f.id,
+          label: f.label,
+          tooltip: f.detail,
+          ...(f.disabledReason ? { disabledReason: f.disabledReason } : {}),
+        }))}
       />
 
-      <Select<ScenarioId>
+      <Select<string>
         aria-label="Scenario"
-        value={engine.scenario.id}
+        value={engine.scenarioId}
         onValueChange={(v) => engine.setScenario(v)}
-        options={SCENARIOS.map((s) => ({ value: s.id, label: s.label, detail: s.detail }))}
+        options={engine.scenarios().map((s) => ({ value: s.id, label: s.label, detail: s.detail }))}
         className="w-[236px] max-[1279px]:w-[196px]"
         contentClassName="w-[300px]"
       />
@@ -182,6 +200,7 @@ export function RunBar() {
           onClick={() => engine.restart()}
         />
         <PlayButton />
+        <StepButton />
       </div>
 
       <div className="flex items-center gap-24 pl-8">

@@ -1,6 +1,5 @@
 import { cx } from "../lib/cx.ts";
-import { engine, useEngineVersion, useLive } from "../sim/engine.ts";
-import { FIRMWARES, SAMPLE_RATE } from "../sim/synthetic.ts";
+import { SAMPLE_RATE, engine, useEngineVersion, useLive } from "../engine/index.ts";
 import { BluetoothOff, Cpu } from "../ui/icons.tsx";
 import { RollingNumber } from "../ui/RollingNumber.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
@@ -38,26 +37,45 @@ function IsrLoad() {
   );
 }
 
+const STATE_DOT: Record<string, string> = {
+  running: "animate-[live-pulse_1.6s_ease-in-out_infinite] bg-ok",
+  paused: "bg-caution",
+  starting: "animate-[live-pulse_1.6s_ease-in-out_infinite] bg-caution",
+  halted: "bg-danger",
+  error: "bg-danger",
+  unavailable: "bg-fg-3",
+};
+
+function EngineItem() {
+  const { state, message, backend } = engine.status;
+  const live = engine.kind === "live";
+  const tip = live
+    ? `${message || "The stock firmware runs in the simulator"}${backend === "unicorn" ? ". CPU: Unicorn, development builds only" : ""}`
+    : "Synthetic signals; the desktop app runs the real firmware";
+  return (
+    <Tooltip content={tip} side="top">
+      <Item className="cursor-default">
+        <span className={cx("size-[6px] rounded-pill", STATE_DOT[state] ?? "bg-fg-3")} />
+        <span className="text-fg">
+          {live ? `Engine: ${engine.status.label ?? "connecting"}` : "Demo engine"}
+        </span>
+        <span>{state}</span>
+        {live && state === "starting" && message && <span className="text-fg-3">{message}</span>}
+      </Item>
+    </Tooltip>
+  );
+}
+
 export function StatusBar() {
   useEngineVersion();
-  const fw = FIRMWARES.find((f) => f.id === engine.firmware);
+  const fw = engine.firmwares().find((f) => f.id === engine.firmware);
   return (
     <footer className="flex h-(--statusbar) shrink-0 items-center gap-16 border-t border-hairline bg-bg px-16 text-12 text-fg-2">
-      <Tooltip content="Synthetic signals until the Rust engine lands (M1)" side="top">
-        <Item className="cursor-default">
-          <span
-            className={cx(
-              "size-[6px] rounded-pill",
-              engine.playing
-                ? "animate-[live-pulse_1.6s_ease-in-out_infinite] bg-ok"
-                : "bg-caution",
-            )}
-          />
-          <span className="text-fg">Demo engine</span>
-          <span>{engine.playing ? "running" : "paused"}</span>
-        </Item>
-      </Tooltip>
-      <Item>{fw?.label} firmware</Item>
+      <EngineItem />
+      <Item>
+        {fw?.label} firmware
+        {engine.status.build && <span className="num text-fg-3">{engine.status.build}</span>}
+      </Item>
       <IsrLoad />
       <Tooltip content="Connect a wheel in the Flash workspace (M6)" side="top">
         <Item className="cursor-default">

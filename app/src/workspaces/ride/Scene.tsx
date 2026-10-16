@@ -4,22 +4,53 @@ import { useReducedMotion } from "motion/react";
 import { type ComponentRef, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { accents, surface } from "../../design/tokens.ts";
-import { engine } from "../../sim/engine.ts";
+import { engine } from "../../engine/index.ts";
 import type { CameraMode } from "../../state/ui.ts";
 import { useUi } from "../../state/ui.ts";
 import { setLowPower } from "../../lib/power.ts";
 import { EucModel } from "./EucModel.tsx";
+import { LiveBodies } from "./LiveBodies.tsx";
+import { wheelPosition } from "./poses.ts";
 import { LOW_FPS, type Quality, chooseQuality, qualityOverride, rendererName } from "./quality.ts";
 
 const TARGET = new THREE.Vector3(0.02, 0.34, 0);
+/** Where the camera looks: the axle area of the wheel, wherever the wheel has gone. */
+const focus = new THREE.Vector3();
+const wheelAt = new THREE.Vector3();
+function focusPoint(out: THREE.Vector3): THREE.Vector3 {
+  if (engine.kind === "live" && wheelPosition(wheelAt)) {
+    // With a rider on board, frame the whole person: look at the hips, not the axle.
+    const y = hasRider() ? 0.85 : TARGET.y;
+    return out.set(wheelAt.x + TARGET.x, y, wheelAt.z + TARGET.z);
+  }
+  return out.copy(TARGET);
+}
+
+function hasRider(): boolean {
+  return engine.bodies.some((b) => b.role === "rider");
+}
+
+/** Keeps its children under the live wheel (floor light, contact shadow); still for the demo. */
+function FollowWheel({ children }: { children: React.ReactNode }) {
+  const group = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (group.current && engine.kind === "live" && wheelPosition(wheelAt)) {
+      group.current.position.set(wheelAt.x, 0, wheelAt.z);
+    }
+  });
+  return <group ref={group}>{children}</group>;
+}
 const FOLLOW_OFFSET = new THREE.Vector3(1.05, 0.52, 1.95);
 const sway = new THREE.Vector3();
+const shift = new THREE.Vector3();
 
 /** Ground grid that scrolls under the wheel, so speed reads even though the wheel stays put. */
 function Floor() {
   const grid = useRef<THREE.Mesh>(null);
   useFrame(() => {
-    if (grid.current) grid.current.position.x = -(engine.latest.distance % 1);
+    // The demo wheel stays put and the floor scrolls; the live wheel moves over a still floor.
+    if (grid.current && engine.kind === "demo")
+      grid.current.position.x = -(engine.latest.distance % 1);
   });
   return (
     <>
@@ -40,7 +71,9 @@ function Floor() {
         <planeGeometry args={[40, 40]} />
         <shadowMaterial transparent opacity={0.35} />
       </mesh>
-      <Spot />
+      <FollowWheel>
+        <Spot />
+      </FollowWheel>
     </>
   );
 }
@@ -82,32 +115,58 @@ function CameraRig({ mode, still }: { mode: CameraMode; still: boolean }) {
   const reduce = useReducedMotion();
   const desired = useRef(new THREE.Vector3());
   const first = useRef(true);
+  /** Whether the orbit distance was set for a rider (null: not set yet). */
+  const orbitFramed = useRef<boolean | null>(null);
 
   useFrame((state, dt) => {
-    if (mode !== "follow") return;
+    focusPoint(focus);
+    if (mode === "orbit") {
+      const c = controls.current;
+      if (!c) return;
+      const rider = hasRider();
+      if (orbitFramed.current !== rider) {
+        // A rider arrived (or left): step back to the follow view's distance for that framing,
+        // keeping the viewing direction the user chose.
+        const distance = FOLLOW_OFFSET.distanceTo(TARGET) * (rider ? 2 : 1);
+        shift.subVectors(camera.position, c.target).setLength(distance);
+        c.target.copy(focus);
+        camera.position.copy(focus).add(shift);
+        orbitFramed.current = rider;
+        return;
+      }
+      // Orbit around the wheel wherever it rides: carry the camera along with the target.
+      shift.subVectors(focus, c.target);
+      c.target.add(shift);
+      camera.position.add(shift);
+      return;
+    }
+    orbitFramed.current = null;
     const l = engine.latest;
     const t = state.clock.elapsedTime;
-    const pull = Math.min(l.speed / 30, 1) * 0.5; // back off a little at speed
+    const speed = Number.isFinite(l.speed) ? Math.abs(l.speed) : 0;
+    const pull = Math.min(speed / 30, 1) * 0.5; // back off a little at speed
     desired.current
       .copy(FOLLOW_OFFSET)
-      .multiplyScalar(1 + pull)
+      .multiplyScalar((1 + pull) * (hasRider() ? 2 : 1))
       .add(
         still
           ? sway.set(0, 0, 0)
           : sway.set(Math.sin(t * 0.17) * 0.06, Math.sin(t * 0.23) * 0.025, 0),
-      );
+      )
+      .add(focus)
+      .sub(TARGET);
     if (reduce || still || first.current) {
       camera.position.copy(desired.current);
       first.current = false;
     } else {
       camera.position.lerp(desired.current, 1 - Math.exp(-dt * 2.2));
     }
-    camera.lookAt(TARGET);
+    camera.lookAt(focus);
   });
 
   useEffect(() => {
     if (mode === "orbit" && controls.current) {
-      controls.current.target.copy(TARGET);
+      controls.current.target.copy(focusPoint(focus));
       controls.current.update();
     }
   }, [mode]);
@@ -119,26 +178,38 @@ function CameraRig({ mode, still }: { mode: CameraMode; still: boolean }) {
       enableDamping={!reduce}
       dampingFactor={0.08}
       minDistance={1.2}
-      maxDistance={7}
+      maxDistance={12}
       maxPolarAngle={Math.PI / 2 - 0.05}
       target={TARGET}
     />
   ) : null;
 }
 
+const KEY_OFFSET = new THREE.Vector3(2.5, 4, 2.5);
+
 function Lights() {
+  // The key light (and its shadow) travels with the live wheel.
+  const key = useRef<THREE.DirectionalLight>(null);
+  useFrame(() => {
+    const light = key.current;
+    if (!light || engine.kind !== "live" || !wheelPosition(wheelAt)) return;
+    light.position.copy(wheelAt).add(KEY_OFFSET);
+    light.target.position.copy(wheelAt);
+    light.target.updateMatrixWorld();
+  });
   return (
     <>
       <hemisphereLight args={["#F2F2F7", "#000000", 0.35]} />
       <directionalLight
-        position={[2.5, 4, 2.5]}
+        ref={key}
+        position={KEY_OFFSET.toArray()}
         intensity={2.8}
         castShadow
         shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-1.5}
-        shadow-camera-right={1.5}
-        shadow-camera-top={1.5}
-        shadow-camera-bottom={-1.5}
+        shadow-camera-left={-2}
+        shadow-camera-right={2}
+        shadow-camera-top={2.2}
+        shadow-camera-bottom={-2}
         shadow-bias={-0.0004}
       />
       {/* Warm rim from behind separates the dark shell from the black background. */}
@@ -226,18 +297,24 @@ export function Scene({ active, onReady }: SceneProps) {
       <Suspense fallback={null}>
         <Lights />
         <Floor />
-        <EucModel accent={accents[accent].accent} />
-        <ContactShadows
-          // The key: a new component when quality changes, so `frames` applies from the start.
-          key={quality}
-          position={[0, 0.001, 0]}
-          opacity={0.75}
-          scale={3}
-          blur={2.2}
-          far={0.9}
-          resolution={high ? 512 : 256}
-          frames={high ? Infinity : 1}
-        />
+        {engine.kind === "live" ? (
+          <LiveBodies accent={accents[accent].accent} />
+        ) : (
+          <EucModel accent={accents[accent].accent} />
+        )}
+        <FollowWheel>
+          <ContactShadows
+            // The key: a new component when quality changes, so `frames` applies from the start.
+            key={quality}
+            position={[0, 0.001, 0]}
+            opacity={0.75}
+            scale={3}
+            blur={2.2}
+            far={0.9}
+            resolution={high ? 512 : 256}
+            frames={high ? Infinity : 1}
+          />
+        </FollowWheel>
       </Suspense>
       <CameraRig mode={camera} still={!high} />
       {active && !high && <Ticker fps={LOW_FPS} />}

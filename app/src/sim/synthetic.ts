@@ -1,41 +1,41 @@
-// Demo engine: smooth, plausible EUC signals so the studio has something honest to show before
-// the Rust engine is wired in (M1/M2). It is deterministic for a given seed, advances in fixed
-// 60 Hz sim steps, and writes into ring buffers that scopes read once per frame. React never
-// sees individual samples: components read `latest` from a rAF loop or poll it at <= 8 Hz.
+// Demo engine: smooth, plausible EUC signals so the studio has something honest to show without
+// the Rust engine (browser builds, tests, screenshots). It is deterministic for a given seed,
+// advances in fixed 60 Hz sim steps, and writes into ring buffers that scopes read once per
+// frame. React never sees individual samples: components read `latest` from a rAF loop or poll
+// it at <= 8 Hz.
 
+import type {
+  ChannelId,
+  EngineClient,
+  EngineStatus,
+  EventKind,
+  FirmwareId,
+  FirmwareInfo,
+  Latest,
+  PhoneCommand,
+  PhoneFrame,
+  ScenarioInfo,
+  SimEvent,
+} from "../engine/types.ts";
+import { CHANNEL_IDS, HISTORY_SECONDS, SAMPLE_RATE } from "../engine/types.ts";
+import type { BodyInfo } from "../engine/telemetry.gen.ts";
 import { RingBuffer } from "../lib/ring.ts";
 
-export const SAMPLE_RATE = 60;
+export {
+  CHANNELS,
+  CHANNEL_IDS,
+  HISTORY_SECONDS,
+  SAMPLE_RATE,
+  type ChannelId,
+  type EventKind,
+  type FirmwareId,
+  type Latest,
+  type SimEvent,
+} from "../engine/types.ts";
+
 const DT = 1 / SAMPLE_RATE;
-export const HISTORY_SECONDS = 30;
 
-export type ChannelId =
-  "speed" | "pwm" | "current" | "voltage" | "pitch" | "temp" | "battery" | "isr";
-
-export interface ChannelInfo {
-  label: string;
-  unit: string;
-  decimals: number;
-  /** Fixed scale for scopes and gauges. */
-  min: number;
-  max: number;
-}
-
-export const CHANNELS: Record<ChannelId, ChannelInfo> = {
-  speed: { label: "Speed", unit: "km/h", decimals: 1, min: 0, max: 40 },
-  pwm: { label: "PWM", unit: "%", decimals: 0, min: 0, max: 100 },
-  current: { label: "Phase current", unit: "A", decimals: 1, min: -40, max: 40 },
-  voltage: { label: "Battery", unit: "V", decimals: 1, min: 100, max: 135 },
-  pitch: { label: "Pitch", unit: "°", decimals: 1, min: -10, max: 10 },
-  temp: { label: "Motor temp", unit: "°C", decimals: 1, min: 20, max: 90 },
-  battery: { label: "Charge", unit: "%", decimals: 0, min: 0, max: 100 },
-  isr: { label: "ISR load", unit: "%", decimals: 0, min: 0, max: 100 },
-};
-
-export const CHANNEL_IDS = Object.keys(CHANNELS) as ChannelId[];
-
-export type FirmwareId = "stock" | "ours-compat" | "ours-clean";
-export const FIRMWARES: { id: FirmwareId; label: string; detail: string }[] = [
+export const FIRMWARES: FirmwareInfo[] = [
   { id: "stock", label: "Stock", detail: "Begode Extreme, official image" },
   { id: "ours-compat", label: "Ours-compat", detail: "Our C rewrite, stock behaviour" },
   { id: "ours-clean", label: "Ours-clean", detail: "Our C rewrite, quirks fixed" },
@@ -67,10 +67,10 @@ export const SCENARIOS: Scenario[] = [
     detail: "Accelerate, cruise, brake, rest. Loops every 26 s.",
     segments: [
       { until: 2, speed: 0 },
-      { until: 9, speed: 20, event: { kind: "ride", title: "Rider leans forward" } },
-      { until: 16, speed: 20, event: { kind: "ride", title: "Cruise at 20 km/h" } },
-      { until: 21, speed: 0, event: { kind: "ride", title: "Rider brakes" } },
-      { until: 26, speed: 0, event: { kind: "ride", title: "Stopped" } },
+      { until: 9, speed: 20, event: { kind: "scenario", title: "Rider leans forward" } },
+      { until: 16, speed: 20, event: { kind: "scenario", title: "Cruise at 20 km/h" } },
+      { until: 21, speed: 0, event: { kind: "scenario", title: "Rider brakes" } },
+      { until: 26, speed: 0, event: { kind: "scenario", title: "Stopped" } },
     ],
   },
   {
@@ -85,11 +85,16 @@ export const SCENARIOS: Scenario[] = [
     detail: "Steady climb at 16 km/h, high current, battery sag.",
     segments: [
       { until: 3, speed: 0 },
-      { until: 9, speed: 16, event: { kind: "ride", title: "Rider leans forward" } },
-      { until: 11, speed: 16, grade: 0.12, event: { kind: "ride", title: "Grade rises to 12 %" } },
+      { until: 9, speed: 16, event: { kind: "scenario", title: "Rider leans forward" } },
+      {
+        until: 11,
+        speed: 16,
+        grade: 0.12,
+        event: { kind: "scenario", title: "Grade rises to 12 %" },
+      },
       { until: 24, speed: 16, grade: 0.12 },
-      { until: 27, speed: 0, grade: 0, event: { kind: "ride", title: "Rider brakes" } },
-      { until: 30, speed: 0, event: { kind: "ride", title: "Stopped" } },
+      { until: 27, speed: 0, grade: 0, event: { kind: "scenario", title: "Rider brakes" } },
+      { until: 30, speed: 0, event: { kind: "scenario", title: "Stopped" } },
     ],
   },
   {
@@ -98,40 +103,13 @@ export const SCENARIOS: Scenario[] = [
     detail: "Accelerate to 30 km/h, then stop as hard as the rider can.",
     segments: [
       { until: 2, speed: 0 },
-      { until: 10, speed: 30, event: { kind: "ride", title: "Rider leans forward" } },
+      { until: 10, speed: 30, event: { kind: "scenario", title: "Rider leans forward" } },
       { until: 12, speed: 30 },
-      { until: 14.5, speed: 0, event: { kind: "ride", title: "Hard brake" } },
-      { until: 22, speed: 0, event: { kind: "ride", title: "Stopped" } },
+      { until: 14.5, speed: 0, event: { kind: "scenario", title: "Hard brake" } },
+      { until: 22, speed: 0, event: { kind: "scenario", title: "Stopped" } },
     ],
   },
 ];
-
-export type EventKind = "firmware" | "ride" | "command" | "alarm";
-
-export interface SimEvent {
-  id: number;
-  /** Sim time in seconds. */
-  t: number;
-  kind: EventKind;
-  title: string;
-}
-
-export interface Latest {
-  t: number;
-  speed: number;
-  pwm: number;
-  current: number;
-  voltage: number;
-  pitch: number;
-  roll: number;
-  temp: number;
-  battery: number;
-  isr: number;
-  grade: number;
-  /** Distance travelled (m) and wheel angle (rad), for the 3D view. */
-  distance: number;
-  wheelAngle: number;
-}
 
 /** Deterministic PRNG (mulberry32). */
 export function prng(seed: number): () => number {
@@ -175,7 +153,20 @@ const PACK_AH = 17.8;
 const PACK_R = 0.18; // ohm
 const ABS_SPEED_MAX = 68; // km/h at 100 % PWM on a full pack, roughly
 
-export class DemoEngine {
+export class DemoEngine implements EngineClient {
+  readonly kind = "demo" as const;
+  readonly bodies: BodyInfo[] = [];
+  readonly frames: PhoneFrame[] = [];
+  readonly phoneCommands: PhoneCommand[] = [];
+  readonly outputs = null;
+  readonly display = null;
+  get status(): EngineStatus {
+    return {
+      state: this.playing ? "running" : "paused",
+      message: "Synthetic signals",
+      backend: "demo",
+    };
+  }
   readonly time = new RingBuffer(SAMPLE_RATE * HISTORY_SECONDS);
   readonly channels = Object.fromEntries(
     CHANNEL_IDS.map((id) => [id, new RingBuffer(SAMPLE_RATE * HISTORY_SECONDS)]),
@@ -194,6 +185,7 @@ export class DemoEngine {
     grade: 0,
     distance: 0,
     wheelAngle: 0,
+    poses: null,
   };
   events: SimEvent[] = [];
 
@@ -230,6 +222,11 @@ export class DemoEngine {
 
   getVersion = (): number => this.version;
 
+  /** The demo has no phone frames or board outputs. */
+  subscribeData = (): (() => void) => () => {};
+
+  getDataVersion = (): number => 0;
+
   private emit(): void {
     this.version++;
     for (const fn of this.listeners) fn();
@@ -261,7 +258,29 @@ export class DemoEngine {
     this.emit();
   }
 
-  setScenario(id: ScenarioId): void {
+  get scenarioId(): string {
+    return this.scenario.id;
+  }
+
+  firmwares(): FirmwareInfo[] {
+    return FIRMWARES;
+  }
+
+  scenarios(): ScenarioInfo[] {
+    return SCENARIOS.map(({ id, label, detail }) => ({ id, label, detail }));
+  }
+
+  /** One fixed 1/60 s step (used while paused). */
+  step(): void {
+    this.stepOnce();
+    this.emit();
+  }
+
+  sendCommand(): Promise<string> {
+    return Promise.reject(new Error("The demo engine has no firmware to talk to"));
+  }
+
+  setScenario(id: string): void {
     const s = SCENARIOS.find((x) => x.id === id);
     if (!s || s === this.scenario) return;
     this.scenario = s;
@@ -285,7 +304,7 @@ export class DemoEngine {
     this.debt += Math.min(wallSeconds, 0.25) * this.targetRtf;
     let steps = 0;
     while (this.debt >= DT) {
-      this.step();
+      this.stepOnce();
       this.debt -= DT;
       steps++;
     }
@@ -311,7 +330,7 @@ export class DemoEngine {
   /** Runs `seconds` of sim time immediately (fills scopes for screenshots and tests). */
   preroll(seconds: number): void {
     const n = Math.round(seconds * SAMPLE_RATE);
-    for (let i = 0; i < n; i++) this.step();
+    for (let i = 0; i < n; i++) this.stepOnce();
     this.emit();
   }
 
@@ -362,7 +381,7 @@ export class DemoEngine {
     return v;
   }
 
-  private step(): void {
+  private stepOnce(): void {
     const L = this.latest;
     const t = L.t + DT;
     const s = this.scenario;

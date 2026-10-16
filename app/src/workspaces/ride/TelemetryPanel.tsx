@@ -1,8 +1,17 @@
 import { useState } from "react";
+import { type RightTab, useUi } from "../../state/ui.ts";
+import { Tabs } from "../../ui/Tabs.tsx";
+import { PhoneBody } from "./PhonePanel.tsx";
 import { series } from "../../design/tokens.ts";
-import { engine, useLive } from "../../sim/engine.ts";
-import { CHANNELS, type ChannelId, SAMPLE_RATE } from "../../sim/synthetic.ts";
-import { Activity } from "../../ui/icons.tsx";
+import {
+  CHANNELS,
+  type ChannelId,
+  SAMPLE_RATE,
+  engine,
+  useEngineVersion,
+  useLive,
+} from "../../engine/index.ts";
+import { Activity, Smartphone } from "../../ui/icons.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { RollingNumber } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -32,6 +41,19 @@ function LiveValue({ id }: { id: ChannelId }) {
   );
 }
 
+/** Shown over a lane whose signal the running engine does not model yet. */
+function NotModelled({ id }: { id: ChannelId }) {
+  const missing = useLive((l) => (Number.isNaN(l[id as keyof typeof l] as number) ? 1 : 0), 2, 0);
+  if (!missing) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
+      <span className="rounded-pill border border-hairline bg-raised px-8 text-11 font-semibold text-fg-2-safe">
+        Not modelled in this run
+      </span>
+    </div>
+  );
+}
+
 function Lane({
   id,
   color,
@@ -53,7 +75,8 @@ function Lane({
           <LiveValue id={id} />
         </span>
       </div>
-      <div className="min-h-0 flex-1 pr-8 pl-4">
+      <div className="relative min-h-0 flex-1 pr-8 pl-4">
+        <NotModelled id={id} />
         <Scope
           time={engine.time}
           values={engine.channels[id]}
@@ -71,29 +94,9 @@ function Lane({
 
 type WindowSecs = "5" | "10" | "30";
 
-export function TelemetryPanel() {
-  const [win, setWin] = useState<WindowSecs>("10");
-  const seconds = Number(win);
+function TelemetryBody({ seconds }: { seconds: number }) {
   return (
-    <Panel
-      title="Telemetry"
-      icon={<Activity />}
-      className="min-w-[300px]"
-      bodyClassName="flex flex-col overflow-hidden"
-      actions={
-        <SegmentedControl<WindowSecs>
-          aria-label="Time window"
-          size="sm"
-          value={win}
-          onValueChange={setWin}
-          options={[
-            { value: "5", label: "5 s" },
-            { value: "10", label: "10 s" },
-            { value: "30", label: "30 s" },
-          ]}
-        />
-      }
-    >
+    <>
       <div className="flex min-h-[300px] flex-1 flex-col gap-8 py-8">
         {LANES.map((l, i) => (
           <Lane
@@ -131,6 +134,54 @@ export function TelemetryPanel() {
           ))}
         </ul>
       </div>
+    </>
+  );
+}
+
+/** The Ride workspace's right dock: telemetry scopes, or the virtual phone. */
+export function RightDock() {
+  useEngineVersion();
+  const tab = useUi((s) => s.rightTab);
+  const setTab = useUi((s) => s.setRightTab);
+  const [win, setWin] = useState<WindowSecs>("10");
+  return (
+    <Panel
+      title={
+        <Tabs<RightTab>
+          aria-label="Right dock"
+          value={tab}
+          onValueChange={setTab}
+          tabs={[
+            { value: "telemetry", label: "Telemetry" },
+            {
+              value: "phone",
+              label: "Phone",
+              ...(engine.frames.length > 0 ? { count: engine.frames.length } : {}),
+            },
+          ]}
+          className="-mb-px h-(--dock-header) [&>div]:h-full"
+        />
+      }
+      icon={tab === "telemetry" ? <Activity /> : <Smartphone />}
+      className="min-w-[300px]"
+      bodyClassName="flex flex-col overflow-hidden"
+      actions={
+        tab === "telemetry" ? (
+          <SegmentedControl<WindowSecs>
+            aria-label="Time window"
+            size="sm"
+            value={win}
+            onValueChange={setWin}
+            options={[
+              { value: "5", label: "5 s" },
+              { value: "10", label: "10 s" },
+              { value: "30", label: "30 s" },
+            ]}
+          />
+        ) : null
+      }
+    >
+      {tab === "telemetry" ? <TelemetryBody seconds={Number(win)} /> : <PhoneBody />}
     </Panel>
   );
 }
