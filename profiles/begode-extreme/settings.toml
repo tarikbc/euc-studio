@@ -1,0 +1,37 @@
+# Begode Extreme: rider settings presets, seeded into the stock firmware's settings journal before
+# power-on. Read by crates/euc-sim (`euc sim run|serve --settings <preset>`, scenario `settings`).
+#
+# The stock firmware keeps its settings and odometer in an 8-halfword record, journalled in the
+# flash page below and mirrored in backup registers DR3..DR10 (cleared at power-on). At boot it
+# loads the last record before the first erased slot, or a blank default record when the page is
+# empty. A preset becomes that record in slot 0. The layout is the one in
+# firmware/core/include/euc/settings/settings.h; the commands that change each field are in
+# docs/protocol/begode.md.
+#
+# Fields not given keep the blank record's value: medium pedals, turn compensation 3, volume 6,
+# everything else 0 (which the firmware reads as tiltback 20 km/h and PWM alarm 80 %).
+# Light and LED modes are not in the record: the wheel always starts with them off.
+
+schema = 1
+journal = 0x0800_F000
+
+[preset.neutral]
+description = "Factory defaults with level pedals: medium pedals, tiltback 20 km/h, voltage-mode drive, pedal trim 4."
+pedal_trim = 4
+
+[preset.tarik-2026-10-15]
+description = "The maintainer's wheel as captured on 2026-10-15 (tests/data/begode-extreme/idle-2026-10-15.hex)."
+# Frame 04: odometer, modes 0x4800, tiltback 69, `W M` 1. Frame 00: settings echo 0x14A9, volume 9.
+# Frame 01: PWM alarm 80 %. Frame 07: `W C` 0, `W X` 0.
+odometer_units = 1_468_670
+pedal_mode = "hard"
+speed_alarm_mode = 2
+tiltback_kmh = 69
+pedal_trim = 5
+wm_value = 1
+roll_cutoff_mode = 0
+turn_compensation = 5
+pwm_tiltback = true
+drive_mode = "current"
+pwm_alarm_percent = 80
+beeper_volume = 9

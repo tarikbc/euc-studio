@@ -1,0 +1,37 @@
+# The battery is nearly empty: 98.5 V at rest (1.3 % charge), below the stock firmware's 99.2 V
+# battery tiltback threshold. The firmware raises its low-voltage alert (bit 0x08) at boot and,
+# once the rider moves, adds a growing nose-up offset to the balance target (about 2.4°/s at
+# first, settling towards 48°). The rider rides at 15 km/h; the pedals tip back, as they should to
+# make the rider stop.
+schema = 1
+name = "low-battery-tiltback"
+description = "Ride at 15 km/h on an almost empty battery: low-voltage alert, then tiltback."
+wheel = "begode-extreme"
+seconds = 20.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [10, 15]]
+# Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
+settings = "neutral"
+
+[[timeline]]
+at_s = 0.0
+fault = "battery_soc"
+soc = 0.013
+
+[[expect]]
+check = "firmware_bits"
+var = "alerts"
+bits = 0x08
+by_s = 3.0
+
+[[expect]]
+check = "pitch_reaches"
+deg = 8.0
+from_s = 10.0
+by_s = 15.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::battery::{Battery, BatteryError, BatteryParams, PackReading};
-use crate::fault::{Faults, PlantFault};
+use crate::fault::{Faults, PlantFault, SocJump};
 use crate::halls::HallParams;
 use crate::inverter::{Circuit, InverterParams, LegDrive, high_side_share};
 use crate::motor::{Dq, MotorParams, Pmsm, inverse_park, park};
@@ -345,8 +345,16 @@ impl ElectricalPlant {
     /// Brings the fault effects up to the plant's time. True if they changed.
     fn refresh_faults(&mut self) -> bool {
         let Some(jumps) = self.faults.refresh(self.time) else { return false };
-        for (pack, delta) in jumps {
-            self.battery.shift_soc(pack, delta);
+        for jump in jumps {
+            match jump {
+                SocJump::Shift { pack, delta } => self.battery.shift_soc(pack, delta),
+                SocJump::Set { soc } => {
+                    for pack in 0..self.battery.packs().len() {
+                        let delta = soc - self.battery.packs()[pack].soc;
+                        self.battery.shift_soc(pack, delta);
+                    }
+                }
+            }
         }
         self.battery.set_conditions(&self.faults.effects().packs);
         true
@@ -667,6 +675,13 @@ pub(crate) mod tests {
         plant.advance(4 * MS);
         let soc = plant.snapshot().soc;
         assert!((soc - 0.833).abs() < 0.001, "the jump happens once: mean {soc}");
+        plant.add_fault(10 * MS, None, PlantFault::BatterySoc { soc: 0.013 }).unwrap();
+        plant.advance(11 * MS);
+        assert!(
+            (plant.snapshot().soc - 0.013).abs() < 1e-4 && plant.bus_v() < 99.0,
+            "nearly empty: {} V",
+            plant.bus_v()
+        );
     }
 
     #[test]

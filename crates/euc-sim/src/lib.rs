@@ -20,6 +20,7 @@ pub mod recording;
 mod report;
 pub mod scenario;
 mod session;
+pub mod settings;
 mod system;
 mod wheel;
 

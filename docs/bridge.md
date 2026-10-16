@@ -13,7 +13,26 @@ cargo run --release -p euc-cli --features unicorn -- sim bridge-test          # 
 
 The simulated wheel is the full engine: the stock firmware on the emulated MCU, the motor and battery,
 and the body with a rider who stands still (or rides a `--scenario`). The stand lets the wheel go at
-2.5 s (`--release-s`).
+2.5 s (`--release-s`). The wheel boots with the `neutral` settings preset unless `--settings` or the
+scenario names another one (see [Settings presets](#settings-presets)).
+
+## Settings presets
+
+A real wheel never boots with blank settings: its rider set them in the app once and the wheel saved
+them. Before power-on the simulator writes a preset into the firmware's settings journal (journal slot 0
+of the flash page at `0x0800F000`, the 8-halfword record of
+`firmware/core/include/euc/settings/settings.h`), so the firmware loads it as if the wheel had saved it.
+Presets live in `profiles/<wheel>/settings.toml`; `--settings <preset>` picks one for `euc sim serve`
+and `euc sim run`, and a scenario may name one with `settings = "<preset>"`.
+
+| Preset | Settings |
+|---|---|
+| `neutral` (default for `serve`) | The firmware's factory defaults with level pedals: medium pedals, pedal trim 4, tiltback 20 km/h, PWM alarm 80 %, speed alarms all on, roll cut-off mode 0, turn compensation 3, volume 6, voltage-mode drive, km, odometer 0. |
+| `tarik-2026-10-15` | The maintainer's wheel, decoded from the capture `tests/data/begode-extreme/idle-2026-10-15.hex`: hard pedals, pedal trim 5, tiltback 69 km/h, speed-alarm mode 2, roll cut-off mode 0, PWM tiltback on, PWM alarm 80 %, turn compensation 5, `W M` 1, volume 9, current-mode drive (12 kHz), km, odometer 1,468,670. The simulated wheel then sends the same settings fields as the capture (frame 00 echo `14A9`, frame 04 modes `4800`). |
+| `blank` | Nothing seeded: the empty journal of a factory-fresh controller (pedal trim 0, so the pedals sit 4.8° nose down). `euc sim run` without a scenario uses it, as the reference emulator does. |
+
+Light and LED modes are not part of the saved record; every wheel starts with the lights off. The
+odometer is in the firmware's units (118 hall steps, about 1 m), which frame 04 reports as metres.
 
 ## Connection
 

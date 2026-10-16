@@ -17,6 +17,8 @@ struct Watched {
     name: String,
     addr: u32,
     size: u32,
+    /// The stock map's `kind`: `u8`, `s16`, `f32`...
+    kind: String,
 }
 
 /// A simulation with a live plant. See the module docs.
@@ -26,6 +28,8 @@ pub struct Session {
     sample_cycles: u64,
     bodies: Vec<BodyInfo>,
     cutoff_vars: Vec<Watched>,
+    /// Every RAM variable of the stock map, for checks that read one.
+    ram: Vec<Watched>,
     cutoff: Option<String>,
     fallen: bool,
     seen_events: usize,
@@ -42,21 +46,23 @@ impl Session {
     pub fn new(machine: Machine, stockmap: Option<&StockMap>, sample_hz: f64) -> Self {
         let hclk = machine.hclk();
         let bodies = machine.plant().live_part().expect("a session needs a live plant").physics().bodies();
+        let watched = |v: &crate::config::RamVar| Watched {
+            name: v.name.clone(),
+            addr: v.addr,
+            size: v.size,
+            kind: v.kind.clone(),
+        };
         let cutoff_vars = stockmap
-            .map(|map| {
-                map.ram
-                    .iter()
-                    .filter(|v| v.role.as_deref() == Some(ROLE_CUTOFF))
-                    .map(|v| Watched { name: v.name.clone(), addr: v.addr, size: v.size })
-                    .collect()
-            })
+            .map(|map| map.ram.iter().filter(|v| v.role.as_deref() == Some(ROLE_CUTOFF)).map(watched).collect())
             .unwrap_or_default();
+        let ram = stockmap.map(|map| map.ram.iter().map(watched).collect()).unwrap_or_default();
         Self {
             machine,
             hclk,
             sample_cycles: ((hclk as f64 / sample_hz).round() as u64).max(1),
             bodies,
             cutoff_vars,
+            ram,
             cutoff: None,
             fallen: false,
             seen_events: 0,
@@ -134,6 +140,34 @@ impl Session {
     /// The firmware has a cutoff flag set: its name.
     pub fn cutoff(&self) -> Option<&str> {
         self.cutoff.as_deref()
+    }
+
+    /// Every cutoff flag the firmware has set now, by stock-map name.
+    pub fn cutoff_flags(&self) -> Vec<String> {
+        let set =
+            |v: &&Watched| self.machine.memory(v.addr, v.size as usize).is_some_and(|b| b.iter().any(|&x| x != 0));
+        self.cutoff_vars.iter().filter(set).map(|v| v.name.clone()).collect()
+    }
+
+    /// The stock-map RAM variable `name` now, little-endian, as an unsigned number of up to
+    /// 8 bytes; `None` without a stock map or for an unknown name.
+    pub fn firmware_var(&self, name: &str) -> Option<u64> {
+        let var = self.ram.iter().find(|v| v.name == name)?;
+        let bytes = self.machine.memory(var.addr, var.size.min(8) as usize)?;
+        Some(bytes.iter().rev().fold(0, |value, &b| value << 8 | u64::from(b)))
+    }
+
+    /// The stock-map RAM variable `name` now as a number, read as its `kind` says: `s8`, `s16`,
+    /// `s32` signed, `f32` floating point, anything else unsigned.
+    pub fn firmware_value(&self, name: &str) -> Option<f64> {
+        let raw = self.firmware_var(name)?;
+        let var = self.ram.iter().find(|v| v.name == name)?;
+        let bits = 8 * var.size.min(8);
+        Some(match var.kind.as_str() {
+            "f32" => f64::from(f32::from_bits(raw as u32)),
+            "s8" | "s16" | "s32" => ((raw << (64 - bits)) as i64 >> (64 - bits)) as f64,
+            _ => raw as f64,
+        })
     }
 
     /// Runs one sample period and returns the snapshot at its end.

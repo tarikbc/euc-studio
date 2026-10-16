@@ -1,0 +1,52 @@
+# The hall sensor connector comes off at 20 km/h. All three lines float high (code 7, invalid),
+# and the stock firmware latches its hall fault after fPWM/8 control calls (about 62 ms): it turns
+# the inverter off, sets alert bit 0x40, and the motor free-wheels until a power cycle. With nothing
+# holding it up, the wheel nose-dives. (One lost line is different: code 7 shows only 1/6 of each
+# electrical turn, the invalid count keeps resetting, and the stock firmware rides on.)
+schema = 1
+name = "hall-loss-while-riding"
+description = "Hall connector off at 20 km/h: the stock firmware cuts the motor within 0.2 s and the wheel nose-dives."
+wheel = "begode-extreme"
+seconds = 17.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [11, 20]]
+# Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
+settings = "neutral"
+
+[[timeline]]
+at_s = 15.0
+fault = "hall_lost"
+line = "a"
+
+[[timeline]]
+at_s = 15.0
+fault = "hall_lost"
+line = "b"
+
+[[timeline]]
+at_s = 15.0
+fault = "hall_lost"
+line = "c"
+
+[[expect]]
+check = "speed_reached"
+kmh = 19.0
+
+[[expect]]
+check = "cutoff"
+from_s = 15.0
+within_s = 0.2
+flag = "hall_fault"
+
+[[expect]]
+check = "firmware_bits"
+var = "alerts"
+bits = 0x40
+from_s = 15.0
+by_s = 15.2
+
+[[expect]]
+check = "pitch_reaches"
+deg = -30.0
+from_s = 15.0
+by_s = 16.0

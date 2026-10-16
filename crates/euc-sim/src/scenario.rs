@@ -30,7 +30,7 @@
 use euc_devices::{DeviceFault, Mpu6500, SmartBms};
 use euc_physics::{Assist, Intent, Rider};
 use euc_plant::fault::PlantFault;
-use euc_telemetry::{EventKind, Snapshot};
+use euc_telemetry::{CHANNELS, EventKind, Signals, Snapshot};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -60,6 +60,9 @@ pub struct Scenario {
     /// Aids for the rigid rider.
     #[serde(default)]
     pub assist: Assist,
+    /// Settings preset the wheel boots with (`profiles/<wheel>/settings.toml`); none: a blank
+    /// settings journal.
+    pub settings: Option<String>,
     /// BLE commands to send.
     #[serde(default)]
     pub inject: Vec<Inject>,
@@ -187,6 +190,102 @@ pub enum Expect {
         /// Largest allowed |speed| at the end, km/h.
         max_abs_kmh: f64,
     },
+    /// The firmware cuts the motor: its first cut at or after `from_s` comes within `within_s`,
+    /// with the stock-map cutoff flag `flag` among those set, if given (a fault the firmware
+    /// must catch).
+    Cutoff {
+        /// From this time on, seconds.
+        from_s: f64,
+        /// Seconds the firmware may take.
+        within_s: f64,
+        /// The flag that must be set at the cut, by stock-map name (`hall_fault`).
+        flag: Option<String>,
+    },
+    /// The shell's pitch reaches `deg` (nose up positive): at least `deg` if it is positive, at
+    /// most `deg` if negative (a tiltback, or a nose dive).
+    PitchReaches {
+        /// Degrees, nose up positive.
+        deg: f64,
+        /// From this time on, seconds (default: the release).
+        from_s: Option<f64>,
+        /// By this time, seconds (default: the end).
+        by_s: Option<f64>,
+    },
+    /// A telemetry signal stays steady: its standard deviation over the window is at most `max`
+    /// (torque or current ripple, a pitch disturbance).
+    Ripple {
+        /// Telemetry key (`torque_nm`, `iq_a`, `pitch_deg`...).
+        signal: String,
+        /// Largest allowed standard deviation, in the signal's unit.
+        max: f64,
+        /// From this time on, seconds (default: the release).
+        from_s: Option<f64>,
+        /// Until this time, seconds (default: the end).
+        by_s: Option<f64>,
+    },
+    /// A firmware estimate follows the truth: a stock-map variable times `scale` stays within an
+    /// RMS error of `max_rms` of a telemetry signal (the firmware's speed against the true speed).
+    FirmwareTracks {
+        /// Stock-map RAM variable name (`speed_cms`).
+        var: String,
+        /// Factor from the variable's unit to the signal's (`0.036` for cm/s to km/h).
+        scale: f64,
+        /// Telemetry key of the truth (`speed_kmh`).
+        signal: String,
+        /// Largest allowed RMS error, in the signal's unit.
+        max_rms: f64,
+        /// From this time on, seconds (default: the release).
+        from_s: Option<f64>,
+        /// Until this time, seconds (default: the end).
+        by_s: Option<f64>,
+    },
+    /// A firmware variable of the stock map has every bit of `bits` set (an alarm flag).
+    FirmwareBits {
+        /// Stock-map RAM variable name (`alerts`).
+        var: String,
+        /// Bits that must all be set.
+        bits: u64,
+        /// From this time on, seconds (default: power-on).
+        from_s: Option<f64>,
+        /// By this time, seconds (default: the end).
+        by_s: Option<f64>,
+    },
+}
+
+impl Expect {
+    /// The stock-map variable this check reads, if any.
+    fn firmware_var(&self) -> Option<&str> {
+        match self {
+            Self::FirmwareBits { var, .. } | Self::FirmwareTracks { var, .. } => Some(var),
+            _ => None,
+        }
+    }
+
+    /// The telemetry signal this check reads, if any.
+    fn signal(&self) -> Option<&str> {
+        match self {
+            Self::Ripple { signal, .. } | Self::FirmwareTracks { signal, .. } => Some(signal),
+            _ => None,
+        }
+    }
+}
+
+/// The value of telemetry signal `key` in `signals`, if `key` names one.
+fn signal_value(signals: &Signals, key: &str) -> Option<f64> {
+    CHANNELS.iter().find(|c| c.key == key).map(|c| f64::from(signals.get(c.channel)))
+}
+
+/// What the firmware showed at one sample, for the checks that read it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Observation {
+    /// Cutoff flags set, by stock-map name.
+    pub cutoff_flags: Vec<String>,
+    /// The stock-map variables the checks read, by name, raw.
+    pub vars: Vec<(String, u64)>,
+    /// The same variables as numbers, read as their stock-map kind says.
+    pub values: Vec<(String, f64)>,
+    /// The telemetry signals.
+    pub signals: Signals,
 }
 
 /// A scenario that cannot run.
@@ -219,6 +318,12 @@ impl Scenario {
         }
         if scenario.push.iter().any(|&[at, n, length]| !(at >= 0.0 && n.is_finite() && length > 0.0)) {
             return bad("push needs [start s, newtons, duration s] with a positive duration".into());
+        }
+        if let Some(signal) =
+            scenario.expects.iter().filter_map(Expect::signal).find(|s| !CHANNELS.iter().any(|c| c.key == *s))
+        {
+            let keys: Vec<&str> = CHANNELS.iter().map(|c| c.key).collect();
+            return bad(format!("unknown telemetry signal \"{signal}\" (known: {})", keys.join(", ")));
         }
         for (i, table) in std::mem::take(&mut scenario.timeline).into_iter().enumerate() {
             let fault =
@@ -293,8 +398,15 @@ impl Outcome {
 }
 
 impl Expect {
-    /// Judges `samples` (the whole run) against this expectation.
+    /// Judges `samples` (the whole run) against this expectation. Checks that read the firmware
+    /// need [`Expect::judge_observed`].
     pub fn judge(&self, samples: &[Sample], release_s: f64) -> CheckResult {
+        self.judge_observed(samples, &[], release_s)
+    }
+
+    /// Judges `samples` with what the firmware showed at each (`observed`, one per sample, or
+    /// empty when nothing was observed).
+    pub fn judge_observed(&self, samples: &[Sample], observed: &[Observation], release_s: f64) -> CheckResult {
         let after = |from: Option<f64>| {
             let from = from.unwrap_or(release_s);
             samples.iter().filter(move |s| s.t_s >= from)
@@ -349,7 +461,149 @@ impl Expect {
                     measured: format!("{end:.2} km/h"),
                 }
             }
+            Self::Cutoff { from_s, within_s, ref flag } => {
+                judge_cutoff(samples, observed, from_s, within_s, flag.as_deref())
+            }
+            Self::PitchReaches { deg, from_s, by_s } => {
+                judge_pitch_reaches(samples, deg, from_s.unwrap_or(release_s), by_s)
+            }
+            Self::FirmwareBits { ref var, bits, from_s, by_s } => {
+                judge_bits(samples, observed, var, bits, from_s.unwrap_or(0.0), by_s)
+            }
+            Self::Ripple { ref signal, max, from_s, by_s } => {
+                judge_ripple(samples, observed, signal, max, from_s.unwrap_or(release_s), by_s)
+            }
+            Self::FirmwareTracks { ref var, scale, ref signal, max_rms, from_s, by_s } => {
+                let window = (from_s.unwrap_or(release_s), by_s);
+                judge_tracks(samples, observed, (var, scale), signal, max_rms, window)
+            }
         }
+    }
+}
+
+/// Samples from `from` to `by` (the end if `None`), with their index.
+fn window(samples: &[Sample], from: f64, by: Option<f64>) -> impl Iterator<Item = (&Sample, usize)> {
+    samples.iter().zip(0..).filter(move |(s, _)| s.t_s >= from && by.is_none_or(|by| s.t_s <= by))
+}
+
+fn by_text(by: Option<f64>) -> String {
+    by.map_or_else(|| "by the end".to_owned(), |by| format!("by {by:.1} s"))
+}
+
+/// [`Expect::Cutoff`].
+fn judge_cutoff(
+    samples: &[Sample],
+    observed: &[Observation],
+    from_s: f64,
+    within_s: f64,
+    flag: Option<&str>,
+) -> CheckResult {
+    let what =
+        format!("cutoff{} within {within_s} s of {from_s:.1} s", flag.map_or_else(String::new, |f| format!(" ({f})")));
+    let Some((cut, i)) = window(samples, from_s, None).find(|(s, _)| s.cutoff) else {
+        return CheckResult { what, passed: false, measured: "no cutoff".to_owned() };
+    };
+    let flags = observed.get(i).map(|o| o.cutoff_flags.clone());
+    let flag_ok = match (flag, &flags) {
+        (None, _) => true,
+        (Some(flag), Some(flags)) => flags.iter().any(|f| f == flag),
+        (Some(_), None) => false,
+    };
+    let shown = flags.map_or_else(|| "flags not observed".to_owned(), |f| f.join(", "));
+    CheckResult {
+        what,
+        passed: cut.t_s - from_s <= within_s && flag_ok,
+        measured: format!("cut at {:.2} s ({shown})", cut.t_s),
+    }
+}
+
+/// [`Expect::PitchReaches`].
+fn judge_pitch_reaches(samples: &[Sample], deg: f64, from: f64, by_s: Option<f64>) -> CheckResult {
+    let up = deg >= 0.0;
+    let hit = window(samples, from, by_s).find(|(s, _)| if up { s.pitch_deg >= deg } else { s.pitch_deg <= deg });
+    let pitches = window(samples, from, by_s).map(|(s, _)| s.pitch_deg);
+    let extreme = if up { pitches.fold(f64::NEG_INFINITY, f64::max) } else { pitches.fold(f64::INFINITY, f64::min) };
+    CheckResult {
+        what: format!("pitch reaches {deg}° from {from:.1} s {}", by_text(by_s)),
+        passed: hit.is_some(),
+        measured: hit
+            .map_or_else(|| format!("only {extreme:.2}°"), |(s, _)| format!("{:.2}° at {:.2} s", s.pitch_deg, s.t_s)),
+    }
+}
+
+/// [`Expect::FirmwareBits`].
+fn judge_bits(
+    samples: &[Sample],
+    observed: &[Observation],
+    var: &str,
+    bits: u64,
+    from: f64,
+    by_s: Option<f64>,
+) -> CheckResult {
+    let what = format!("{var} has bits 0x{bits:X} {}", by_text(by_s));
+    if observed.is_empty() {
+        return CheckResult { what, passed: false, measured: "the firmware was not observed".to_owned() };
+    }
+    let value = |i: usize| observed.get(i)?.vars.iter().find(|(name, _)| name == var).map(|&(_, v)| v);
+    let hit = window(samples, from, by_s).find(|&(_, i)| value(i).is_some_and(|v| v & bits == bits));
+    CheckResult {
+        what,
+        passed: hit.is_some(),
+        measured: hit
+            .map_or_else(|| "never".to_owned(), |(s, i)| format!("0x{:X} at {:.2} s", value(i).unwrap_or(0), s.t_s)),
+    }
+}
+
+/// [`Expect::Ripple`].
+fn judge_ripple(
+    samples: &[Sample],
+    observed: &[Observation],
+    signal: &str,
+    max: f64,
+    from: f64,
+    by_s: Option<f64>,
+) -> CheckResult {
+    let what = format!("{signal} spread <= {max} from {from:.1} s {}", by_text(by_s));
+    let values: Vec<f64> = window(samples, from, by_s)
+        .filter_map(|(_, i)| signal_value(&observed.get(i)?.signals, signal))
+        .filter(|v| v.is_finite())
+        .collect();
+    if values.is_empty() {
+        return CheckResult { what, passed: false, measured: "not observed".to_owned() };
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let spread = (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
+    CheckResult { what, passed: spread <= max, measured: format!("standard deviation {spread:.2}, mean {mean:.2}") }
+}
+
+/// [`Expect::FirmwareTracks`].
+fn judge_tracks(
+    samples: &[Sample],
+    observed: &[Observation],
+    (var, scale): (&str, f64),
+    signal: &str,
+    max_rms: f64,
+    (from, by_s): (f64, Option<f64>),
+) -> CheckResult {
+    let what = format!("{var} x {scale} follows {signal} within {max_rms} RMS from {from:.1} s {}", by_text(by_s));
+    let pairs: Vec<(f64, f64)> = window(samples, from, by_s)
+        .filter_map(|(_, i)| {
+            let seen = observed.get(i)?;
+            let estimate = seen.values.iter().find(|(name, _)| name == var)?.1 * scale;
+            Some((estimate, signal_value(&seen.signals, signal)?))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return CheckResult { what, passed: false, measured: "not observed".to_owned() };
+    }
+    let n = pairs.len() as f64;
+    let rms = (pairs.iter().map(|(e, t)| (e - t).powi(2)).sum::<f64>() / n).sqrt();
+    let (estimate, truth) = pairs.iter().fold((0.0, 0.0), |(a, b), (e, t)| (a + e / n, b + t / n));
+    CheckResult {
+        what,
+        passed: rms <= max_rms,
+        measured: format!("RMS error {rms:.2}; mean {estimate:.2} against {truth:.2}"),
     }
 }
 
@@ -357,6 +611,10 @@ impl Expect {
 #[derive(Debug, Clone)]
 pub struct Ride {
     samples: Vec<Sample>,
+    /// What the firmware showed at each sample.
+    observed: Vec<Observation>,
+    /// The stock-map variables the checks read.
+    vars: Vec<String>,
     last_target: f64,
     was_ramping: bool,
     last_push: f64,
@@ -376,8 +634,21 @@ impl Ride {
             let until = timed.for_s.map(|length| ((timed.at_s + length) * hclk) as u64);
             inject(session, from, until, &timed.fault).map_err(ScenarioError::Invalid)?;
         }
+        let mut vars: Vec<String> = Vec::new();
+        for var in scenario.expects.iter().filter_map(Expect::firmware_var) {
+            if session.firmware_var(var).is_none() {
+                return Err(ScenarioError::Invalid(format!(
+                    "a check reads {var}, which the stock map of this build does not name"
+                )));
+            }
+            if !vars.iter().any(|v| v == var) {
+                vars.push(var.to_owned());
+            }
+        }
         Ok(Self {
             samples: Vec::new(),
+            observed: Vec::new(),
+            vars,
             last_target: f64::NAN,
             was_ramping: false,
             last_push: 0.0,
@@ -431,6 +702,12 @@ impl Ride {
             fallen: state.is_some_and(|s| s.fallen),
             cutoff: session.cutoff().is_some(),
         });
+        self.observed.push(Observation {
+            cutoff_flags: session.cutoff_flags(),
+            vars: self.vars.iter().map(|v| (v.clone(), session.firmware_var(v).unwrap_or(0))).collect(),
+            values: self.vars.iter().map(|v| (v.clone(), session.firmware_value(v).unwrap_or(f64::NAN))).collect(),
+            signals: snapshot.signals,
+        });
         self.distance_m = f64::from(snapshot.signals.distance_m);
         snapshot
     }
@@ -445,7 +722,11 @@ impl Ride {
         let samples = &self.samples;
         let released = samples.iter().filter(|s| s.t_s >= scenario.release_s);
         Outcome {
-            checks: scenario.expects.iter().map(|e| e.judge(samples, scenario.release_s)).collect(),
+            checks: scenario
+                .expects
+                .iter()
+                .map(|e| e.judge_observed(samples, &self.observed, scenario.release_s))
+                .collect(),
             top_speed_kmh: samples.iter().map(|s| s.speed_kmh).fold(0.0, f64::max),
             max_abs_pitch_deg: released.map(|s| s.pitch_deg.abs()).fold(0.0, f64::max),
             distance_m: self.distance_m,
@@ -566,6 +847,67 @@ kmh = 19.0
             error("at_s = 1.0\nfault = \"hall_stuck\"\nline = \"a\"\nlevel = \"low\"\ndevice = \"x\"")
                 .contains("device does not apply")
         );
+    }
+
+    #[test]
+    fn judges_fault_reactions() {
+        let at = |t_s, pitch_deg, cutoff| Sample { t_s, speed_kmh: 0.0, pitch_deg, fallen: false, cutoff };
+        let samples = [at(1.0, 0.0, false), at(2.0, 9.0, false), at(2.1, 12.0, true)];
+        let seen = |flags: &[&str], alerts| Observation {
+            cutoff_flags: flags.iter().map(|&f| f.to_owned()).collect(),
+            vars: vec![("alerts".to_owned(), alerts)],
+            ..Observation::default()
+        };
+        let observed = [seen(&[], 0), seen(&[], 0x08), seen(&["hall_fault"], 0x48)];
+        let cut = Expect::Cutoff { from_s: 2.0, within_s: 0.2, flag: Some("hall_fault".into()) };
+        assert_eq!(cut.judge_observed(&samples, &observed, 0.0).measured, "cut at 2.10 s (hall_fault)");
+        assert!(cut.judge_observed(&samples, &observed, 0.0).passed);
+        assert!(!cut.judge(&samples, 0.0).passed, "the flag needs the firmware observed");
+        assert!(!Expect::Cutoff { from_s: 1.0, within_s: 0.5, flag: None }.judge(&samples, 0.0).passed, "too late");
+        let tilt = Expect::PitchReaches { deg: 8.0, from_s: None, by_s: Some(2.0) }.judge(&samples, 0.0);
+        assert_eq!((tilt.passed, tilt.measured.as_str()), (true, "9.00° at 2.00 s"));
+        let dive = Expect::PitchReaches { deg: -5.0, from_s: None, by_s: None }.judge(&samples, 0.0);
+        assert_eq!((dive.passed, dive.measured.as_str()), (false, "only 0.00°"));
+        let alarm = Expect::FirmwareBits { var: "alerts".into(), bits: 0x08, from_s: None, by_s: None };
+        assert_eq!(alarm.judge_observed(&samples, &observed, 0.0).measured, "0x8 at 2.00 s");
+        assert!(!alarm.judge(&samples, 0.0).passed, "not observed");
+        let parsed = Scenario::from_toml(&format!(
+            "{RIDE}\n[[expect]]\ncheck = \"firmware_bits\"\nvar = \"alerts\"\nbits = 0x40\nby_s = 20.0\n\
+             [[expect]]\ncheck = \"cutoff\"\nfrom_s = 15.0\nwithin_s = 0.2\nflag = \"hall_fault\"\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            parsed.expects[2],
+            Expect::FirmwareBits { var: "alerts".into(), bits: 0x40, from_s: None, by_s: Some(20.0) }
+        );
+    }
+
+    #[test]
+    fn judges_ripple_and_tracking() {
+        let at = |t_s| Sample { t_s, speed_kmh: 20.0, pitch_deg: 0.0, fallen: false, cutoff: false };
+        let samples = [at(1.0), at(2.0), at(3.0), at(4.0)];
+        let seen = |torque: f32, speed_cms: f64| Observation {
+            values: vec![("speed_cms".to_owned(), speed_cms)],
+            signals: Signals { torque_nm: torque, speed_kmh: 20.0, ..Signals::default() },
+            ..Observation::default()
+        };
+        let observed = [seen(10.0, 556.0), seen(14.0, 556.0), seen(6.0, 400.0), seen(10.0, 400.0)];
+        let ripple = |from_s| Expect::Ripple { signal: "torque_nm".into(), max: 1.0, from_s: Some(from_s), by_s: None };
+        let steady = ripple(4.0).judge_observed(&samples, &observed, 0.0);
+        assert_eq!((steady.passed, steady.measured.as_str()), (true, "standard deviation 0.00, mean 10.00"));
+        assert!(!ripple(1.0).judge_observed(&samples, &observed, 0.0).passed, "10, 14, 6, 10: 2.83");
+        let tracks = Expect::FirmwareTracks {
+            var: "speed_cms".into(),
+            scale: 0.036,
+            signal: "speed_kmh".into(),
+            max_rms: 1.0,
+            from_s: Some(3.0),
+            by_s: None,
+        };
+        let lagging = tracks.judge_observed(&samples, &observed, 0.0);
+        assert_eq!((lagging.passed, lagging.measured.as_str()), (false, "RMS error 5.60; mean 14.40 against 20.00"));
+        let typo = format!("{RIDE}\n[[expect]]\ncheck = \"ripple\"\nsignal = \"torque\"\nmax = 1.0\n");
+        assert!(Scenario::from_toml(&typo).unwrap_err().to_string().contains("unknown telemetry signal \"torque\""));
     }
 
     #[test]

@@ -8,20 +8,8 @@ seconds = 40.0
 release_s = 2.5
 # [s, km/h]: stand still, about 1.1 m/s² up to 20 km/h, hold, about 1.4 m/s² down to a stop.
 speed_kmh = [[0, 0], [6, 0], [11, 20], [21, 20], [25, 0]]
-
-# Pedal trim to neutral (W U 4) before the release: a blank settings record starts at trim 0, which
-# tilts the pedals 4.8° nose down. One byte at a time, as an app sends them.
-[[inject]]
-at_s = 1.0
-bytes = "W"
-
-[[inject]]
-at_s = 1.3
-bytes = "U"
-
-[[inject]]
-at_s = 1.6
-bytes = "4"
+# Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
+settings = "neutral"
 
 [[expect]]
 check = "upright"

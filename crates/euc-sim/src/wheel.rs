@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::config::{BoardFile, StockMap};
 use crate::plant::Live;
+use crate::settings::SettingsFile;
 
 /// Everything the simulator reads from `profiles/<wheel>/`.
 #[derive(Debug, Clone)]
@@ -21,6 +22,8 @@ pub struct WheelFiles {
     pub electrical: PlantParams,
     /// `[body]` of `plant.toml`: the mechanics.
     pub body: WheelBody,
+    /// `settings.toml`, if the wheel has settings presets.
+    pub settings: Option<SettingsFile>,
 }
 
 /// A wheel's files could not be used.
@@ -61,7 +64,24 @@ impl WheelFiles {
             .map_err(|e: toml::de::Error| LoadError::File { file: "stockmap.toml", why: e.to_string() })?;
         let (electrical, body) =
             split_plant(&parse("plant.toml")?).map_err(|why| LoadError::File { file: "plant.toml", why })?;
-        Ok(Self { profile, board, stockmap, electrical, body })
+        let settings = match source.read(&profile.id, "settings.toml") {
+            Ok(text) => {
+                Some(SettingsFile::from_toml(&text).map_err(|why| LoadError::File { file: "settings.toml", why })?)
+            }
+            Err(ProfileError::UnknownFile { .. }) => None,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self { profile, board, stockmap, electrical, body, settings })
+    }
+
+    /// The board with settings preset `name` seeded into the settings journal (power-on state).
+    pub fn board_with_settings(&self, name: &str) -> Result<BoardFile, LoadError> {
+        let file = |why: String| LoadError::File { file: "settings.toml", why };
+        let settings =
+            self.settings.as_ref().ok_or_else(|| file(format!("{} has no settings presets", self.profile.id)))?;
+        let mut board = self.board.clone();
+        settings.seed(&mut board, settings.preset(name).map_err(file)?).map_err(file)?;
+        Ok(board)
     }
 
     /// Core clock in Hz.
@@ -97,6 +117,8 @@ mod tests {
         assert!((files.body.tire.radius_m * std::f64::consts::TAU - 1.313).abs() < 0.001, "{:?}", files.body.tire);
         let live = files.live(Rider::default(), Assist::default()).unwrap();
         assert!(live.physics().held());
+        assert!(files.board_with_settings("neutral").is_ok());
+        assert!(files.board_with_settings("nope").unwrap_err().to_string().contains("no settings preset"));
     }
 
     #[test]

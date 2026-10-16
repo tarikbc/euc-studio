@@ -14,6 +14,7 @@ const FILES: &[(&str, &str, &str)] = &[
     ("begode-extreme", "board.toml", include_str!("../../../profiles/begode-extreme/board.toml")),
     ("begode-extreme", "display.toml", include_str!("../../../profiles/begode-extreme/display.toml")),
     ("begode-extreme", "plant.toml", include_str!("../../../profiles/begode-extreme/plant.toml")),
+    ("begode-extreme", "settings.toml", include_str!("../../../profiles/begode-extreme/settings.toml")),
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
 ];

@@ -15,7 +15,7 @@ use euc_sim::scenario::{Ride, Scenario};
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use euc_telemetry::EventKind;
 
-use crate::sim::{BACKEND, firmware, injection, load_scenario};
+use crate::sim::{BACKEND, BLANK, board_with, firmware, injection, load_scenario};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
 
@@ -35,6 +35,10 @@ pub(crate) struct ServeArgs {
     /// `stock` or a firmware file.
     #[arg(long, default_value = "stock")]
     firmware: String,
+    /// Settings preset the wheel boots with (profiles/<wheel>/settings.toml), or `blank`.
+    /// Default: the scenario's, else `neutral`.
+    #[arg(long, value_name = "PRESET")]
+    settings: Option<String>,
     /// Simulated seconds per wall second.
     #[arg(long, default_value_t = 1.0)]
     rate: f64,
@@ -66,6 +70,8 @@ pub(crate) struct BridgeTestArgs {
 
 /// Simulated seconds between two state messages.
 const STATE_EVERY_S: f64 = 0.2;
+/// The settings preset a served wheel boots with by default: a real wheel never has blank settings.
+const NEUTRAL: &str = "neutral";
 /// Samples per simulated second: the granularity of pacing and rider control.
 const SAMPLE_HZ: f64 = 200.0;
 /// Wall seconds `bridge-test` keeps trying to connect.
@@ -202,8 +208,15 @@ impl Server {
             .flat_map(|s| &s.inject)
             .map(|inject| injection(&format!("{}@{}", inject.bytes, inject.at_s), 0))
             .collect::<anyhow::Result<Vec<_>>>()?;
+        let preset = args
+            .settings
+            .as_deref()
+            .or_else(|| scenario.as_ref().and_then(|s| s.settings.as_deref()))
+            .unwrap_or(if files.settings.is_some() { NEUTRAL } else { BLANK });
+        let board = board_with(&files, Some(preset))?;
+        ui::row(STRONG, "settings", preset);
         let config = MachineConfig {
-            board: &files.board,
+            board: &board,
             stockmap: stock.then_some(&files.stockmap),
             image: &image,
             load_addr: wheel.board.app.base,

@@ -153,7 +153,9 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 A scenario (`scenarios/*.toml`) is a scripted ride with expectations; `euc sim run --scenario FILE`
 runs it on the wheel it names and prints each check. The target speed is a list of `[seconds, km/h]`
 points, linear in between. `release_s` is when the stand lets go; BLE commands go in `[[inject]]`;
-`push = [[start s, N, duration s]]` pushes the rider forward (or back, negative) at the centre of mass.
+`push = [[start s, N, duration s]]` pushes the rider forward (or back, negative) at the centre of mass;
+`settings = "<preset>"` boots the wheel with a settings preset (see [../bridge.md](../bridge.md#settings-presets)).
+Both shipped scenarios use `neutral`: factory settings with level pedals.
 The stand should let go soon after the firmware starts balancing: held against a rigid stand, the
 stock firmware's balance output climbs to its limit if its set angle is not the stand's.
 Checks (`[[expect]]`, judged after the run, from the release unless `from_s` says otherwise):

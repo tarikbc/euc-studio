@@ -161,6 +161,7 @@ level = "low"
 | `stage_overtemp` | `rate_k_per_s`, `max_c` | The power stage climbs at that rate above what its losses give, up to `max_c`, and holds; the board NTC reads it. After the window it cools with the stage time constant (200 s). |
 | `cell_low` | `pack`, `cell`, `drop_v` | That cell group's open-circuit voltage sits `drop_v` low: its BMS reading and the pack voltage drop. |
 | `pack_imbalance` | `pack`, `soc_delta` | The pack's state of charge jumps once at the start and stays; the packs then even out through the bus. |
+| `battery_soc` | `soc` | Every pack's state of charge is set once at the start (a battery ridden nearly empty) and stays. |
 | `high_resistance` | `pack`, `factor` | The pack's R0 and R1 are `factor` times normal: it sags more and carries less of the load. |
 | `imu_noise` | `accel_g` (0), `gyro_dps` (0) | Gaussian noise on each axis of every sample. |
 | `imu_bias` | `accel_g` [x, y, z], `gyro_dps` [x, y, z] | Constant offsets. |
@@ -168,7 +169,7 @@ level = "low"
 | `bms_silent` | none | The BMS does not answer the poll. |
 | `bms_garbled` | `byte_error_rate` (0), `missing_bytes` (0) | Each reply byte is random with that probability, and the reply loses its last bytes. The firmware checks no header, length or checksum, so the damage becomes cell, temperature and current values. |
 
-The first nine are `euc_plant::fault::PlantFault`, the last five `euc_devices::fault::DeviceFault`
+The first ten are `euc_plant::fault::PlantFault`, the last five `euc_devices::fault::DeviceFault`
 (an optional `device = "<instance>"` picks the device when a board has more than one of its kind).
 The simulator converts the window to cycles once and hands each fault to its target:
 `ElectricalPlant::add_fault`, `Mpu6500::add_fault` or `SmartBms::add_fault`. The plant applies a
@@ -180,6 +181,20 @@ controller, so they continue through resets and power cycles.
 
 Not modeled: a shorted MOSFET or a failed gate driver, an intermittent contact (use short windows),
 and BMS boards that fail one at a time (the four boards answer as one reply).
+
+Scenario checks for a fault's outcome: `cutoff` (the firmware cuts within a time, optionally by a
+named stock-map flag), `firmware_bits` (a stock-map variable such as `alerts` gets bits set) and
+`pitch_reaches` (a tiltback or a nose dive). What the stock firmware does, on the Begode Extreme
+(2026-10-16, Unicorn):
+
+- `scenarios/hall-loss-while-riding.toml`: the hall connector comes off at 20 km/h (all three lines
+  read high, code 7). The firmware latches `hall_fault` 70 ms later, sets alert bit 0x40, turns the
+  inverter off, and the wheel nose-dives (−33° within 0.1 s). With one line lost the code reads 7
+  for only one sector in six, the invalid count keeps resetting, and the firmware rides on with
+  rough torque: no cut.
+- `scenarios/low-battery-tiltback.toml`: at 98.5 V (1.3 % charge) the firmware sets alert bit 0x08
+  at its first control tick (1.7 s) and, once the wheel rolls, tilts the pedals back: the shell
+  passes 8° nose up 1.6 s after the rider reaches speed, and keeps rising (26° by 20 s) without a cut.
 
 ## Sign conventions that make the stock firmware's FOC work
 

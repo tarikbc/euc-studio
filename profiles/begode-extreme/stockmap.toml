@@ -94,6 +94,13 @@ size = 1
 kind = "u8"
 note = "frame 04 byte 14; bit 2 = IMU fault, bit 6 = hall error"
 
+[[ram]]
+name = "speed_cms"
+addr = 0x2000_0120
+size = 2
+kind = "s16"
+note = "the speed the balance law schedules its gains with, cm/s, forward positive, from hall edges per 20 ms (balance findings §4)"
+
 # Cutoff flags (balance findings §5.3 and §6): scenarios fail if one is set after the stand lets go.
 [[ram]]
 name = "balance_disabled"

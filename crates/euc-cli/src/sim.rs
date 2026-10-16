@@ -44,6 +44,10 @@ pub(crate) struct Args {
     /// `stock` (the current official build, fetched if it is not cached) or a firmware file.
     #[arg(long, default_value = "stock")]
     firmware: String,
+    /// Settings preset the wheel boots with (profiles/<wheel>/settings.toml), or `blank`.
+    /// Default: the scenario's, else blank (the reference harness's state).
+    #[arg(long, value_name = "PRESET")]
+    settings: Option<String>,
     /// Simulated seconds to run (a scenario sets its own).
     #[arg(long, default_value_t = 6.0)]
     seconds: f64,
@@ -143,8 +147,10 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     }
 
     let hclk = files.hclk();
+    let preset = args.settings.as_deref().or_else(|| scenario.as_ref().and_then(|s| s.settings.as_deref()));
+    let board = board_with(&files, preset)?;
     let config = MachineConfig {
-        board: &files.board,
+        board: &board,
         stockmap: stock.then_some(&files.stockmap),
         image: &image,
         load_addr: wheel.board.app.base,
@@ -389,6 +395,17 @@ pub(crate) fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyho
     let path = cache.verified(&current.sha256).with_context(|| format!("{} is not in the cache", current.label))?;
     Ok((fs::read(&path)?, current.label.clone()))
 }
+
+/// The board file with settings preset `preset` seeded (`None` or `blank`: an empty journal).
+pub(crate) fn board_with(files: &WheelFiles, preset: Option<&str>) -> anyhow::Result<euc_sim::config::BoardFile> {
+    match preset {
+        None | Some(BLANK) => Ok(files.board.clone()),
+        Some(name) => Ok(files.board_with_settings(name)?),
+    }
+}
+
+/// The settings "preset" that seeds nothing.
+pub(crate) const BLANK: &str = "blank";
 
 /// `V`, `V@2.6` or `hex:5759@4`; without a time the i-th injection goes at 3.0 + 1.5 i seconds.
 pub(crate) fn injection(spec: &str, index: usize) -> anyhow::Result<(f64, Vec<u8>)> {

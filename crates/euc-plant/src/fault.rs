@@ -119,6 +119,12 @@ pub enum PlantFault {
         /// Change of state of charge, −1..=1.
         soc_delta: f64,
     },
+    /// Every pack's state of charge is set to `soc` when the window starts: a battery ridden
+    /// nearly empty, or one charged only partly. The window's end does not undo it.
+    BatterySoc {
+        /// State of charge, 0..=1.
+        soc: f64,
+    },
     /// One pack's internal resistance (R0 and R1) is `factor` times normal (aged cells, a loose
     /// connector): it sags more and carries less of the load.
     HighResistance {
@@ -144,6 +150,7 @@ impl PlantFault {
         "stage_overtemp",
         "cell_low",
         "pack_imbalance",
+        "battery_soc",
         "high_resistance",
     ];
 
@@ -158,6 +165,7 @@ impl PlantFault {
             Self::StageOvertemp { .. } => "stage_overtemp",
             Self::CellLow { .. } => "cell_low",
             Self::PackImbalance { .. } => "pack_imbalance",
+            Self::BatterySoc { .. } => "battery_soc",
             Self::HighResistance { .. } => "high_resistance",
         }
     }
@@ -197,12 +205,22 @@ impl PlantFault {
             Self::PackImbalance { pack, soc_delta } if !pack_ok(pack) || !(-1.0..=1.0).contains(&soc_delta) => {
                 bad(format!("needs pack < {} and soc_delta in -1..=1", params.battery.packs))
             }
+            Self::BatterySoc { soc } if !(0.0..=1.0).contains(&soc) => bad("soc must be in 0..=1".into()),
             Self::HighResistance { pack, factor } if !(pack_ok(pack) && factor > 0.0 && factor.is_finite()) => {
                 bad(format!("needs pack < {} and factor above 0", params.battery.packs))
             }
             _ => Ok(()),
         }
     }
+}
+
+/// A one-time change of state of charge, when a fault's window starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SocJump {
+    /// Pack `pack` changes by `delta`.
+    Shift { pack: usize, delta: f64 },
+    /// Every pack is set to `soc`.
+    Set { soc: f64 },
 }
 
 /// A sensor's error while a `current_sensor` fault is active.
@@ -284,8 +302,8 @@ impl Faults {
     }
 
     /// Recomputes the effects if the active set may have changed by `now`. Returns `None` when
-    /// nothing changed, else the state-of-charge jumps that start now (`(pack, delta)`).
-    pub(crate) fn refresh(&mut self, now: u64) -> Option<Vec<(usize, f64)>> {
+    /// nothing changed, else the state-of-charge jumps that start now.
+    pub(crate) fn refresh(&mut self, now: u64) -> Option<Vec<SocJump>> {
         if now < self.next_change {
             return None;
         }
@@ -307,7 +325,12 @@ impl Faults {
                 }
                 PlantFault::PackImbalance { pack, soc_delta } => {
                     if !scheduled.started {
-                        jumps.push((usize::from(pack), soc_delta));
+                        jumps.push(SocJump::Shift { pack: usize::from(pack), delta: soc_delta });
+                    }
+                }
+                PlantFault::BatterySoc { soc } => {
+                    if !scheduled.started {
+                        jumps.push(SocJump::Set { soc });
                     }
                 }
                 PlantFault::HighResistance { pack, factor } => {
@@ -383,6 +406,7 @@ mod tests {
             "fault = \"stage_overtemp\"\nrate_k_per_s = 2.0\nmax_c = 95.0",
             "fault = \"cell_low\"\npack = 1\ncell = 7\ndrop_v = 0.5",
             "fault = \"pack_imbalance\"\npack = 0\nsoc_delta = -0.2",
+            "fault = \"battery_soc\"\nsoc = 0.02",
             "fault = \"high_resistance\"\npack = 1\nfactor = 4.0",
         ];
         let kinds: Vec<&str> = samples.iter().map(|s| toml::from_str::<PlantFault>(s).unwrap().kind()).collect();
@@ -401,7 +425,7 @@ mod tests {
         assert_eq!(faults.refresh(50), None, "nothing changes before 100");
         faults.refresh(100);
         assert_eq!(faults.effects().halls.stuck.b, Some(true));
-        assert_eq!(faults.refresh(160), Some(vec![(1, -0.1)]), "the jump happens once");
+        assert_eq!(faults.refresh(160), Some(vec![SocJump::Shift { pack: 1, delta: -0.1 }]), "the jump happens once");
         assert!((faults.effects().halls.noise_deg - 4.0).abs() < 1e-12);
         assert_eq!(faults.refresh(200), Some(vec![]));
         assert_eq!(faults.effects().halls.stuck.b, None, "the stuck line is released at 200");
