@@ -62,3 +62,15 @@ euc_add_unit_test(test_balance
 euc_add_unit_test(test_failsafe
     SOURCES unit/test_failsafe.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_foc
+    SOURCES unit/test_foc.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_hall
+    SOURCES unit/test_hall.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_motor
+    SOURCES unit/test_motor.c
+    LIBRARIES euc_port_sim)

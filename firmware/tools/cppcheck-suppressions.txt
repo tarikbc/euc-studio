@@ -39,6 +39,10 @@ misra-c2012-8.7:*/core/protocol/*
 misra-c2012-10.1:*/core/include/euc/math/fixed.h
 shiftNegativeLHS:*/core/include/euc/math/fixed.h
 
+# 2.5 (advisory, unused macro): fixed.h defines the limits of each format for every user; one translation
+# unit uses only some of them.
+misra-c2012-2.5:*/core/include/euc/math/fixed.h
+
 # 19.2 (advisory, no union): reading the bits of a float is how the stock rounding (denormal flush, fast
 # inverse square root) is reproduced; C11 defines type punning through a union.
 misra-c2012-19.2:*/core/include/euc/math/float_ops.h
@@ -54,6 +58,18 @@ misra-c2012-10.8:*/core/math/libm.c
 
 # 8.7 (advisory): the balance steps are public so a lock-step harness can compare each with its stock function.
 misra-c2012-8.7:*/core/balance/*
+
+# Motor drive. 2.5 (advisory, unused macro): the headers define constants for the app and the ports (error
+# bits, sample counts). 8.7 (advisory, external linkage used in one unit): the module entry points are called
+# by the app, the SIL port and tests; no app calls the motor modules yet (F5 wires them).
+misra-c2012-2.5:*/core/include/euc/motor/*
+misra-c2012-8.7:*/core/motor/*
+
+# --- boards -------------------------------------------------------------------------------------------------
+
+# 2.5 (advisory, unused macro): board.h records each fact about the board once it is known; the drivers that
+# use a constant arrive step by step (motor channels and the over-current trip with F5).
+misra-c2012-2.5:*/boards/*/board.h
 
 # --- ports/sim ----------------------------------------------------------------------------------------------
 

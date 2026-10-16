@@ -4,6 +4,7 @@
  * lock-step harness, not of these tests.
  */
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -126,6 +127,24 @@ static void test_law_gains_follow_speed(void)
     /* Kp 60 + 10 = 70; 0.1 x Kd (600 + 320) = 92; Kc (30 - 8) x 10000 / 10000 = 22; Kv 30 x 1200 / 1000 = 36
      */
     TEST_ASSERT_FLOAT_WITHIN(0.001F, 70.0F + 92.0F + 22.0F + 36.0F, state.command);
+}
+
+static void test_voltage_mode_feed_forward_is_the_same_in_both_profiles(void)
+{
+    /* At 20 kHz hall calls the stock period speed reads 1.2 x high (1200 for 1000 mm/s) with Kv 30; clean
+     * reads true mm/s (quirk HALL_SPEED_1_2X) with Kv 36. Both give 36 duty units. */
+    const uint32_t profiles[2] = {EUC_SIL_PROFILE_COMPAT, EUC_SIL_PROFILE_CLEAN};
+    const int32_t period_speed[2] = {1200, 1000};
+    for (size_t p = 0U; p < 2U; p++) {
+        euc_sil_quirk_set_mask(euc_sil_quirk_profile_mask(profiles[p]));
+        struct euc_balance_state state;
+        struct euc_balance_in in;
+        law_ready(&state, &in);
+        state.error_deg = 0.0F;
+        in.hall_period_speed = period_speed[p];
+        euc_balance_step_law(&state, &in);
+        TEST_ASSERT_FLOAT_WITHIN(0.001F, 36.0F, state.command);
+    }
 }
 
 static void test_law_clamps_speed_for_gain_scheduling(void)
@@ -466,6 +485,7 @@ int main(void)
     RUN_TEST(test_law_proportional_term_at_reference_voltage);
     RUN_TEST(test_law_scales_to_battery_voltage_within_limits);
     RUN_TEST(test_law_gains_follow_speed);
+    RUN_TEST(test_voltage_mode_feed_forward_is_the_same_in_both_profiles);
     RUN_TEST(test_law_clamps_speed_for_gain_scheduling);
     RUN_TEST(test_law_current_mode);
     RUN_TEST(test_output_slew_and_soft_start);

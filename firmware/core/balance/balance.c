@@ -8,6 +8,7 @@
 
 #include "balance_internal.h"
 #include "euc/math/float_ops.h"
+#include "euc/quirks.h"
 
 /* Power-on wait before the first start-up check (ticks). */
 #define START_COUNTDOWN_TICKS (-200)
@@ -57,7 +58,9 @@ void euc_balance_step_gains(struct euc_balance_state *state, const struct euc_ba
         gains->kc_base = voltage_mode[mode].kc_base;
         gains->accel_gain = voltage_mode[mode].accel_gain;
         gains->kc_slope = 8;
-        gains->kv = 30.0F;
+        /* Stock tuning works on a hall-period speed that reads 1.2 x high in this mode. Clean reads true mm/s
+         * (quirk HALL_SPEED_1_2X), so its gain is 1.2 x higher and the feed-forward stays the same. */
+        gains->kv = EUC_QUIRK(HALL_SPEED_1_2X) ? 30.0F : 36.0F;
     } else {
         /* Current mode: no current feedback, no speed feed-forward; the current-feedback slope is left as is.
          */

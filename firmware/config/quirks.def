@@ -58,6 +58,22 @@ EUC_QUIRK_DEF(PHASE_SAT_SWAPPED, 1, 0, "0x08007B4C phase current read",
               "Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale).")
 EUC_QUIRK_DEF(NAN_FAIL_OPEN, 1, 0, "0x0800678C balance task, 0x08006B24 output limit",
               "A NaN or infinity passes the float clamps of the balance task (NaN compares false).")
+EUC_QUIRK_DEF(INT16_WRAP, 1, 0, "0x08004104 Clarke, 0x08006EEC Park, 0x080075C8 Rev_Park, 0x08007B4C",
+              "Out-of-range FOC results and raw phase currents wrap around to 16 bits instead of saturating.")
+EUC_QUIRK_DEF(IQ_MA_WRAP, 1, 0, "0x08004668 FOC_Model",
+              "The low-passed Iq in mA uses a 32-bit product that wraps above 65.5 A (balance feedback).")
+EUC_QUIRK_DEF(IB_OFFSET_FROM_ADC1, 1, 0, "0x08007A68 current offset calibration",
+              "Phase B's offset is measured on ADC1 but phase B is read on ADC2 (offset mismatch = error).")
+EUC_QUIRK_DEF(BKP_CURRENT_OFFSETS, 1, 0, "0x08007A68 current offset calibration",
+              "From the tenth power-on, offsets in BKP DR12/DR13 (written by nothing) replace measured ones.")
+EUC_QUIRK_DEF(HALL_SPEED_1_2X, 1, 0, "0x0800539C hall_update",
+              "The hall-period speed assumes 24 kHz calls, so in voltage mode (20 kHz) it reads 1.2 x high.")
+EUC_QUIRK_DEF(HALL_SPEED_FILTER_STALL, 1, 0, "0x0800539C hall_update",
+              "The hall-period speed filter truncates, so it settles up to 999 counts short of its input.")
+EUC_QUIRK_DEF(HALL_INVALID_ANGLE_RUN, 1, 0, "0x0800539C hall_update",
+              "In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault.")
+EUC_QUIRK_DEF(MODE0_DEAD_TIME, 1, 0, "0x08007CD4 SVPWM_IcsInit",
+              "Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns.")
 
 /* Alarms and user interface */
 EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",

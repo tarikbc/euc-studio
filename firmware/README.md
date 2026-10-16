@@ -7,11 +7,13 @@ A clean C11 rewrite of the Begode Extreme controller firmware. One CMake tree bu
 - **host**: unit tests, and a software-in-the-loop (SIL) shared library that the simulator loads in place
   of the emulated image.
 
-Status: milestone M1, steps F1 and F2. Core has the BLE protocol (`core/protocol/`, described in
-[docs/protocol/begode.md](../docs/protocol/begode.md), tested against a real capture) and the balance task:
+Status: milestone M1, steps F1 to F3. Core has the BLE protocol (`core/protocol/`, described in
+[docs/protocol/begode.md](../docs/protocol/begode.md), tested against a real capture), the balance task:
 attitude estimation (`core/attitude/`), balance law, tiltbacks, cut-offs and recovery (`core/balance/`), with
-our own fdlibm-derived math (`core/math/`) so host and target compute the same bits. The image links core but
-does not call it yet, configures no peripheral and drives no pin. It is not meant for a wheel: nothing in this
+our own fdlibm-derived math (`core/math/`) so host and target compute the same bits, and the motor drive
+(`core/motor/`): hall decoding, phase-current sensing and integer field-oriented control for both drive modes.
+The FOC lookup tables are computed from their formulas at build time (`tools/gen_motor_tables.py`). The image
+links core but does not call it yet, configures no peripheral and drives no pin. It is not meant for a wheel: nothing in this
 tree is flashed before the gates in the project plan (sim dry-run, stock-first flash, SWD backup) are in place.
 
 ## Layout and layer rules
@@ -26,7 +28,7 @@ tree is flashed before the gates in the project plan (sim dry-run, stock-first f
 | `apps/<board>/` | `main`, init order, task table (TIM8 / ADC / RTC / main-loop contexts) | Composes core modules with a port and a board, and schedules them. |
 | `config/quirks.def` | compat / clean quirk list | See [Profiles and quirks](#profiles-and-quirks). |
 | `tests/unit/` | Unity tests, host only | One executable per area, run by CTest. Shared captures live in `../tests/data/`. |
-| `tools/` | size report, quirk doc generator, cppcheck deviation record | Python standard library only. |
+| `tools/` | size report, quirk doc generator, FOC table generator, cppcheck deviation record | Python standard library only. |
 
 Code style: fixed-width types, units in names (`_bytes`, `_ms`, `_q15`), no heap, no recursion, no dead code,
 comments that say why.
@@ -93,8 +95,9 @@ USART1. After editing the list, run `cmake --build --preset <any> --target quirk
 
 ## Fail-closed rules
 
-Lock-step fidelity never outranks a safe actuator. The balance task follows these rules
-(`tests/unit/test_failsafe.c` injects NaN and infinity at every stage):
+Lock-step fidelity never outranks a safe actuator. The balance task and the motor drive follow these rules
+(`tests/unit/test_failsafe.c` injects NaN and infinity at every balance stage; `tests/unit/test_motor.c`
+covers the motor gates):
 
 - **Actuator boundary, both profiles.** The motor command the current loop reads (`motor_command`) is always
   finite and within the soft-start limit; a NaN or infinity is published as 0. This is a deliberate difference
@@ -108,6 +111,13 @@ Lock-step fidelity never outranks a safe actuator. The balance task follows thes
   `if (!(x <= limit)) x = limit` turns it into full power. Check finiteness first, then clamp.
 - **Ride settings over BLE.** Clean applies settings that change riding behaviour only at standstill
   (quirk `SETTINGS_WHILE_MOVING`); the stock BLE link has no authentication.
+- **Motor boundary, both profiles.** The drive checks the command again where it enters
+  (`euc_motor_set_command()`: finite, within ±1050). A hall fault, the start-up current-sensor check or a
+  system hard cut turns the bridge off until reset, as in the stock firmware.
+- **Clean motor drive.** A phase over-current trips the bridge (quirk `NO_OVERCURRENT_TRIP`; the level and
+  sample count are `board.h` placeholders until the power stage is measured), out-of-range FOC values saturate
+  instead of wrapping (`INT16_WRAP`), and the angle holds while the hall state is invalid
+  (`HALL_INVALID_ANGLE_RUN`).
 
 ## Size budget
 

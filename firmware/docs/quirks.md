@@ -38,24 +38,32 @@ The bit is the quirk's position in the SIL mask.
 | 12 | `NO_OVERCURRENT_TRIP` | on | off | 0x08007C04 phase current check | Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off. |
 | 13 | `PHASE_SAT_SWAPPED` | on | off | 0x08007B4C phase current read | Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale). |
 | 14 | `NAN_FAIL_OPEN` | on | off | 0x0800678C balance task, 0x08006B24 output limit | A NaN or infinity passes the float clamps of the balance task (NaN compares false). |
+| 15 | `INT16_WRAP` | on | off | 0x08004104 Clarke, 0x08006EEC Park, 0x080075C8 Rev_Park, 0x08007B4C | Out-of-range FOC results and raw phase currents wrap around to 16 bits instead of saturating. |
+| 16 | `IQ_MA_WRAP` | on | off | 0x08004668 FOC_Model | The low-passed Iq in mA uses a 32-bit product that wraps above 65.5 A (balance feedback). |
+| 17 | `IB_OFFSET_FROM_ADC1` | on | off | 0x08007A68 current offset calibration | Phase B's offset is measured on ADC1 but phase B is read on ADC2 (offset mismatch = error). |
+| 18 | `BKP_CURRENT_OFFSETS` | on | off | 0x08007A68 current offset calibration | From the tenth power-on, offsets in BKP DR12/DR13 (written by nothing) replace measured ones. |
+| 19 | `HALL_SPEED_1_2X` | on | off | 0x0800539C hall_update | The hall-period speed assumes 24 kHz calls, so in voltage mode (20 kHz) it reads 1.2 x high. |
+| 20 | `HALL_SPEED_FILTER_STALL` | on | off | 0x0800539C hall_update | The hall-period speed filter truncates, so it settles up to 999 counts short of its input. |
+| 21 | `HALL_INVALID_ANGLE_RUN` | on | off | 0x0800539C hall_update | In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault. |
+| 22 | `MODE0_DEAD_TIME` | on | off | 0x08007CD4 SVPWM_IcsInit | Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns. |
 
 ## Alarms and user interface
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 15 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
+| 23 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
 
 ## Settings storage (flash journal at 0x0800F000)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 16 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
-| 17 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
-| 18 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
+| 24 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
+| 25 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
+| 26 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
 
 ## Platform
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 19 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
-| 20 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 27 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
+| 28 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
