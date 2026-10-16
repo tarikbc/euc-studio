@@ -110,7 +110,8 @@ conflicts with the tire on the scanned wheel; the owner's photo confirms the 3.0
 
 ## Pedals
 
-The CNC decks were off the wheel for the scan. The model draws our own deck in their style: a black
+**ESTIMATE, to be updated from the owner's measurements** (pedal height, size and position; the owner
+also says the drawn design does not match his pedals). The CNC decks were off the wheel for the scan. The model draws our own deck in their style: a black
 anodised aluminium plate with a D-shaped outer edge and a bright chamfer, hexagonal through-cut-outs in
 the front and rear thirds, a plain solid band in the middle, gold grip pins on the cell junctions
 (26 per deck) and a polished hinge pin. Left and right are mirror images. The sizes are estimates:
@@ -146,8 +147,8 @@ the pins at y +-176.3 mm.
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 290k triangles 2.6 MB, LOD1
-85k 1.0 MB, LOD2 28k 0.29 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 300k triangles 2.5 MB, LOD1
+114k 1.2 MB, LOD2 40k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -168,11 +169,31 @@ the scan (the tools live in the private research folder):
 5. **Modelled parts.** Display window (flat, with UVs for the T16-007 panel), headlight lenses, axle
    stub, pedal decks (above), and the rear roller: its tube is redrawn as two translucent sleeves
    around a black centre band with the BLE status LED; the scanned end caps become the two speakers.
-6. **No trademarks.** The brand emblem pressed into the seat top is flattened (a quadratic surface
-   fitted to the plain ring around it), and the pedal band stays plain.
-7. **Levels of detail.** Vertex clustering, then quadric collapse, then back onto the planes. Quadric
-   collapse alone on a raw scan with 100,000 open border edges builds slivers hundreds of mm long.
-8. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
+6. **Packs, shock and rear handle.** The four battery packs are modelled as boxes with 4 mm rounded
+   edges and 8 mm chamfers on the faces measured above, with the rivet rows read on a height map of
+   the side (four groups of five near each outer end). The rear shock is a **DNM-type coil-over
+   without reservoir, per owner photos 2026-10-16; spring rate unknown** (the 2026-10 scan shows an
+   older shock with a piggyback reservoir). Its eyes sit on the scan's cross shafts (top x -140.5,
+   z 368.1 mm; bottom about x -224, z 182 mm, +-5 mm); the rest is scaled from the photo by the
+   204 mm eye-to-eye length and is ESTIMATE: threaded body (29 mm) with a ridged end cap at the
+   bottom eye, slotted preload collar, black spring (52 mm outside, 8 mm wire, 7 coils), chrome
+   shaft (12 mm) and a red rebound knob at the top eye. The link plates and cross shafts are the
+   scan's. The **rear handle** is the orange CNC U-handle of the photos: the lower part of each arm
+   (frame bolt at x -115, z 415 mm to the roller axis, three windows, outer face at |y| 58.7 mm) is
+   in the scan as the "roller arms"; the part above the roller (85 mm, bent 15 degrees up) and the
+   black grip bar (26 mm) are ESTIMATES scaled with the roller. The scanned faces these models
+   replace are removed; what remains of the scan there (brackets, a sloped base plate) is cleaned
+   (loose flaps under 150 mm2 dropped, holes closed, smoothed). The roller is cut out of the seat
+   before decimation, and its end caps (speakers) are modelled from their measured profile.
+7. **No trademarks.** The brand emblem pressed into the seat top is flattened (a quadratic surface
+   fitted to the plain ring around it), the pedal band stays plain, and the shock carries no brand
+   marks.
+8. **Levels of detail.** Hard parts: vertex clustering, smoothing, quadric collapse, then back onto
+   the planes. Curved parts (seat, scanned brackets): a 1 mm clustering pass, smoothing, quadric
+   collapse with optimal placement, smoothing again. Quadric collapse alone on a raw scan with
+   100,000 open border edges builds slivers hundreds of mm long. Loose scanned shards (under 60, 150
+   and 400 mm2 for LOD0, LOD1, LOD2) are dropped.
+9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, satin aluminium handle tube, black anodised pedals with gold pins, smoked display
    window. Ambient occlusion is baked into the vertex colours.

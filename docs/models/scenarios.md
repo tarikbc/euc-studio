@@ -11,22 +11,24 @@ the aids are estimates until measured; the top-speed numbers move with the motor
 anything with an impact moves with the body model (see below). Read them as how the stock firmware
 behaves on this model, and compare runs with each other rather than with a real wheel.
 
-Run one with `euc sim run --scenario scenarios/<name>.toml` (Unicorn backend). Results of 2026-10-16
+Run one with `cargo run --release -p euc-cli -- sim run --scenario scenarios/<name>.toml` (our own
+core, the default; development builds can add `--cpu unicorn` as the reference). Results of 2026-10-16
 with the measured 3.00-12 tire (rolling radius 0.2251 m, 28 pole pairs); "maintainer's" settings are
 the `tarik-2026-10-15` preset (current-mode drive, hard pedals, PWM alarm 80 % with PWM tiltback, speed
-tiltback 69 km/h):
+tiltback 69 km/h). The rider is welded to the pedals and can step off (`step_off_s`):
 
 | Scenario | Settings | Stock outcome | Key numbers |
 |---|---|---|---|
-| `overlean-top-speed` | maintainer's; the rider ignores tiltback | **Cutout: falls.** | Accelerating at 5 km/h per second: PWM alarm (80 %) at 24.2 s, about 62 km/h; the PWM first saturates at 26.0 s; the firmware disables the drive at 29.2 s at 70.8 km/h and the wheel falls at 30.0 s, 5.9 s after the first alarm; PWM tiltback 7.9° by then. |
-| `overlean-top-speed-30pct` | same, battery at 30 % (115 V at rest) | **Cutout: falls,** earlier and slower. | PWM alarm at 22.3 s, about 58 km/h; saturated at 24.1 s; drive disabled at 25.3 s at 64.8 km/h and the wheel falls at once, 3.0 s after the alarm; bus 108 V. |
-| `hard-braking-30kmh` | maintainer's | **Holds.** No cutoff, no fall, no alert. | Stops from 32.5 km/h in 2.83 s (3.2 m/s² mean); braking torque peaks at −206 N·m with −240 A of Iq (the firmware's limit is 280 A); regeneration only −12.0 A at the battery (130.8 V on the bus); pedals tip 10.8° nose up. |
-| `hill-climb-low-battery` | maintainer's, battery at 3 % (101.8 V at rest); the rider ignores tiltback | **Holds, tilts back** on the climb; no cutoff. | 20 % grade from 40 m (reached at 17.0 s, 25 km/h): low-voltage alert already on from boot (1.7 s); the climb sags the bus below 99.2 V and the battery tiltback passes 2° at 20.8 s and keeps growing, to 26° at 36 s (pedals 30° nose up); bus down to 97.0 V, Iq up to 77 A. |
-| `low-battery-tiltback` | neutral | **Warns and tilts back,** no cutoff. | 98.5 V: alert 0x08 at 1.7 s; the pedals pass 8° nose up at 12.5 s and the rider, easing off, gets no faster than 6.9 km/h. |
-| `hall-single-line-loss` | neutral | **No cutoff,** degraded drive. | Firmware speed reads a third of the truth (6.7 against 20.1 km/h): speed tiltback and alarms act at three times their setting. Torque ripple 19.9 N·m (3.9 healthy). |
-| `hall-loss-while-riding` | neutral | **Cut, then falls.** | Hall fault 70 ms after the connector comes off; alert 0x40; nose dive past −30° within 0.13 s. |
-| `pothole-20kmh` | maintainer's | **PRELIMINARY** (rigid body, no suspension yet): `upright` fails, as on the compat firmware; the pedals dip past 45° at 20.4 s, the firmware does not cut, and the wheel rides on nose down. | A 2 cm deep, 50 cm long pothole with steep edges: the far edge takes the wheel from 20.0 to 16.1 km/h in 20 ms; full forward torque (285 A, the current limit); shell to −57°; the gyro clips (below) and for the next seconds the firmware balances 26° nose down (RMS error of its attitude 27° over 20.8-22 s). |
-| `ble-service-cut-standing` | maintainer's | **Cut, then falls.** | A phone sends "c", then "y" while the rider stands still: the motor is cut 10 ms after the "y" (drive fault and balance disabled), and wheel and rider fall 1.3 s later. No pairing, no confirmation. |
+| `overlean-top-speed` | maintainer's; the rider ignores tiltback | **Cutout: falls.** | Accelerating at 5 km/h per second: first PWM alarm (80 %) at 25.8 s, 64.7 km/h; the PWM first saturates at 26.2 s; the firmware disables the drive at 31.6 s at 71.0 km/h, 5.8 s after the alarm, and the wheel falls 0.15 s later; PWM tiltback 8.4° by then. |
+| `overlean-top-speed-30pct` | same, battery at 30 % (115 V at rest) | **Cutout: falls,** earlier and slower. | PWM alarm at 22.4 s, 57.5 km/h; saturated at 24.7 s; drive disabled at 26.5 s at 66.4 km/h, 4.0 s after the alarm, and the wheel falls at once; bus 109 V. |
+| `hard-braking-30kmh` | maintainer's | **Holds.** No cutoff, no fall, no alert. | From 29.2 km/h at the brake: below 15 km/h after 1.5 s, below 5 km/h after 2.9 s (2.3 m/s² mean), stopped after 4.7 s; braking torque peaks at −161 N·m with −187 A of Iq (the firmware's limit is 280 A); regeneration only −14 A at the battery (131.1 V on the bus); pedals tip 6.8° nose up. The rider's speed gain is 1.0: 2.0 made a 4 Hz rider-wheel limit cycle before the brake. |
+| `hill-climb-low-battery` | maintainer's, battery at 3 % (101.8 V at rest); the rider ignores tiltback | **Holds, tilts back** on the climb; no cutoff. | 20 % grade from 40 m (reached at 17.0 s, 25 km/h): low-voltage alert already on from boot (1.7 s, below 105.6 V); the climb sags the bus below 99.2 V and the battery tiltback passes 2° at 20.9 s and keeps growing, to 26° at 36 s (pedals 30° nose up); bus down to 97.0 V, Iq up to 79 A. |
+| `low-battery-tiltback` | neutral | **Warns and tilts back,** no cutoff. | 98.5 V: alert 0x08 at 1.7 s; the rider sets off at 8.5 s, once the pedals are level; the pedals pass 8° nose up at 12.6 s and the rider, easing off, gets no faster than 11.4 km/h, stops at 16.0 s with the pedals 22° nose up, and then rolls back at up to 1.5 km/h. |
+| `hall-single-line-loss` | neutral | **No cutoff,** degraded drive. | Firmware speed reads a third of the truth (6.7 against 20.1 km/h): speed tiltback and alarms act at three times their setting. Torque ripple 19.6 N·m (3.8 healthy). |
+| `hall-loss-while-riding` | neutral | **Cut, then falls.** | Hall fault 70 ms after the connector comes off; alert 0x40; nose dive past −30° within 0.14 s. |
+| `pothole-20kmh` | maintainer's | **PRELIMINARY** (rigid body, no suspension yet): `upright` fails, as on the compat firmware; the pedals dip past 45° at 20.2 s, the firmware does not cut, and the wheel rides on nose down. | A 2 cm deep, 50 cm long pothole with steep edges: the far edge takes the wheel from 20.0 to 16.2 km/h in 20 ms; full forward current (253 A); shell to −54°; the gyro clips (below) and for the next seconds the firmware balances 20° nose down (RMS error of its attitude 21° over 20.8-22 s). |
+| `ble-service-cut-standing` | maintainer's | **Cut, then falls.** | A phone sends "c", then "y" while the rider stands still: the motor is cut 10 ms after the "y" (drive fault and balance disabled), and wheel and rider fall 1.2 s later. No pairing, no confirmation. The clean profile answers `SERVICE:DENIED` and keeps balancing. |
+| `rider-steps-off-15kmh`, `rider-steps-off-5kmh` | maintainer's | **Cut once the wheel goes down,** no runaway. | The riderless wheel is easy to balance, so the drive stays on until the wheel tips onto its side; the roll cut-off disables it 70 ms after the roll passes 40°: 2.4 s after the step-off at 15 km/h, 0.6 s at 5 km/h. Stock, compat and clean behave the same. |
 | `balance-60s`, `ride-20kmh-stop` | neutral | Hold (CI regression runs). | |
 
 ## What the overlean runs show
@@ -36,24 +38,32 @@ rider eases off and stays up, which is what the PWM tiltback is for; the danger 
 through it.
 
 The PWM alarm comes before the cutout, but not by a fixed margin. On a full battery the PWM sits near
-55-78 % above 60 km/h, touches the 80 % alarm at about 62 km/h, and saturates for good about 6 s later
-at 70 km/h, when the rider asks for more than the voltage headroom allows: the q-current loop
+55-78 % above 60 km/h, touches the 80 % alarm at about 65 km/h, and the drive is disabled about 6 s
+later at 71 km/h, when the rider asks for more than the voltage headroom allows: the q-current loop
 saturates, the current stops following its reference, and the balance command runs to its ±1050
-limit. On a 30 % battery the whole sequence comes about 4 km/h earlier and the margin from alarm to
-fall halves to 3 s. The PWM tiltback has reached only 4-8° by the fall: it warns, but at this
+limit. On a 30 % battery the whole sequence comes about 7 km/h earlier and the margin from alarm to
+cutout shrinks to 4 s. The PWM tiltback has reached only 5-8° by the fall: it warns, but at this
 acceleration it cannot stop a rider who keeps leaning.
 
 Pedal height (an ESTIMATE from the scan, ±15 mm) moves the cutout along this ramp but hardly its speed:
-with the pedals 5 mm below the axle the drive is disabled at 28.5 s at 70.4 km/h, with them 25 mm
-above at 35.4 s at 71.2 km/h (now 10 mm above: 29.2 s, 70.8 km/h). It mostly changes how long the
+with the pedals 5 mm below the axle the drive was disabled at 28.5 s at 70.4 km/h, with them 25 mm
+above at 35.4 s at 71.2 km/h, and 10 mm above (the estimate) at 29.2 s at 70.8 km/h (measured before
+the rider was welded to the pedals, which moved the cutout to 31.6 s). It mostly changes how long the
 rider can hang at the limit before the nose goes down.
 
 Before the measured tire and pedals (the 16 × 3 tire guess, 26 pole pairs, 7.7 % less torque per amp
 at the axle, pedals level with the axle), the full-battery run gave: PWM alarm at 22.86 s at about
 62 km/h, nose past −20° at 23.28 s, fall at 23.76 s at 63.6 km/h, only 0.4 s after the alarm; the
 30 % run: alarm at 21.71 s at about 58 km/h, fall at 24.49 s. So the warning time, from the first PWM
-alarm to the loss of balance, depends on the motor values: 3-6 s with the measured tire and pedals,
+alarm to the loss of balance, depends on the motor values: 4-6 s with the measured tire and pedals,
 0.4 s before them. It needs measured motor constants before it means anything for a real wheel.
+
+The motor's inductance (an ESTIMATE, 200 µH) matters most, because the PWM value the firmware shows
+and alarms on is Vq alone, and the d voltage it leaves out grows with the inductance
+([findings](../findings/stock-firmware.md), finding 10). On our compat build, which follows stock here:
+with 100 µH the vector never reaches the limit and the speed tiltback holds the wheel near 70 km/h; with
+400 µH the first PWM alarm comes at 43 km/h, 0.1 s before saturation, and the drive is disabled at
+48 km/h.
 
 ## The gyro clips, and the attitude estimate stays wrong
 
@@ -61,14 +71,15 @@ The stock firmware sets the MPU-6500's gyro to ±500 °/s (65.5 LSB per °/s). I
 shell's pitch rate reaches 820 °/s and then 1360 °/s for a few tens of milliseconds. The IMU model,
 like the real part, saturates its 16-bit output at the range limit, so the firmware integrates
 500 °/s where the shell turns faster, and its Mahony filter loses the excess. After the swing the
-firmware believes the shell is level (−1.4°) while it is 26° nose down, and it balances that error:
-the wheel rides on with the pedals tilted. The accelerometer correction (hard pedals: Mahony gain 0.2)
+firmware believes the shell is level (+1.2°) while it is about 20° nose down (RMS error 21° over
+20.8-22 s; 26° in the run before the rider was welded to the pedals), and it balances that error: the
+wheel rides on with the pedals tilted. The accelerometer correction (hard pedals: Mahony gain 0.2)
 removes it slowly, by about 5° per second.
 
 The trigger is probably exaggerated (see the pothole caveat), but the behavior is the firmware's: any
 event that turns the shell faster than 500 °/s leaves the stock firmware riding with a wrong idea of
-level for seconds. A wider gyro range (±1000 or ±2000 °/s) or a check of the accelerometer after a
-saturated sample would avoid it.
+level for seconds. The clean profile runs the gyro at ±2000 °/s and re-anchors faster after a
+saturated sample (`GYRO_500DPS_CLIP`); see [findings/stock-firmware.md](../findings/stock-firmware.md).
 
 ## Preliminary: impacts on a rigid body
 
@@ -88,9 +99,11 @@ fall (drive disabled 0.3 s later).
   understood yet.
 - The hill climb stops at 36 s on purpose. Run on, the battery tiltback reaches 40° by 39 s, the
   rider who never gives up on 25 km/h stalls the wheel on the slope, the bus dips to 89 V and the
-  firmware disables the drive at 40.7 s; a person would have stepped off long before. With the
-  default rider, who eases off for tiltback, the wheel slows on the 20 % grade, stalls, rolls back
-  and falls at 23.5 s (drive disabled at 23.9 s): the easing rule is not yet right for steep slopes.
+  firmware disables the drive at about 41 s; a person would have stepped off long before. With the
+  default rider, who eases off for tiltback, the wheel still falls (at 23.7 s, drive disabled at
+  24.3 s): at 10° nose up and 15 km/h on the 20 % grade the firmware swings Iq from +25 to −227 A in
+  0.3 s while the rider leans back only 5°. That is no longer the old easing rule's roll-back; whether
+  a real rider would hold on there is open, so the scenario keeps the rider who ignores tiltback.
 
 ## Terrain
 

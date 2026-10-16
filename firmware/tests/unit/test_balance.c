@@ -246,18 +246,109 @@ static void test_lost_hall_line_lowers_the_speed_tiltback(void)
     euc_balance_step_tiltbacks(&state, &in);
     TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_speed_deg);
     in.limp = true; /* limp: 10 km/h = 2.778 m/s */
-    for (unsigned tick = 0U; tick < 1000U; tick++) {
+    for (unsigned tick = 0U; tick < 3000U; tick++) {
         euc_balance_step_tiltbacks(&state, &in);
     }
-    const float overspeed_m_per_s = 5.0F - (10.0F / 3.6F);
-    TEST_ASSERT_FLOAT_WITHIN(0.1F, 10.0F * overspeed_m_per_s * (1.0F - powf(0.9995F, 1000.0F)),
-                             state.tiltback_speed_deg);
+    /* Toward 10 deg per m/s of overspeed (22.2 deg), at most 2.5 deg/s, and it stops at 12 deg. */
+    TEST_ASSERT_EQUAL_FLOAT(12.0F, state.tiltback_speed_deg);
     /* A lower setting stays */
     euc_balance_init(&state);
     in.settings.tiltback_speed_kmh = 8U;
     state.speed_m_per_s = 2.5F; /* 9 km/h: above 8, below the limp speed */
     euc_balance_step_tiltbacks(&state, &in);
     TEST_ASSERT_TRUE(state.tiltback_speed_deg > 0.0F);
+}
+
+/* Limp mode starting at high speed: the speed tiltback grows at most 2.5 deg/s, never abruptly. */
+static void test_limp_tiltback_rate_is_bounded(void)
+{
+    struct euc_balance_state state;
+    struct euc_balance_in in = level_input();
+    euc_balance_init(&state);
+    in.limp = true;
+    state.speed_m_per_s = 13.9F; /* 50 km/h: unlimited, about 24 deg after 1 s */
+    for (unsigned tick = 0U; tick < 496U; tick++) {
+        const float before = state.tiltback_speed_deg;
+        euc_balance_step_tiltbacks(&state, &in);
+        TEST_ASSERT_TRUE((state.tiltback_speed_deg - before) <= 0.00505F);
+    }
+    TEST_ASSERT_FLOAT_WITHIN(0.05F, 2.5F, state.tiltback_speed_deg);
+    euc_balance_init(&state);
+    state.speed_m_per_s = -13.9F; /* backward: the same bound, the other sign */
+    for (unsigned tick = 0U; tick < 496U; tick++) {
+        euc_balance_step_tiltbacks(&state, &in);
+    }
+    TEST_ASSERT_FLOAT_WITHIN(0.05F, -2.5F, state.tiltback_speed_deg);
+    in.limp = false; /* without limp mode the stock rate stays */
+    euc_balance_init(&state);
+    state.speed_m_per_s = 13.9F;
+    for (unsigned tick = 0U; tick < 496U; tick++) {
+        euc_balance_step_tiltbacks(&state, &in);
+    }
+    TEST_ASSERT_TRUE(state.tiltback_speed_deg > 10.0F);
+}
+
+/* Clean: the PWM tiltback also runs when the voltage vector passes 75 %, without 'e' and whatever the PWM
+ * alarm says (PWM_TILTBACK_VQ_ONLY). */
+static void test_headroom_tiltback_in_clean(void)
+{
+    const uint32_t profiles[2] = {EUC_SIL_PROFILE_COMPAT, EUC_SIL_PROFILE_CLEAN};
+    for (size_t p = 0U; p < 2U; p++) {
+        euc_sil_quirk_set_mask(euc_sil_quirk_profile_mask(profiles[p]));
+        struct euc_balance_state state;
+        struct euc_balance_in in = level_input(); /* 'x': PWM tiltback off, no alarm */
+        euc_balance_init(&state);
+        state.speed_cm_per_s = 1500;
+        in.motor_voltage_sq = 23000U * 23000U; /* 73 %: below the margin */
+        for (unsigned tick = 0U; tick < 100U; tick++) {
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_pwm_deg);
+        in.motor_voltage_sq = (20000U * 20000U) + (14000U * 14000U); /* |V| = 24413, 77 % */
+        for (unsigned tick = 0U; tick < 496U; tick++) {
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        if (profiles[p] == EUC_SIL_PROFILE_COMPAT) {
+            TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_pwm_deg);
+        } else {
+            TEST_ASSERT_FLOAT_WITHIN(0.1F, 2.6F, state.tiltback_pwm_deg); /* 2.7 deg/s nose-up */
+        }
+    }
+}
+
+/* Clean: the battery tiltback stops at 8 deg and a 10 km/h speed limit takes over
+ * (BATTERY_TILTBACK_UNBOUNDED). */
+static void test_battery_tiltback_capped_with_a_speed_limit_in_clean(void)
+{
+    const uint32_t profiles[2] = {EUC_SIL_PROFILE_COMPAT, EUC_SIL_PROFILE_CLEAN};
+    for (size_t p = 0U; p < 2U; p++) {
+        euc_sil_quirk_set_mask(euc_sil_quirk_profile_mask(profiles[p]));
+        struct euc_balance_state state;
+        struct euc_balance_in in = level_input(); /* tiltback 25 km/h */
+        euc_balance_init(&state);
+        state.speed_cm_per_s = 420;
+        state.speed_m_per_s = 4.2F;                       /* 15 km/h */
+        in.battery_voltage_cv = 9850;                     /* below 99.20 V */
+        for (unsigned tick = 0U; tick < 10000U; tick++) { /* 20 s */
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        if (profiles[p] == EUC_SIL_PROFILE_COMPAT) {
+            TEST_ASSERT_TRUE(state.tiltback_battery_deg > 30.0F); /* unbounded */
+            TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_speed_deg);
+            continue;
+        }
+        TEST_ASSERT_TRUE(state.battery_limit);
+        TEST_ASSERT_EQUAL_FLOAT(8.0F, state.tiltback_battery_deg);
+        /* 15 km/h is above the 10 km/h limit: the speed tiltback grows, at most 12 deg */
+        TEST_ASSERT_EQUAL_FLOAT(12.0F, state.tiltback_speed_deg);
+        /* hold in the gap between the windows, release inside the inner window */
+        in.battery_voltage_cv = 10000;
+        euc_balance_step_tiltbacks(&state, &in);
+        TEST_ASSERT_TRUE(state.battery_limit);
+        in.battery_voltage_cv = 12000;
+        euc_balance_step_tiltbacks(&state, &in);
+        TEST_ASSERT_FALSE(state.battery_limit);
+    }
 }
 
 static void test_battery_tiltback_window(void)
@@ -534,6 +625,9 @@ int main(void)
     RUN_TEST(test_ramp_down_to_zero);
     RUN_TEST(test_speed_tiltback);
     RUN_TEST(test_lost_hall_line_lowers_the_speed_tiltback);
+    RUN_TEST(test_limp_tiltback_rate_is_bounded);
+    RUN_TEST(test_headroom_tiltback_in_clean);
+    RUN_TEST(test_battery_tiltback_capped_with_a_speed_limit_in_clean);
     RUN_TEST(test_battery_tiltback_window);
     RUN_TEST(test_pwm_tiltback_needs_the_setting_and_clamps);
     RUN_TEST(test_pedal_trim_slews_without_overshoot);

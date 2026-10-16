@@ -37,9 +37,9 @@ because its clipped gyro makes it believe the wheel is level. See "Open question
 | Protection | Trigger | Response | Depends on speed |
 |---|---|---|---|
 | Speed tiltback | speed above `W Y` (km/h, 200 = off) | nose-up offset, 10 deg per m/s over, time constant 4 s; releases with 2 s | yes |
-| PWM tiltback | PWM alarm active and `e` set | nose-up offset at 2.7 deg/s, at most 12 deg | through PWM |
-| Battery / temperature tiltback | voltage outside 99.20..137.60 V or board above about 80 degC | nose-up offset at 2.38 deg/s (1.98 backward); holds in the gap to the inner window, releases in 20 s | no |
-| Clean: lost hall line | one stuck hall line found (`HALL_SINGLE_LINE_UNDETECTED`) | speed tiltback at 10 km/h at most, no automatic restart after the next stop | yes |
+| PWM tiltback | PWM alarm active and `e` set; clean also whenever the voltage vector \|Vd, Vq\| passes 75 % (`PWM_TILTBACK_VQ_ONLY`) | nose-up offset at 2.7 deg/s, at most 12 deg | through PWM |
+| Battery / temperature tiltback | voltage outside 99.20..137.60 V or board above about 80 degC | nose-up offset at 2.38 deg/s (1.98 backward); holds in the gap to the inner window, releases in 20 s. Stock: no limit (about 48 deg in the end). Clean: at most 8 deg, and the 10 km/h speed limit of limp mode takes over until the inner window (`BATTERY_TILTBACK_UNBOUNDED`) | no (clean: yes) |
+| Clean: limp mode | one stuck hall line found (`HALL_SINGLE_LINE_UNDETECTED`) or a stalled main loop (`NO_WATCHDOG`) | speed tiltback at 10 km/h at most, growing at most 2.5 deg/s, at most 12 deg, no automatic restart after the next stop | yes |
 | Output slew | every tick | command changes at most 120 per tick, soft start +1 per tick up to 1050 | no |
 | Voltage-mode current back-off | \|Iq\| > 280 A (drive mode 0) | command reduced each step, slew 60 per step | no |
 | q-integral limit | every tick | the current loop's integral supplies at most 160 x \|v\| (0.1 m/s, up to 20 m/s) of voltage | yes |
@@ -52,12 +52,14 @@ because its clipped gyro makes it believe the wheel is level. See "Open question
 | Hall fault | hall state 0 or 7 | more than fPWM / 8 calls (62.5 ms) | `hall_fault`, hard cut, `alerts` bit 0x40, 2 beeps every 250 ticks | the timer reads the raw lines also while a lost line is rebuilt |
 | Lost hall line | one line stuck | never detected (stock) | none: wrong angle in 2 sectors of 6, speed reads 1/3 | found within about 3 electrical turns; state rebuilt from 2 lines, alert 0x40, 10 km/h tiltback |
 | Current sensor start check | any phase reading above 80 A in readings 1..999 after power-on (3 of them before the tick starts) | 1 reading | hard cut, stop the drive, alert 0x02 | same |
-| Over-current | phase current above the board level | never (stock counts only) | none | trips the bridge (`NO_OVERCURRENT_TRIP`; level is a board placeholder) |
+| Over-current | phase current above the board level | never (stock counts only) | none | off in both profiles until a bench level is set (`NO_OVERCURRENT_TRIP`; level is a board placeholder) |
 | IMU at power-on | WHO_AM_I wrong | once | hard cut, alert 0x04 | same |
 | Gyro clip | pitch rate above the gyro range | while it lasts | none: the attitude loses the excess (+-500 deg/s) | +-2000 deg/s and a faster re-anchor after a rail (`GYRO_500DPS_CLIP`) |
 | Numeric | NaN or infinity in attitude, law, ramp-down or output | at once | stock passes it on | command 0, motor off until power-off (`NAN_FAIL_OPEN`) |
 | Exception | any fault handler | at once | both profiles turn the bridge off first | - |
-| Hang | main loop or tick stops | 250 ms | stock: nothing | independent watchdog resets (`NO_WATCHDOG`) |
+| Main loop stall | no main-loop pass while the tick runs | 0.5 s | stock: nothing | limp mode and stall beeps, no reset (`NO_WATCHDOG`) |
+| Dead tick or FOC | no tick, no FOC step, or a broken command | 250 ms (167..333 ms) | stock: nothing | independent watchdog resets; the next boot keeps the bridge off (`NO_WATCHDOG`) |
+| Stale command | no balance command for 3 ticks (about 6 ms) | 6 ms | stock: the FOC keeps the last command | command ramps to 0 at 4200 per second and latches (`STALE_COMMAND_HELD`) |
 | Free fall | all axes below 0.3 g for 10 ticks | while it lasts | gravity reference held at 1 g; never cuts | same |
 
 ## Battery, temperature and BMS (alarms only, no cut)
@@ -99,6 +101,17 @@ and clean, and if clean still trips, change in this order, each proven by one sc
 2. A lower command slew (for example 40 per tick) when the command crosses zero while \|error\| > 15 deg.
 3. The pitch detector's 105 ms for the error detector too: this changes when a fall cuts, not whether.
 4. Only if a realistic body still trips: a speed-aware cut-off, with evidence.
+
+### Telemetry PWM % and the true headroom
+
+Clean's headroom tiltback (`PWM_TILTBACK_VQ_ONLY`) reads the voltage vector \|Vd, Vq\|, but the telemetry PWM %
+(frame 07) still reports Vq before the circle limit, as the stock firmware does. At speed Vq reads about 66 %
+while the vector is already at 78..86 %, so an app's PWM alarm underestimates the true headroom. Options, to be
+decided after periph's sensitivity check on the motor values:
+
+1. Keep the stock meaning (apps are calibrated to stock wheels).
+2. Report \|V\| in the same field (honest headroom, but a different meaning under the same name).
+3. Keep Vq and add \|V\| in a spare telemetry field (no app changes its meaning; new apps can show both).
 
 ### Acceptance: what must still cut
 

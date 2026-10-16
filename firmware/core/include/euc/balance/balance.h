@@ -61,6 +61,7 @@ struct euc_balance_in {
     int32_t hall_period_speed;       /* speed from hall periods, about 1200 per m/s */
     int32_t motor_current_lpf_ma;    /* low-passed q-axis current, mA */
     int16_t motor_voltage_q;         /* FOC Vq, 31500 = 100 % modulation */
+    uint32_t motor_voltage_sq;       /* clean: |Vd, Vq|^2 after the circle limit (31500^2 = 100 %) */
     bool pwm_alarm_active;           /* alarm task: PWM above the 'W' 'P' threshold */
     bool hard_inhibit;               /* hard fault or lock: no automatic recovery */
     bool hall_fault;                 /* hall sensor fault: no automatic recovery */
@@ -94,6 +95,8 @@ struct euc_balance_state {
     float error_prev_deg; /* for the current-mode D term */
     float tiltback_battery_deg;
     float tiltback_speed_deg;
+    bool battery_limit; /* clean: battery or board temperature outside its window: speed limit, capped
+                           tiltback */
     float tiltback_pwm_deg;
     float pedal_trim_deg;
     float restart_offset_deg;

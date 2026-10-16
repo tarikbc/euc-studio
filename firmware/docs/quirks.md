@@ -50,41 +50,44 @@ The bit is the quirk's position in the SIL mask.
 | 24 | `HALL_INVALID_ANGLE_RUN` | on | off | 0x0800539C hall_update | In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault. |
 | 25 | `MODE0_DEAD_TIME` | on | off | 0x08007CD4 SVPWM_IcsInit | Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns. |
 | 26 | `HALL_SINGLE_LINE_UNDETECTED` | on | off | 0x0800539C hall_update | One stuck hall line is never detected: the motor runs on with a wrong angle in two sectors of six. |
+| 27 | `STALE_COMMAND_HELD` | on | off | 0x08004668 motor_control_isr_body | If the balance tick stops, the FOC keeps applying the last command for as long as the tick is dead. |
+| 28 | `PWM_TILTBACK_VQ_ONLY` | on | off | 0x0800678C balance task, 0x0800B880 alarm_task | PWM tiltback needs 'e' and reads Vq before the circle limit (66 % at speed while the vector is full). |
+| 29 | `BATTERY_TILTBACK_UNBOUNDED` | on | off | 0x0800678C balance task | Below 99.2 V or above 80 degC the pedals tilt back 2.4 deg/s without a limit, at any speed. |
 
 ## Sensors
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 27 | `NTC_REFERENCE_298_5` | on | off | 0x08005218 ntc_temperature_measure | The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high. |
+| 30 | `NTC_REFERENCE_298_5` | on | off | 0x08005218 ntc_temperature_measure | The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high. |
 
 ## Alarms and user interface
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 28 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
-| 29 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
-| 30 | `STRIP_BREATH_PER_PASS` | off | off | 0x08005A3C led_update_flag, 0x08005A5C led_strip_effects | The strip effects run every main-loop pass, so the breathing speed follows the CPU load (2.1 s on the wheel). |
+| 31 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
+| 32 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
+| 33 | `STRIP_BREATH_PER_PASS` | off | off | 0x08005A3C led_update_flag, 0x08005A5C led_strip_effects | The strip effects run every main-loop pass, so the breathing speed follows the CPU load (2.1 s on the wheel). |
 
 ## BMS link (USART3)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 31 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
-| 32 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
+| 34 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
+| 35 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
 
 ## Settings storage (flash journal at 0x0800F000)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 33 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
-| 34 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
-| 35 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
-| 36 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
-| 37 | `RECORD_FIELDS_UNCHECKED` | on | off | 0x08004D48 settings_load | Most loaded settings fields are used unchecked: a roll limit step of 15 moves the cut-off to 115 deg. |
+| 36 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
+| 37 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
+| 38 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
+| 39 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
+| 40 | `RECORD_FIELDS_UNCHECKED` | on | off | 0x08004D48 settings_load | Most loaded settings fields are used unchecked: a roll limit step of 15 moves the cut-off to 115 deg. |
 
 ## Platform
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 38 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
-| 39 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 41 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
+| 42 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |

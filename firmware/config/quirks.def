@@ -83,6 +83,12 @@ EUC_QUIRK_DEF(MODE0_DEAD_TIME, 1, 0, "0x08007CD4 SVPWM_IcsInit",
               "Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns.")
 EUC_QUIRK_DEF(HALL_SINGLE_LINE_UNDETECTED, 1, 0, "0x0800539C hall_update",
               "One stuck hall line is never detected: the motor runs on with a wrong angle in two sectors of six.")
+EUC_QUIRK_DEF(STALE_COMMAND_HELD, 1, 0, "0x08004668 motor_control_isr_body",
+              "If the balance tick stops, the FOC keeps applying the last command for as long as the tick is dead.")
+EUC_QUIRK_DEF(PWM_TILTBACK_VQ_ONLY, 1, 0, "0x0800678C balance task, 0x0800B880 alarm_task",
+              "PWM tiltback needs 'e' and reads Vq before the circle limit (66 % at speed while the vector is full).")
+EUC_QUIRK_DEF(BATTERY_TILTBACK_UNBOUNDED, 1, 0, "0x0800678C balance task",
+              "Below 99.2 V or above 80 degC the pedals tilt back 2.4 deg/s without a limit, at any speed.")
 
 /* Sensors */
 EUC_QUIRK_DEF(NTC_REFERENCE_298_5, 1, 0, "0x08005218 ntc_temperature_measure",

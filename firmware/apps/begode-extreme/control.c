@@ -292,6 +292,11 @@ static void balance(void)
     in->hall_period_speed = app.motor.hall.period_speed;
     in->motor_current_lpf_ma = app.motor.iq_lpf_ma;
     in->motor_voltage_q = app.motor.vq_active;
+    const int32_t vq = app.motor.v_qd.q_q15;
+    const int32_t vd = app.motor.v_qd.d_q15;
+    const int32_t vq_squared = vq * vq;
+    const int32_t vd_squared = vd * vd;
+    in->motor_voltage_sq = (uint32_t)vq_squared + (uint32_t)vd_squared;
     in->pwm_alarm_active = app.alarm_out.pwm_alarm;
     in->hard_inhibit = app.motor.hard_cut || app.foc_hard_cut_request;
     in->hall_fault = app.motor.hall.fault;

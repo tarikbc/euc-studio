@@ -19,8 +19,11 @@
  * Telemetry and balance taps: Iq low-passed in mA (balance current feedback), Iq in 0.1 A, the active Vq
  * (balance overload checks, app PWM %).
  *
- * Fail-closed: the command is checked where it enters (finite, within +-1050), and in the clean profile a
- * phase over-current trips the bridge (quirk NO_OVERCURRENT_TRIP; the level is a board setting).
+ * Fail-closed: the command is checked where it enters (finite, within +-1050). In the clean profile a command
+ * that is not renewed for 3 ticks (about 6 ms: the balance tick died) latches command_stale, and the FOC
+ * ramps the command to 0 at 4200 per second (full command in 0.25 s) and keeps it there until power-off; the
+ * watchdog stays the backstop (quirk STALE_COMMAND_HELD). The phase over-current trip exists but is off in
+ * both profiles until a bench level is set (quirk NO_OVERCURRENT_TRIP).
  */
 #ifndef EUC_MOTOR_MOTOR_H
 #define EUC_MOTOR_MOTOR_H
@@ -83,6 +86,13 @@ struct euc_motor_state {
     bool hard_cut;        /* latched until reset: bridge off */
     bool outputs_enabled; /* bridge outputs on (TIM8 MOE) */
     bool enable_pending;  /* the one-time enable has not happened yet */
+
+    /* Clean: a stale balance command (quirk STALE_COMMAND_HELD) */
+    bool command_seen;            /* the balance has sent a command since power-on */
+    uint16_t steps_since_command; /* FOC steps since the last command */
+    uint16_t stale_limit_steps;   /* 3 ticks of FOC steps */
+    float stale_ramp_per_step;    /* 4200 per second, per FOC step */
+    bool command_stale;           /* latched until power-off: the command ramps to 0 */
 };
 
 struct euc_motor_foc_in {

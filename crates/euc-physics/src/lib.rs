@@ -34,6 +34,13 @@ pub const TIMESTEP_S: f64 = 0.0005;
 /// Pitch or roll beyond which the wheel counts as fallen, radians (45°).
 const FALLEN_RAD: f64 = std::f64::consts::FRAC_PI_4;
 
+/// The push of the foot that steps off: a roll torque on the shell, N·m, for [`STEP_OFF_KICK_S`].
+/// Without it a riderless wheel in this symmetric model would roll on upright for ever.
+const STEP_OFF_KICK_NM: f64 = 30.0;
+
+/// How long the stepping foot pushes, seconds.
+const STEP_OFF_KICK_S: f64 = 0.2;
+
 /// Time the model settles on its stand before the clock starts, seconds.
 const SETTLE_S: f64 = 0.2;
 
@@ -128,8 +135,8 @@ pub struct Physics {
     motor_torque: f64,
     ankle_torque: f64,
     push_n: f64,
-    /// The rider has stepped off: no ankle, push, drag or roll aid any more.
-    rider_off: bool,
+    /// When the rider stepped off, seconds: no ankle, push, drag or roll aid any more.
+    stepped_off_at: Option<f64>,
 }
 
 impl std::fmt::Debug for Physics {
@@ -188,7 +195,7 @@ impl Physics {
             motor_torque: 0.0,
             ankle_torque: 0.0,
             push_n: 0.0,
-            rider_off: false,
+            stepped_off_at: None,
         };
         // The stand and the tire are soft constraints: let them take the load before time starts,
         // so the first IMU sample already reads a wheel at rest.
@@ -222,16 +229,19 @@ impl Physics {
         self.push_n = newtons;
     }
 
-    /// The rider steps off: the feet weld lets go, the rider's body falls free beside the wheel, and
-    /// the ankle torque, the rider's pushes and drag and the roll aid stop. It cannot be undone.
+    /// The rider steps off: the feet weld lets go and the rider's body lands beside the wheel; the
+    /// ankle torque, the rider's pushes and drag and the roll aid stop, and the stepping foot gives
+    /// the shell a short sideways push. It cannot be undone.
     pub fn step_off(&mut self) {
-        self.data.eq_active_mut()[self.ids.on_pedals] = false;
-        self.rider_off = true;
+        if self.stepped_off_at.is_none() {
+            self.data.eq_active_mut()[self.ids.on_pedals] = false;
+            self.stepped_off_at = Some(self.time_s());
+        }
     }
 
     /// The rider has stepped off.
     pub const fn rider_off(&self) -> bool {
-        self.rider_off
+        self.stepped_off_at.is_some()
     }
 
     /// Holds the wheel upright and still on a stand, or lets it go.
@@ -267,16 +277,21 @@ impl Physics {
             held: self.held(),
             pitch_up: att.pitch,
         };
-        self.ankle_torque = if self.rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
+        let rider_off = self.rider_off();
+        self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
         self.motor_torque = motor_torque_nm;
 
-        let assist = if self.rider_off { Assist { roll_stiffness: 0.0, roll_damping: 0.0 } } else { self.setup.assist };
-        let roll_torque = -(assist.roll_stiffness * att.roll + assist.roll_damping * att.roll_rate);
+        let assist = if rider_off { Assist { roll_stiffness: 0.0, roll_damping: 0.0 } } else { self.setup.assist };
+        let kick = match self.stepped_off_at {
+            Some(at) if self.time_s() - at < STEP_OFF_KICK_S => STEP_OFF_KICK_NM,
+            _ => 0.0,
+        };
+        let roll_torque = kick - (assist.roll_stiffness * att.roll + assist.roll_damping * att.roll_rate);
         let [hx, hy] = att.heading;
         self.data.ctrl_mut()[ids.ankle] = self.ankle_torque;
         self.data.qfrc_applied_mut()[ids.axle_dof] = motor_torque_nm;
         self.data.xfrc_applied_mut()[ids.shell] = [0.0, 0.0, 0.0, roll_torque * hx, roll_torque * hy, 0.0];
-        let along = if self.rider_off { 0.0 } else { self.push_n - aero };
+        let along = if rider_off { 0.0 } else { self.push_n - aero };
         self.data.xfrc_applied_mut()[ids.rider] = [along * hx, along * hy, 0.0, 0.0, 0.0, 0.0];
         self.data.step2();
         self.distance_m += att.speed * TIMESTEP_S;

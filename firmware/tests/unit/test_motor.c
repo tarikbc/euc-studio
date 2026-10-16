@@ -471,6 +471,62 @@ static void test_over_current_trip_cuts_when_switched_on(void)
     }
 }
 
+/* Clean: a balance command that is not renewed for 3 ticks (72 FOC steps at 12 kHz) ramps to 0 at 4200 per
+ * second (0.35 per step) and latches (STALE_COMMAND_HELD). Compat keeps the last command. */
+static void test_stale_command_ramps_to_zero_in_clean(void)
+{
+    for (size_t p = 0U; p < 2U; p++) {
+        use_profile(profiles[p]);
+        struct euc_motor_state state;
+        struct euc_motor_foc_out out;
+        const struct euc_motor_foc_in in = idle_input();
+        power_on(&state, EUC_MOTOR_CURRENT_MODE);
+        TEST_ASSERT_EQUAL_UINT16(72U, state.stale_limit_steps);
+        for (uint32_t i = 0U; i < 500U; i++) {
+            euc_motor_foc_step(&state, &in, &out); /* no command yet (boot): never stale */
+        }
+        TEST_ASSERT_FALSE(state.command_stale);
+        euc_motor_set_command(&state, 500.0F);
+        for (uint32_t i = 0U; i < 72U; i++) {
+            euc_motor_foc_step(&state, &in, &out);
+        }
+        TEST_ASSERT_FALSE(state.command_stale);
+        TEST_ASSERT_EQUAL_FLOAT(500.0F, state.command);
+        euc_motor_foc_step(&state, &in, &out); /* the 73rd step: 3 ticks and more */
+        if (profiles[p] == EUC_SIL_PROFILE_COMPAT) {
+            TEST_ASSERT_FALSE(state.command_stale);
+            TEST_ASSERT_EQUAL_FLOAT(500.0F, state.command);
+            continue;
+        }
+        TEST_ASSERT_TRUE(state.command_stale);
+        TEST_ASSERT_FLOAT_WITHIN(0.001F, 500.0F - 0.35F, state.command);
+        for (uint32_t i = 0U; i < 1500U; i++) { /* 500 / 0.35 = 1429 steps, 0.12 s */
+            euc_motor_foc_step(&state, &in, &out);
+        }
+        TEST_ASSERT_EQUAL_FLOAT(0.0F, state.command);
+        euc_motor_set_command(&state, 800.0F); /* latched: a late command does not drive again */
+        euc_motor_foc_step(&state, &in, &out);
+        TEST_ASSERT_EQUAL_FLOAT(0.0F, state.command);
+    }
+}
+
+static void test_fresh_commands_keep_the_command(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct euc_motor_state state;
+    struct euc_motor_foc_out out;
+    const struct euc_motor_foc_in in = idle_input();
+    power_on(&state, EUC_MOTOR_VOLTAGE_MODE);
+    TEST_ASSERT_EQUAL_UINT16(60U, state.stale_limit_steps); /* 10 kHz */
+    for (uint32_t tick = 0U; tick < 100U; tick++) {
+        euc_motor_set_command(&state, -300.0F);
+        for (uint32_t i = 0U; i < 20U; i++) { /* about one tick of FOC steps */
+            euc_motor_foc_step(&state, &in, &out);
+        }
+    }
+    TEST_ASSERT_FALSE(state.command_stale);
+}
+
 static void test_iq_lpf_wraps_above_65_a_in_compat(void)
 {
     for (size_t p = 0U; p < 2U; p++) {
@@ -514,6 +570,8 @@ int main(void)
     RUN_TEST(test_hall_fault_turns_the_bridge_off);
     RUN_TEST(test_start_check_stops_the_drive);
     RUN_TEST(test_over_current_trip_cuts_when_switched_on);
+    RUN_TEST(test_stale_command_ramps_to_zero_in_clean);
+    RUN_TEST(test_fresh_commands_keep_the_command);
     RUN_TEST(test_iq_lpf_wraps_above_65_a_in_compat);
     return UNITY_END();
 }

@@ -42,6 +42,11 @@
 
 #define BALANCE_PWM_PERCENT_DIVISOR 315 /* 31500 = 100 % */
 
+/* Clean stale-command guard: 3 RTC ticks (496.03 Hz) without a command, then a 4200 per second ramp to 0. */
+#define STALE_TICKS      3U
+#define RTC_TICK_HZ_X100 49603U
+#define STALE_RAMP_PER_S 4200.0F
+
 struct euc_motor_timing euc_motor_timing_for_mode(uint8_t drive_mode)
 {
     /* Voltage mode: 10 kHz. The stock dead time there is one count (13.9 ns), unsafe unless the gate driver
@@ -102,6 +107,9 @@ void euc_motor_init(struct euc_motor_state *state, uint8_t drive_mode, const str
     state->pid_d = pid_d_power_on;
     state->pid_q = pid_q_power_on;
     state->enable_pending = true;
+    const uint32_t fpwm = state->timing.pwm_frequency_hz;
+    state->stale_limit_steps = (uint16_t)((STALE_TICKS * fpwm * 100U) / RTC_TICK_HZ_X100);
+    state->stale_ramp_per_step = euc_f32_div(STALE_RAMP_PER_S, (float)fpwm);
 }
 
 void euc_motor_set_command(struct euc_motor_state *state, float command)
@@ -113,6 +121,11 @@ void euc_motor_set_command(struct euc_motor_state *state, float command)
         checked = -EUC_MOTOR_COMMAND_LIMIT;
     } else {
         /* within the limit */
+    }
+    state->command_seen = true;
+    state->steps_since_command = 0U;
+    if (state->command_stale && !EUC_QUIRK(STALE_COMMAND_HELD)) {
+        return; /* latched: the FOC owns the command until power-off */
     }
     state->command = checked;
 }
@@ -201,6 +214,31 @@ static int16_t scaled_command(float command, double factor)
     return (int16_t)product;
 }
 
+/* Clean: no command for 3 ticks means the balance tick died; ramp the command to 0 and latch. */
+static void stale_command_guard(struct euc_motor_state *state)
+{
+    if (EUC_QUIRK(STALE_COMMAND_HELD) || !state->command_seen) {
+        return;
+    }
+    if (state->steps_since_command < UINT16_MAX) {
+        state->steps_since_command++;
+    }
+    if (state->steps_since_command > state->stale_limit_steps) {
+        state->command_stale = true;
+    }
+    if (!state->command_stale) {
+        return;
+    }
+    const float step = state->stale_ramp_per_step;
+    if (state->command > step) {
+        state->command = euc_f32_sub(state->command, step);
+    } else if (state->command < -step) {
+        state->command = euc_f32_add(state->command, step);
+    } else {
+        state->command = 0.0F;
+    }
+}
+
 static int16_t regulate(struct euc_motor_state *state, bool disabled)
 {
     /* The integrals stay at zero while the stop brake held on the previous step. */
@@ -285,6 +323,7 @@ void euc_motor_foc_step(struct euc_motor_state *state, const struct euc_motor_fo
     state->id_gain = (int16_t)gain;
     state->i_qd.d_q15 = (int16_t)((gain * measured.d_q15) / ID_GAIN_DIVISOR);
 
+    stale_command_guard(state);
     const int16_t vq = regulate(state, in->drive_disabled);
     stop_brake(state, vq, in);
 

@@ -23,7 +23,10 @@ repository.
    the service sequences (firmware update, IMU calibration, drive-mode toggle), and the stock firmware stops the
    motor at once, even under a rider. Our clean firmware runs them only when nobody rides (the wheel is off, on
    its side, or cut with the handle button) and the power button is pressed within 10 s. Flashing a wheel that
-   runs our clean firmware therefore needs that press.
+   runs our clean firmware therefore needs that press. The simulator shows both sides
+   (`scenarios/ble-service-cut-standing.toml`): with a rider standing still, a phone sends "c" then "y"; the stock
+   firmware cuts the motor 10 ms later and wheel and rider fall, while the clean firmware answers `SERVICE:DENIED`
+   and keeps balancing ([docs/findings/stock-firmware.md](docs/findings/stock-firmware.md)).
 
 ## Reporting a safety problem
 

@@ -137,6 +137,13 @@ covers the motor gates):
   holds while the hall state is invalid (`HALL_INVALID_ANGLE_RUN`). The phase over-current trip exists but is
   off in both profiles until its level is measured on the bench (`NO_OVERCURRENT_TRIP` is on in clean too;
   a false trip mid-ride is a fall).
+- **Voltage headroom.** The stock PWM alarm and tiltback read Vq before the circle limit, so at speed they read
+  about 66 % while the voltage vector is already full, and the tiltback needs `e`. Clean also tilts back
+  whenever the vector \|Vd, Vq\| passes 75 %, whatever the settings (`PWM_TILTBACK_VQ_ONLY`).
+- **Low battery and hot board.** Stock tilts the pedals back 2.4 deg/s without a limit (26 deg after a
+  minute's climb, about 48 deg in the end). Clean stops that tiltback at 8 deg and applies the 10 km/h speed
+  limit of limp mode instead (2.5 deg/s, at most 12 deg), until the voltage and temperature are back inside
+  their window (`BATTERY_TILTBACK_UNBOUNDED`).
 - **One lost hall line.** The stock firmware never notices one stuck hall line: it rides on with a wrong
   angle in two sectors of six and a speed reading a third of the truth. Clean finds the silent line within
   three electrical turns, rebuilds the state from the other two lines, raises error bit 0x40 (fault beeps),

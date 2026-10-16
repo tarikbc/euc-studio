@@ -20,7 +20,7 @@ settings = "tarik-2026-10-15"
 brake_max = 6.0           # m/s²: a rider braking as hard as they dare
 lean_max_deg = 30.0
 lean_rate_deg_s = 60.0
-speed_kp = 2.0
+speed_kp = 1.0           # 2.0 made a 4 Hz rider-wheel limit cycle before the brake (eng)
 
 [[expect]]
 check = "record"

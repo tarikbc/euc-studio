@@ -52,7 +52,8 @@ axle_height_loaded_m = 0.2251  # INFERRED: equals the firmware's rolling radius
 
 [pedals]
 # CNC aluminium decks (D-shaped, hexagonal cut-outs, grip pins). The decks were off the wheel for
-# the scan: only the hinge brackets and pins are in it. Sizes below are ESTIMATES from shop photo
+# the scan: only the hinge brackets and pins are in it. The owner says this design does not match
+# his pedals; shape and sizes will be updated from his measurements. Sizes below are ESTIMATES from shop photo
 # proportions (notch = 0.16 of the length, width = 0.47 of the length) and the bracket the notch
 # must clear; one real measurement replaces them.
 in_scan = false
@@ -146,6 +147,31 @@ speaker_caps_m = [[-0.1868, 0.0505, 0.4491], [-0.1868, -0.0505, 0.4491]]  # norm
 speaker_grille_m = [0.012, 0.022]    # inner and outer radius
 ble_led_m = [-0.1868, -0.008, 0.4754]  # ESTIMATE (owner video): top of the band, right edge
 
+[shock]
+# Current shock, per owner photos 2026-10-16: DNM-type coil-over without reservoir, black spring,
+# threaded body with a slotted preload collar, chrome shaft, red rebound knob at the top eye.
+# Spring rate unknown. The 2026-10 scan shows an older shock with a piggyback reservoir.
+eye_top_m = [-0.1405, 0.0, 0.3681]      # MEASURED (scan): centre of the top cross shaft
+eye_bottom_m = [-0.224, 0.0, 0.182]     # MEASURED (scan), +-0.005
+eye_to_eye_m = 0.204
+body_at = "bottom eye"                  # owner photos: shaft and knob at the top eye
+spring_outer_diameter_m = 0.052         # ESTIMATE (photo, scaled by eye-to-eye)
+spring_wire_m = 0.008                   # ESTIMATE
+spring_coils = 7                        # owner photos
+spring_rate = "unknown"
+
+[rear_handle]
+# Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
+# through the roller axis, a black round grip bar parallel to the roller, behind it.
+arm_frame_bolt_m = [-0.115, 0.4150]     # x, z; MEASURED (scan, the lower part of the arm)
+arm_roller_bolt_m = [-0.1868, 0.4491]   # x, z; MEASURED (the roller axis)
+arm_outer_y_m = 0.0587                  # MEASURED: outer face, +-y
+arm_thickness_m = 0.006                 # ESTIMATE
+arm_width_m = 0.030                     # MEASURED (scan, lower part)
+grip_centre_m = [-0.2515, 0.0, 0.5042]  # ESTIMATE: 85 mm past the roller axis, bent 15 deg up
+grip_diameter_m = 0.026                 # ESTIMATE
+evidence = "lower arms MEASURED (scan); upper arms and grip ESTIMATE (photos, roller as scale)"
+
 [imu]
 # The controller board is inside the body and not visible in the scan. DEFAULT (findings)
 above_axle_m = 0.15
@@ -164,7 +190,11 @@ pack_right = { centre = [0.0, -0.0734, 0.1644], half = [0.1243, 0.0284, 0.2059] 
 top = { centre = [-0.0267, -0.0009, 0.4199], half = [0.1380, 0.0923, 0.0496] }
 front = { centre = [0.1495, 0.0, 0.4250], half = [0.0382, 0.0750, 0.0590] }
 roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radius = 0.0275 }
+# Shock: the envelope of the scanned one; the current shock (DNM-type, owner photos 2026-10-16)
+# sits on the same eyes and is slimmer (spring 52 mm outside, ESTIMATE).
 shock = { from = [-0.169, 0.0, 0.383], to = [-0.204, 0.0, 0.162], radius = 0.035 }
+# ESTIMATE: rear handle grip bar (see [rear_handle]).
+rear_handle_grip = { from = [-0.2515, -0.0527, 0.5042], to = [-0.2515, 0.0527, 0.5042], radius = 0.013 }
 pedal_bracket_left = { centre = [0.0007, 0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
 pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
 # ESTIMATE: deployed pedal decks (see [pedals]), centred on the pins, top at deck_top_z_m.
@@ -179,3 +209,4 @@ wheel_nodes = ["tire", "hub", "rim"]     # under node "wheel": spin about z
 pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold about x
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
+handle_nodes = ["rear_handle"]

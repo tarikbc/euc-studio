@@ -25,11 +25,18 @@ The independent watchdog (IWDG, LSI clock) starts at the first tick with a 250 m
 - **Feed** only when the FOC ran since the last tick (the ADC interrupt counts its steps) and the balance
   published a finite command within +-1050. A dead tick, a dead FOC or a broken command leaves the drive state
   unknown; then nothing feeds the watchdog and it resets the MCU after 250 ms.
+- **Dead tick, live FOC**: until the watchdog fires (167..333 ms) the FOC would keep applying the last
+  command. The FOC therefore checks the command itself (`core/motor/motor.c`, quirk `STALE_COMMAND_HELD`): no
+  new command for 3 ticks (72 FOC steps at 12 kHz, 60 at 10 kHz, about 6 ms) latches `command_stale`, and the
+  command ramps to 0 at 4200 per second (full command in 0.25 s) and stays there until power-off; a late
+  command does not drive again. The watchdog stays the backstop.
 - **Main loop stalled**: no main-loop pass for 248 ticks (0.5 s) while the tick runs. This does not reset the
   wheel: the balance still works, and a reset (more than 1 s of boot before the tick runs again) is a fall at
   speed. Instead it latches until power-off:
   - limp mode: speed tiltback at 10 km/h at most, no automatic restart after the next stop (the same limp as a
-    lost hall line, balance input `limp`);
+    lost hall line, balance input `limp`). In limp mode the speed tiltback grows at most 2.5 deg/s, so a
+    limp that starts at high speed tilts the pedals gradually (without the bound, 50 km/h would give about
+    24 deg in the first second);
   - the stall alarm: 3 x 20-tick beeps every 500 ticks.
   The rider slows down and steps off. Telemetry stops with the main loop, so the app sees the link go quiet.
 - **The boot after a watchdog reset** reads the reset flag (RCC CSR IWDGRSTF) and keeps the bridge off until
@@ -56,7 +63,8 @@ Timing limits:
   latches no stall for them (248 ticks is 0.5 s).
 
 Tests: `tests/unit/test_supervisor.c` (feeding rules, stall latch, compat does neither),
-`tests/unit/test_alarms.c` (stall beeps), `tests/unit/test_balance.c` (limp tiltback and no restart).
+`tests/unit/test_alarms.c` (stall beeps), `tests/unit/test_balance.c` (limp tiltback, its 2.5 deg/s bound and
+no restart), `tests/unit/test_motor.c` (stale command: 72 steps, ramp, latch, compat keeps the command).
 
 ## Over-current trip
 
