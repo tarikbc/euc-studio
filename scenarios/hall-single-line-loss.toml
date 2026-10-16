@@ -1,0 +1,87 @@
+# One hall line (a) is lost at 20 km/h and reads high. The code then shows 7 (invalid) for one sector
+# in six, the stock firmware's invalid-state counter keeps resetting, and it never cuts: it rides on
+# with a wrong rotor angle in two sectors of six and counts only two hall edges per electrical turn
+# instead of six. This file records that degradation as checks that pass on the stock build
+# (GW1825007, 2026-10-16). Measured there:
+#   torque ripple (standard deviation) 3.5 N·m before the fault, 16.5 N·m after (Iq 20.6 A);
+#   firmware speed estimate RMS error 0.18 km/h before, 13.6 km/h after (it reads 6.7 km/h at
+#   20.3 km/h: a third), so its speed tiltback and alarms would act at three times their setting;
+#   pitch standard deviation 0.32° before, 0.58° after, |pitch| at most 3.4°.
+# A firmware that checks hall plausibility should cut cleanly or estimate the angle and speed from
+# the two working lines: tighten the "after" bounds to the "before" ones when it does.
+schema = 1
+name = "hall-single-line-loss"
+description = "Hall line a lost at 20 km/h: the stock firmware rides on with torque ripple and a speed estimate a third of the truth."
+wheel = "begode-extreme"
+seconds = 25.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [11, 20]]
+# Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
+settings = "neutral"
+
+[[timeline]]
+at_s = 15.0
+fault = "hall_lost"
+line = "a"
+
+[[expect]]
+check = "no_cutoff"
+
+[[expect]]
+check = "upright"
+
+# Before the fault: the healthy drive.
+[[expect]]
+check = "ripple"
+signal = "torque_nm"
+max = 6.0
+from_s = 12.0
+by_s = 15.0
+
+[[expect]]
+check = "firmware_tracks"
+var = "speed_cms"
+scale = 0.036
+signal = "speed_kmh"
+max_rms = 0.5
+from_s = 12.0
+by_s = 15.0
+
+[[expect]]
+check = "ripple"
+signal = "pitch_deg"
+max = 0.5
+from_s = 12.0
+by_s = 15.0
+
+# After the fault: the stock firmware's degradation, with about 25 % margin.
+[[expect]]
+check = "ripple"
+signal = "torque_nm"
+max = 20.0
+from_s = 16.0
+
+[[expect]]
+check = "ripple"
+signal = "iq_a"
+max = 26.0
+from_s = 16.0
+
+[[expect]]
+check = "firmware_tracks"
+var = "speed_cms"
+scale = 0.036
+signal = "speed_kmh"
+max_rms = 17.0
+from_s = 16.0
+
+[[expect]]
+check = "ripple"
+signal = "pitch_deg"
+max = 0.8
+from_s = 16.0
+
+[[expect]]
+check = "pitch"
+max_abs_deg = 6.0
+from_s = 16.0

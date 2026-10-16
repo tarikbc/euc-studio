@@ -183,15 +183,21 @@ Not modeled: a shorted MOSFET or a failed gate driver, an intermittent contact (
 and BMS boards that fail one at a time (the four boards answer as one reply).
 
 Scenario checks for a fault's outcome: `cutoff` (the firmware cuts within a time, optionally by a
-named stock-map flag), `firmware_bits` (a stock-map variable such as `alerts` gets bits set) and
-`pitch_reaches` (a tiltback or a nose dive). What the stock firmware does, on the Begode Extreme
+named stock-map flag), `firmware_bits` (a stock-map variable such as `alerts` gets bits set),
+`pitch_reaches` (a tiltback or a nose dive), `ripple` (the standard deviation of a telemetry signal
+in a window) and `firmware_tracks` (the RMS error of a firmware estimate, such as `speed_cms`,
+against the true signal). What the stock firmware does, on the Begode Extreme
 (2026-10-16, Unicorn):
 
 - `scenarios/hall-loss-while-riding.toml`: the hall connector comes off at 20 km/h (all three lines
   read high, code 7). The firmware latches `hall_fault` 70 ms later, sets alert bit 0x40, turns the
-  inverter off, and the wheel nose-dives (−33° within 0.1 s). With one line lost the code reads 7
-  for only one sector in six, the invalid count keeps resetting, and the firmware rides on with
-  rough torque: no cut.
+  inverter off, and the wheel nose-dives (−33° within 0.1 s).
+- `scenarios/hall-single-line-loss.toml`: one line lost at 20 km/h. The code reads 7 for only one
+  sector in six, the invalid count keeps resetting, and the firmware never cuts. It rides on with a
+  wrong angle in two sectors of six (torque standard deviation 16.5 N·m against 3.5 before) and
+  counts two hall edges per electrical turn instead of six: its speed reads 6.7 km/h at 20.3 km/h,
+  so its speed tiltback and alarms would act at three times their setting. The checks pass on the
+  stock build and record this; a fixed firmware should tighten them.
 - `scenarios/low-battery-tiltback.toml`: at 98.5 V (1.3 % charge) the firmware sets alert bit 0x08
   at its first control tick (1.7 s) and, once the wheel rolls, tilts the pedals back: the shell
   passes 8° nose up 1.6 s after the rider reaches speed, and keeps rising (26° by 20 s) without a cut.
