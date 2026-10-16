@@ -4,6 +4,7 @@ mod fetch;
 mod firmware;
 mod image;
 mod paths;
+mod sim;
 mod ui;
 
 use std::cell::Cell;
@@ -43,6 +44,9 @@ enum Command {
     /// Inspect firmware images.
     #[command(subcommand)]
     Image(image::Command),
+    /// Run firmware in the simulator.
+    #[command(subcommand)]
+    Sim(sim::Command),
 }
 
 /// Whether a command's verdict was positive. Errors are separate: they abort with a message.
@@ -68,6 +72,7 @@ fn main() -> ExitCode {
         Command::Fetch(args) => fetch::run(&ctx, &args),
         Command::Firmware(command) => firmware::run(&ctx, command),
         Command::Image(command) => image::run(&ctx, command),
+        Command::Sim(command) => sim::run(&ctx, command),
     };
     match result {
         Ok(Verdict::Ok) => ExitCode::SUCCESS,

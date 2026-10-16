@@ -1,0 +1,22 @@
+[package]
+name = "euc-sim"
+description = "The simulated EUC controller: memory map, board components, run loop, reports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-core.workspace = true
+euc-devices.workspace = true
+euc-profile.workspace = true
+euc-proto-begode.workspace = true
+euc-stm32f1.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

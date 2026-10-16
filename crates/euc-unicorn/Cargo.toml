@@ -1,0 +1,23 @@
+[package]
+name = "euc-unicorn"
+description = "Unicorn (QEMU) as a Cpu backend: development and CI oracle only, never shipped (GPL-2.0)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-core.workspace = true
+thiserror.workspace = true
+unicorn-engine.workspace = true
+
+[dev-dependencies]
+euc-fwsource.workspace = true
+euc-profile.workspace = true
+euc-sim.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

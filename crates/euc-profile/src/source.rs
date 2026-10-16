@@ -42,6 +42,15 @@ impl ProfileSource {
             Self::Override(dir) => dir.load(id),
         }
     }
+
+    /// The text of another file of wheel `id`'s profile (`board.toml`, `stockmap.toml`), from
+    /// the same source as its `wheel.toml`.
+    pub fn read(&self, id: &str, file: &str) -> Result<String, ProfileError> {
+        match self {
+            Self::Builtin => builtin::read(id, file).map(str::to_owned),
+            Self::Override(dir) => dir.read(id, file),
+        }
+    }
 }
 
 /// Where a loaded profile came from.

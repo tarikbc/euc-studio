@@ -12,16 +12,24 @@ publish.workspace = true
 name = "euc"
 path = "src/main.rs"
 
+[features]
+# The Unicorn CPU backend for `euc sim run`. GPL-2.0: development builds only, never shipped.
+unicorn = ["dep:euc-core", "dep:euc-unicorn"]
+
 [dependencies]
 anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+euc-core = { workspace = true, optional = true }
 euc-fwsource.workspace = true
 euc-image.workspace = true
 euc-profile.workspace = true
+euc-sim.workspace = true
+euc-unicorn = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,0 +1,471 @@
+# Begode Extreme main controller: memory map, peripheral instances and board wiring.
+# Read by crates/euc-sim. Instance kinds come from euc-stm32f1, euc-devices and euc-sim.
+#
+# Wiring (OBSERVED in the stock firmware's init code, see the M1 notes):
+#   USART1 PA9/PA10 115200 -> BLE module (frames out, single-byte commands in)
+#   USART3 PB10/PB11 9600, RX by DMA1 ch3 -> smart BMS boards
+#   SPI3 PB3/4/5, CS PA15 -> MPU-6500 IMU
+#   ADC1 injected: ch4 phase current, ch0 battery voltage, ch11 board NTC
+#   ADC2 injected: ch5 phase current, ch10 (meaning UNKNOWN)
+#   Halls PB7/PB6/PB8, power button PB15 (low = pressed), power latch PB14
+#   TM1640-style display bit-banged on PC5 (CLK) / PC4 (DIN)
+#
+# Instance order matters: at a quantum boundary due events fire in this order (after SysTick),
+# as in the reference harness.
+
+schema = 1
+
+[mcu]
+name = "STM32F103 high density"
+irqs = 60
+priority_bits = 4
+irq_names = [
+    "WWDG", "PVD", "TAMPER", "RTC", "FLASH", "RCC", "EXTI0", "EXTI1", "EXTI2", "EXTI3",
+    "EXTI4", "DMA1_Ch1", "DMA1_Ch2", "DMA1_Ch3", "DMA1_Ch4", "DMA1_Ch5", "DMA1_Ch6", "DMA1_Ch7", "ADC1_2", "USB_HP_CAN_TX",
+    "USB_LP_CAN_RX0", "CAN_RX1", "CAN_SCE", "EXTI9_5", "TIM1_BRK", "TIM1_UP", "TIM1_TRG_COM", "TIM1_CC", "TIM2", "TIM3",
+    "TIM4", "I2C1_EV", "I2C1_ER", "I2C2_EV", "I2C2_ER", "SPI1", "SPI2", "USART1", "USART2", "USART3",
+    "EXTI15_10", "RTCAlarm", "USBWakeUp", "TIM8_BRK", "TIM8_UP", "TIM8_TRG_COM", "TIM8_CC", "ADC3", "FSMC", "SDIO",
+    "TIM5", "SPI3", "UART4", "UART5", "TIM6", "TIM7", "DMA2_Ch1", "DMA2_Ch2", "DMA2_Ch3", "DMA2_Ch4_5",
+]
+
+[memory]
+# 512 KiB: TIM8, SPI3 and 2 KiB pages imply a high-density part.
+flash = { base = 0x0800_0000, size = 0x8_0000 }
+# Flash below this runs as plain memory (the app); above it the data-flash model applies the
+# STM32F1 program/erase rules (the FLASH_ARRAY instance).
+code_end = 0x0800_E000
+sram = { base = 0x2000_0000, size = 0x1_0000 }
+sram_bitband = 0x2200_0000
+periph = { base = 0x4000_0000, size = 0x3_0000 }
+periph_bitband = 0x4200_0000
+ppb = { base = 0xE000_0000, size = 0x10_0000 }
+
+[[instance]]
+name = "RCC"
+kind = "stm32f1.rcc"
+base = 0x4002_1000
+hse_hz = 8_000_000
+
+[[instance]]
+name = "FLASH"
+kind = "stm32f1.flash"
+base = 0x4002_2000
+array = "FLASH_ARRAY"
+
+[[instance]]
+name = "FLASH_ARRAY"
+kind = "stm32f1.flash-array"
+base = 0x0800_E000
+size = 0x7_2000
+controller = "FLASH"
+# A level wheel's factory IMU calibration, as the firmware itself writes it: 0x0800F800 holds the
+# "calibrated" marker 0x0055 0x00AA, 0x08010000 six int16 averages (ax, ay, az, gx, gy, gz) with
+# az = 1 g = 0x2000 at +-4 g. Without it the firmware calibrates and waits for a power cycle.
+seed = [
+    { addr = 0x0800_F800, halfwords = [0x0055, 0x00AA] },
+    { addr = 0x0801_0000, halfwords = [0x0000, 0x0000, 0x2000, 0x0000, 0x0000, 0x0000] },
+]
+
+[[instance]]
+name = "DMA1"
+kind = "stm32f1.dma"
+base = 0x4002_0000
+channels = 7
+irq = { ch1 = 11, ch2 = 12, ch3 = 13, ch4 = 14, ch5 = 15, ch6 = 16, ch7 = 17 }
+
+[[instance]]
+name = "DMA2"
+kind = "stm32f1.dma"
+base = 0x4002_0400
+channels = 5
+irq = { ch1 = 56, ch2 = 57, ch3 = 58, ch4 = 59, ch5 = 59 }
+
+[[instance]]
+name = "GPIOA"
+kind = "stm32f1.gpio"
+base = 0x4001_0800
+
+[[instance]]
+name = "GPIOB"
+kind = "stm32f1.gpio"
+base = 0x4001_0C00
+
+[[instance]]
+name = "GPIOC"
+kind = "stm32f1.gpio"
+base = 0x4001_1000
+
+[[instance]]
+name = "GPIOD"
+kind = "stm32f1.gpio"
+base = 0x4001_1400
+
+[[instance]]
+name = "GPIOE"
+kind = "stm32f1.gpio"
+base = 0x4001_1800
+
+[[instance]]
+name = "GPIOF"
+kind = "stm32f1.gpio"
+base = 0x4001_1C00
+
+[[instance]]
+name = "GPIOG"
+kind = "stm32f1.gpio"
+base = 0x4001_2000
+
+[[instance]]
+name = "AFIO"
+kind = "stm32f1.afio"
+base = 0x4001_0000
+
+[[instance]]
+name = "EXTI"
+kind = "stm32f1.exti"
+base = 0x4001_0400
+afio = "AFIO"
+irq = { exti0 = 6, exti1 = 7, exti2 = 8, exti3 = 9, exti4 = 10, exti9_5 = 23, exti15_10 = 40, pvd = 1, rtc_alarm = 41, usb_wakeup = 42 }
+
+[[instance]]
+name = "TIM2"
+kind = "stm32f1.tim"
+base = 0x4000_0000
+class = "general"
+clock = "RCC"
+irq = { irq = 28 }
+
+[[instance]]
+name = "TIM3"
+kind = "stm32f1.tim"
+base = 0x4000_0400
+class = "general"
+clock = "RCC"
+irq = { irq = 29 }
+
+[[instance]]
+name = "TIM4"
+kind = "stm32f1.tim"
+base = 0x4000_0800
+class = "general"
+clock = "RCC"
+irq = { irq = 30 }
+
+[[instance]]
+name = "TIM5"
+kind = "stm32f1.tim"
+base = 0x4000_0C00
+class = "general"
+clock = "RCC"
+irq = { irq = 50 }
+
+[[instance]]
+name = "TIM6"
+kind = "stm32f1.tim"
+base = 0x4000_1000
+class = "basic"
+clock = "RCC"
+irq = { irq = 54 }
+
+[[instance]]
+name = "TIM7"
+kind = "stm32f1.tim"
+base = 0x4000_1400
+class = "basic"
+clock = "RCC"
+irq = { irq = 55 }
+
+[[instance]]
+name = "TIM1"
+kind = "stm32f1.tim"
+base = 0x4001_2C00
+class = "advanced"
+clock = "RCC"
+irq = { up = 25, cc = 27, trg_com = 26, brk = 24 }
+
+[[instance]]
+name = "TIM8"
+kind = "stm32f1.tim"
+base = 0x4001_3400
+class = "advanced"
+clock = "RCC"
+irq = { up = 44, cc = 46, trg_com = 45, brk = 43 }
+
+[[instance]]
+name = "ADC1"
+kind = "stm32f1.adc"
+base = 0x4001_2400
+index = 1
+clock = "RCC"
+irq = { irq = 18 }
+
+[[instance]]
+name = "ADC2"
+kind = "stm32f1.adc"
+base = 0x4001_2800
+index = 2
+clock = "RCC"
+irq = { irq = 18 }
+
+[[instance]]
+name = "ADC3"
+kind = "stm32f1.adc"
+base = 0x4001_3C00
+index = 3
+clock = "RCC"
+irq = { irq = 47 }
+
+[[instance]]
+name = "USART1"
+kind = "stm32f1.usart"
+base = 0x4001_3800
+clock = "RCC"
+bus = "apb2"
+irq = { irq = 37 }
+
+[[instance]]
+name = "USART2"
+kind = "stm32f1.usart"
+base = 0x4000_4400
+clock = "RCC"
+bus = "apb1"
+irq = { irq = 38 }
+
+[[instance]]
+name = "USART3"
+kind = "stm32f1.usart"
+base = 0x4000_4800
+clock = "RCC"
+bus = "apb1"
+irq = { irq = 39 }
+
+[[instance]]
+name = "UART4"
+kind = "stm32f1.usart"
+base = 0x4000_4C00
+clock = "RCC"
+bus = "apb1"
+irq = { irq = 52 }
+
+[[instance]]
+name = "UART5"
+kind = "stm32f1.usart"
+base = 0x4000_5000
+clock = "RCC"
+bus = "apb1"
+irq = { irq = 53 }
+
+[[instance]]
+name = "SPI1"
+kind = "stm32f1.spi"
+base = 0x4001_3000
+
+[[instance]]
+name = "SPI2"
+kind = "stm32f1.spi"
+base = 0x4000_3800
+
+[[instance]]
+name = "SPI3"
+kind = "stm32f1.spi"
+base = 0x4000_3C00
+
+[[instance]]
+name = "RTC"
+kind = "stm32f1.rtc"
+base = 0x4000_2800
+clock = "RCC"
+irq = { irq = 3 }
+
+[[instance]]
+name = "BKP"
+kind = "stm32f1.bkp"
+base = 0x4000_6C00
+
+[[instance]]
+name = "PWR"
+kind = "stm32f1.pwr"
+base = 0x4000_7000
+
+[[instance]]
+name = "IWDG"
+kind = "stm32f1.iwdg"
+base = 0x4000_3000
+
+[[instance]]
+name = "WWDG"
+kind = "stm32f1.plain"
+base = 0x4000_2C00
+
+[[instance]]
+name = "CRC"
+kind = "stm32f1.plain"
+base = 0x4002_3000
+
+[[instance]]
+name = "DAC"
+kind = "stm32f1.plain"
+base = 0x4000_7400
+
+[[instance]]
+name = "DWT"
+kind = "cortex-m3.dwt"
+base = 0xE000_1000
+size = 0x1000
+
+[[instance]]
+name = "imu"
+kind = "mpu6500"
+
+[[instance]]
+name = "bms"
+kind = "smart-bms"
+delay_s = 0.005
+temps = [23, 22, 23]
+
+[[instance]]
+name = "display"
+kind = "tm1640"
+
+[[instance]]
+name = "buzzer"
+kind = "buzzer"
+
+# DMA requests: which controller channel serves each peripheral request line.
+[[dma]]
+request = "ADC1.regular"
+channel = "DMA1.1"
+
+[[dma]]
+request = "ADC3.regular"
+channel = "DMA2.5"
+
+[[dma]]
+request = "USART1.rx"
+channel = "DMA1.5"
+
+[[dma]]
+request = "USART1.tx"
+channel = "DMA1.4"
+
+[[dma]]
+request = "USART2.rx"
+channel = "DMA1.6"
+
+[[dma]]
+request = "USART2.tx"
+channel = "DMA1.7"
+
+[[dma]]
+request = "USART3.rx"
+channel = "DMA1.3"
+
+[[dma]]
+request = "USART3.tx"
+channel = "DMA1.2"
+
+[[dma]]
+request = "UART4.rx"
+channel = "DMA2.3"
+
+[[dma]]
+request = "UART4.tx"
+channel = "DMA2.5"
+
+# Wires between components. `board` is the simulator's own board logic: the BLE host, the
+# power latch and the plant-driven inputs.
+[[wire]]
+from = "ADC1.dual_inj"
+to = "ADC2.dual_inj"
+
+[[wire]]
+from = "ADC1.dual_reg"
+to = "ADC2.dual_reg"
+
+[[wire]]
+from = "USART1.tx"
+to = "board.ble_rx"
+
+[[wire]]
+from = "board.ble_tx"
+to = "USART1.rx"
+
+[[wire]]
+from = "USART3.tx"
+to = "bms.rx"
+
+[[wire]]
+from = "bms.tx"
+to = "USART3.rx"
+
+[[wire]]
+from = "SPI3.mosi"
+to = "imu.spi"
+
+[[wire]]
+from = "imu.spi"
+to = "SPI3.miso"
+
+[[wire]]
+from = "GPIOA.15"
+to = "imu.cs"
+
+[[wire]]
+from = "GPIOC.4"
+to = "display.din"
+
+[[wire]]
+from = "GPIOC.5"
+to = "display.clk"
+
+[[wire]]
+from = "TIM4.oc4"
+to = "buzzer.pwm"
+
+[[wire]]
+from = "GPIOB.14"
+to = "board.latch"
+
+[[wire]]
+from = "board.hall_a"
+to = "GPIOB.7"
+
+[[wire]]
+from = "board.hall_b"
+to = "GPIOB.6"
+
+[[wire]]
+from = "board.hall_c"
+to = "GPIOB.8"
+
+[[wire]]
+from = "board.button"
+to = "GPIOB.15"
+
+# What each ADC channel measures. Channels not listed read mid-scale (2048).
+[[analog]]
+adc = 1
+channel = 0
+signal = "battery_v"
+# Counts per volt, the inverse of the firmware's V*100 = raw*100*0x561>>15.
+scale = [32768, 1377]
+
+[[analog]]
+adc = 1
+channel = 11
+signal = "board_temp_c"
+# 47 k NTC (B 4150) to ground, 10 k pull-up to 3.3 V; constants from the firmware's conversion.
+ntc = { r25 = 47000.0, beta = 4150.0, pullup = 10000.0 }
+
+[[analog]]
+adc = 2
+channel = 10
+# INFERRED: the second NTC is the motor's. Changing it changed no frame field in 3 s.
+signal = "motor_temp_c"
+ntc = { r25 = 47000.0, beta = 4150.0, pullup = 10000.0 }
+
+[board]
+# The power button is low when pressed; the rider releases it 0.1 s after the firmware sets the
+# power latch, as on a real power-on.
+button_active_low = true
+release_after_latch_s = 0.1

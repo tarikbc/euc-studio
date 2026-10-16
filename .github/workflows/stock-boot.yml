@@ -1,0 +1,50 @@
+name: stock-boot
+
+# Boots the official Begode Extreme firmware in the simulator (Unicorn backend) and checks the
+# milestones. The image is fetched from Begode's update server at run time and verified against
+# the pinned sha256; it lives in the runner's temp folder only and is never cached or uploaded.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "crates/**"
+      - "profiles/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/stock-boot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-boot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  boot:
+    name: stock firmware boots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Keep the image in the runner's temp folder
+        run: echo "EUC_CACHE_DIR=$RUNNER_TEMP/euc-firmware" >> "$GITHUB_ENV"
+      - name: Fetch the stock image (verified against its pin)
+        run: cargo run --release --locked -p euc-cli -- fetch begode-extreme
+      - name: Boot tests
+        run: cargo test --release --locked -p euc-unicorn
+      - name: 30 s run with V, N and b commands
+        run: >
+          cargo run --release --locked -p euc-cli --features unicorn --
+          sim run begode-extreme --seconds 30 --inject V@2.6 --inject N@3.6 --inject b@4.6
+      - name: Remove the image
+        if: always()
+        run: rm -rf "$EUC_CACHE_DIR"

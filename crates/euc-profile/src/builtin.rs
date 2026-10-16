@@ -5,20 +5,32 @@ use std::path::PathBuf;
 use crate::dir::from_text;
 use crate::{Origin, ProfileError, WHEEL_FILE, WheelProfile};
 
-/// `(id, wheel.toml)` for every folder in the repo's `profiles/`, sorted by id.
+/// `(wheel id, file name, text)` for every file in the repo's `profiles/<wheel>/`, sorted.
 ///
 /// Embedding them means a plain `euc fetch` trusts only pins that were reviewed and built with
-/// the code, never a `profiles/` folder it happens to find on disk. A new wheel is added here.
-const PROFILES: &[(&str, &str)] = &[("begode-extreme", include_str!("../../../profiles/begode-extreme/wheel.toml"))];
+/// the code, never a `profiles/` folder it happens to find on disk. A new wheel or file is added
+/// here (the tests below fail until it is).
+const FILES: &[(&str, &str, &str)] = &[
+    ("begode-extreme", "board.toml", include_str!("../../../profiles/begode-extreme/board.toml")),
+    ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
+    ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
+];
 
 pub(crate) fn ids() -> Vec<String> {
-    PROFILES.iter().map(|(id, _)| (*id).to_owned()).collect()
+    FILES.iter().filter(|(_, file, _)| *file == WHEEL_FILE).map(|(id, _, _)| (*id).to_owned()).collect()
+}
+
+pub(crate) fn read(id: &str, file: &str) -> Result<&'static str, ProfileError> {
+    FILES.iter().find(|(i, f, _)| *i == id && *f == file).map(|(_, _, text)| *text).ok_or_else(|| {
+        ProfileError::UnknownFile { id: id.to_owned(), file: file.to_owned(), searched: Origin::Builtin }
+    })
 }
 
 pub(crate) fn load(id: &str) -> Result<WheelProfile, ProfileError> {
-    let Some((_, text)) = PROFILES.iter().find(|(known, _)| *known == id) else {
+    if !ids().iter().any(|known| known == id) {
         return Err(ProfileError::UnknownWheel { id: id.to_owned(), searched: Origin::Builtin, available: ids() });
-    };
+    }
+    let text = read(id, WHEEL_FILE)?;
     from_text(text, id, PathBuf::from(format!("built-in:{id}/{WHEEL_FILE}")), Origin::Builtin)
 }
 
@@ -40,26 +52,39 @@ mod tests {
             let wheel = load(&id).unwrap();
             assert_eq!((wheel.id.as_str(), &wheel.origin), (id.as_str(), &Origin::Builtin));
         }
-        let mut sorted = ids();
-        sorted.sort();
-        assert_eq!(ids(), sorted, "keep PROFILES sorted by id");
+        let mut sorted = FILES.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(FILES, sorted, "keep FILES sorted");
     }
 
-    /// The binary must carry exactly what is on disk: a profile edited, added or removed without
-    /// rebuilding (or without registering it in `PROFILES`) fails here.
+    /// The binary must carry exactly what is on disk: a profile file edited, added or removed
+    /// without rebuilding (or without registering it in `FILES`) fails here.
     #[test]
     fn embedded_profiles_match_the_repo() {
-        for (id, text) in PROFILES {
-            let path = repo_profiles().join(id).join(WHEEL_FILE);
-            let on_disk = fs::read_to_string(&path).unwrap();
-            assert_eq!(*text, on_disk, "{} differs from the built-in copy; rebuild", path.display());
+        let mut on_disk = Vec::new();
+        for id in ProfileDir::new(repo_profiles()).ids().unwrap() {
+            for entry in fs::read_dir(repo_profiles().join(&id)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|ext| ext == "toml") {
+                    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                    on_disk.push((id.clone(), name, fs::read_to_string(&path).unwrap()));
+                }
+            }
         }
-        assert_eq!(ProfileDir::new(repo_profiles()).ids().unwrap(), ids(), "register every profile folder in PROFILES");
+        on_disk.sort();
+        let embedded: Vec<_> =
+            FILES.iter().map(|(i, f, t)| ((*i).to_owned(), (*f).to_owned(), (*t).to_owned())).collect();
+        assert_eq!(
+            embedded, on_disk,
+            "profiles/ differs from the built-in copy; rebuild or register the file in FILES"
+        );
     }
 
     #[test]
-    fn unknown_wheel_names_the_built_in_set() {
+    fn unknown_wheel_or_file_names_the_built_in_set() {
         let message = load("nope").unwrap_err().to_string();
         assert_eq!(message, "no wheel profile \"nope\" in the built-in profiles (available: begode-extreme)");
+        let message = read("begode-extreme", "plant.toml").unwrap_err().to_string();
+        assert_eq!(message, "no file plant.toml for wheel \"begode-extreme\" in the built-in profiles");
     }
 }

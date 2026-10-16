@@ -1,0 +1,95 @@
+# Named places in the stock Begode Extreme firmware (build GW1825007, pinned in wheel.toml).
+# Our names; addresses only, never code or bytes. Read by crates/euc-sim for boot markers and
+# reports. Evidence: the M1 emulation notes (all OBSERVED in the emulator unless marked).
+
+schema = 1
+build = "GW1825007"
+
+# Entry points. `marker = true`: the run report records the first time execution reaches it
+# (boot milestones; watching stops after the marker window).
+[[entry]]
+name = "reset_handler"
+addr = 0x0800_322C
+marker = true
+
+[[entry]]
+name = "c_runtime_init"
+addr = 0x0800_3130
+marker = true
+
+[[entry]]
+name = "main"
+addr = 0x0800_AA7C
+marker = true
+
+[[entry]]
+name = "imu_init"
+addr = 0x0800_6390
+marker = true
+
+[[entry]]
+name = "boot_button_and_hall_wait"
+addr = 0x0800_982C
+marker = true
+
+[[entry]]
+name = "bms_uart_init"
+addr = 0x0800_B234
+marker = true
+
+[[entry]]
+name = "bms_poll_and_parse"
+addr = 0x0800_B318
+marker = true
+
+[[entry]]
+name = "telemetry_tick"
+addr = 0x0800_8038
+marker = true
+
+[[entry]]
+name = "frame_tx_pump"
+addr = 0x0800_70E4
+marker = true
+
+[[entry]]
+name = "imu_calibrate"
+addr = 0x0800_49B8
+marker = true
+
+[[entry]]
+name = "motor_control_isr_body"
+addr = 0x0800_4668
+marker = true
+
+[[entry]]
+name = "rtc_tick_control"   # INFERRED name
+addr = 0x0800_678C
+marker = true
+
+[[entry]]
+name = "ble_command_parser"
+addr = 0x0800_5988
+marker = true
+
+# RAM variables (after the firmware's own scatter-load).
+[[ram]]
+name = "version_string"
+addr = 0x2000_0084
+size = 9
+kind = "ascii"
+note = "the text the `V` command sends"
+
+[[ram]]
+name = "telemetry_pause"
+addr = 0x2000_0048
+size = 1
+kind = "u8"
+note = "set to 3 by every received command byte: telemetry pauses for 3 rounds"
+
+[[ram]]
+name = "alerts"
+addr = 0x2000_005A
+size = 1
+kind = "u8"
+note = "frame 04 byte 14; bit 2 = IMU fault, bit 6 = hall error"

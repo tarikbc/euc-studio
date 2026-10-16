@@ -17,8 +17,9 @@ ignore = []
 
 [licenses]
 # Anything not listed is refused. That covers every GPL and LGPL variant: no copyleft code may
-# reach a binary we ship. The future `euc-unicorn` crate (Unicorn is GPL-2.0-only) is a dev and CI
-# oracle that never ships; it will get a scoped `exceptions` entry for exactly those crates.
+# reach a binary we ship. The one exception is Unicorn (GPL-2.0), the development and CI oracle
+# behind `euc-unicorn`: allowed for exactly its two crates below, and [bans] lets only
+# `euc-unicorn` depend on them. Release builds never enable the `unicorn` feature.
 allow = [
     "LicenseRef-PolyForm-Noncommercial-1.0.0", # this repo
     "MIT",
@@ -38,7 +39,10 @@ allow = [
 confidence-threshold = 0.9
 # The list is policy, not inventory: some entries wait for crates the studio and later milestones add.
 unused-allowed-license = "allow"
-exceptions = []
+exceptions = [
+    { crate = "unicorn-engine", allow = ["GPL-2.0"] },
+    { crate = "unicorn-engine-sys", allow = ["GPL-2.0"] },
+]
 
 [licenses.private]
 # Our crates are `publish = false` but still checked against the list above.
@@ -49,6 +53,11 @@ multiple-versions = "warn"
 wildcards = "deny"
 # Workspace path dependencies carry no version; that is not a wildcard on crates.io.
 allow-wildcard-paths = true
+deny = [
+    # GPL-2.0: only the euc-unicorn wrapper may pull it in (see [licenses]).
+    { crate = "unicorn-engine", wrappers = ["euc-unicorn"] },
+    { crate = "unicorn-engine-sys", wrappers = ["unicorn-engine"] },
+]
 
 [sources]
 unknown-registry = "deny"

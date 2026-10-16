@@ -38,6 +38,16 @@ pub enum ProfileError {
         /// The folder name.
         folder: String,
     },
+    /// The wheel's profile has no file of that name.
+    #[error("no file {file} for wheel \"{id}\" in {searched}")]
+    UnknownFile {
+        /// The wheel id.
+        id: String,
+        /// The file asked for.
+        file: String,
+        /// The source searched.
+        searched: Origin,
+    },
     /// The source has no profile for the requested wheel.
     #[error("no wheel profile \"{id}\" in {searched} (available: {})", list_or_none(available))]
     UnknownWheel {
@@ -85,13 +95,25 @@ impl ProfileDir {
         Ok(ids)
     }
 
+    /// Reads another file of wheel `id`'s profile folder (`board.toml`, `stockmap.toml`).
+    pub fn read(&self, id: &str, file: &str) -> Result<String, ProfileError> {
+        let path = self.root.join(id).join(file);
+        let unknown = || ProfileError::UnknownFile {
+            id: id.to_owned(),
+            file: file.to_owned(),
+            searched: Origin::Override(self.root.clone()),
+        };
+        if !is_plain(id) || !is_plain_file(file) || !path.is_file() {
+            return Err(unknown());
+        }
+        fs::read_to_string(&path).map_err(|error| ProfileError::Io { path, error })
+    }
+
     /// Loads and validates the profile of wheel `id`. It carries [`Origin::Override`].
     pub fn load(&self, id: &str) -> Result<WheelProfile, ProfileError> {
         let origin = Origin::Override(self.root.clone());
-        // Ids are kebab case; anything else (`..`, separators) never becomes a path.
-        let plain = !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
         let path = self.root.join(id).join(WHEEL_FILE);
-        if !plain || !path.is_file() {
+        if !is_plain(id) || !path.is_file() {
             return Err(ProfileError::UnknownWheel {
                 id: id.to_owned(),
                 searched: origin,
@@ -101,6 +123,18 @@ impl ProfileDir {
         let text = fs::read_to_string(&path).map_err(|error| ProfileError::Io { path: path.clone(), error })?;
         from_text(&text, id, path, origin)
     }
+}
+
+/// Ids are kebab case; anything else (`..`, separators) never becomes a path.
+fn is_plain(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A file name inside a profile folder: no separators, no leading dot.
+fn is_plain_file(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
 /// Parses a profile that must have id `id`, and stamps it with `origin`.

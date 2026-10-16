@@ -43,6 +43,16 @@ pub(crate) fn path(path: &Path) -> String {
     sanitize_display(&path.display().to_string())
 }
 
+/// Text from outside the program (firmware output, blocker texts), safe to print.
+pub(crate) fn safe(text: &str) -> String {
+    sanitize_display(text)
+}
+
+/// Text quoted with its control characters visible (`"NAME:EXTREME\r\n"`), safe to print.
+pub(crate) fn quoted(text: &str) -> String {
+    sanitize_display(&format!("{text:?}"))
+}
+
 /// Pretty JSON on stdout.
 pub(crate) fn json(value: &impl Serialize) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
