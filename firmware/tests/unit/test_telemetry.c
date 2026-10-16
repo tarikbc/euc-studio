@@ -24,7 +24,8 @@ static uint8_t capture_frames[CAPTURE_FRAMES][EUC_TLM_FRAME_BYTES];
 static size_t capture_frame_count;
 static const char *capture_error; /* set by load_capture_stream(); reported by the first test */
 
-/* Capture file: one notification per line, "<seconds> <hex byte> <hex byte> ...". */
+/* Capture file: one notification per line, "<seconds> <hex byte> <hex byte> ...". Empty lines and lines that
+ * start with '#' (the recorder's header) are skipped. */
 static void load_capture_stream(void)
 {
     FILE *file = fopen(CAPTURE_PATH, "r");
@@ -35,7 +36,14 @@ static void load_capture_stream(void)
     char line[CAPTURE_LINE_BYTES];
     capture_stream_bytes = 0U;
     while ((capture_error == NULL) && (fgets(line, (int)sizeof(line), file) != NULL)) {
-        const char *cursor = strchr(line, ' '); /* skip the timestamp */
+        const char *start = line;
+        while ((*start == ' ') || (*start == '\t')) {
+            start++;
+        }
+        if ((*start == '\0') || (*start == '\n') || (*start == '\r') || (*start == '#')) {
+            continue;
+        }
+        const char *cursor = strchr(start, ' '); /* skip the timestamp */
         while (cursor != NULL) {
             char *end = NULL;
             const unsigned long value = strtoul(cursor, &end, 16);
@@ -96,9 +104,9 @@ static void decode_frame(const uint8_t *frame, struct euc_tlm_in *in)
         in->trip_distance_m = field_u16(frame, 3U);
         in->phase_current_ca = field_s16(frame, 4U);
         in->board_temperature_mpu6050 = field_s16(frame, 5U);
-        in->turn_compensation = (uint8_t)((echo >> 10U) & 0x0FU);
-        in->pedal_trim = (uint8_t)((echo >> 5U) & 0x0FU);
-        in->pwm_tiltback_enabled = ((echo >> 3U) & 1U) != 0U;
+        in->turn_compensation = (uint8_t)(((uint32_t)echo >> 10U) & 0x0FU);
+        in->pedal_trim = (uint8_t)(((uint32_t)echo >> 5U) & 0x0FU);
+        in->pwm_tiltback_enabled = (((uint32_t)echo >> 3U) & 1U) != 0U;
         in->drive_mode = (uint8_t)(echo & 1U);
         in->beeper_volume = (uint8_t)field_u16(frame, 7U);
     } else if (type == EUC_TLM_FRAME_BMS) {
@@ -118,9 +126,9 @@ static void decode_frame(const uint8_t *frame, struct euc_tlm_in *in)
     } else if (type == EUC_TLM_FRAME_STATUS) {
         const uint16_t modes = field_u16(frame, 2U);
         in->odometer_m = ((uint32_t)field_u16(frame, 0U) << 16U) | field_u16(frame, 1U);
-        in->pedal_mode = (uint8_t)((modes >> 13U) & 3U);
-        in->speed_alarm_mode = (uint8_t)((modes >> 10U) & 3U);
-        in->roll_cutoff_mode = (uint8_t)((modes >> 7U) & 3U);
+        in->pedal_mode = (uint8_t)(((uint32_t)modes >> 13U) & 3U);
+        in->speed_alarm_mode = (uint8_t)(((uint32_t)modes >> 10U) & 3U);
+        in->roll_cutoff_mode = (uint8_t)(((uint32_t)modes >> 7U) & 3U);
         in->units_miles = (modes & 1U) != 0U;
         in->auto_power_off_remaining_s = field_u16(frame, 3U);
         in->tiltback_speed_kmh = field_u16(frame, 4U);
@@ -130,7 +138,7 @@ static void decode_frame(const uint8_t *frame, struct euc_tlm_in *in)
     } else {
         const uint16_t echo = field_u16(frame, 1U);
         in->battery_current_ca = field_s16(frame, 0U);
-        in->wc_value = (uint8_t)((echo >> 4U) & 0x0FU);
+        in->wc_value = (uint8_t)(((uint32_t)echo >> 4U) & 0x0FU);
         in->wx_value = (uint8_t)(echo & 0x0FU);
         in->pwm_percent = (int8_t)field_s16(frame, 3U);
     }

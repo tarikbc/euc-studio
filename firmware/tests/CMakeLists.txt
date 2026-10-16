@@ -98,3 +98,7 @@ euc_add_unit_test(test_sensors
 euc_add_unit_test(test_display
     SOURCES unit/test_display.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_strip
+    SOURCES unit/test_strip.c
+    LIBRARIES euc_port_sim)

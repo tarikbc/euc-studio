@@ -35,6 +35,12 @@
 
 #define WINDOWS_PER_BLOCK 10U /* the block closes after one more: 11 windows */
 
+#define WORKING_LINES_UNKNOWN     0xFFU /* forces a zone entry on the next rebuilt state */
+#define STUCK_LINE_EDGES_PER_TURN 4U    /* line changes per electrical turn with one line stuck */
+
+/* Next state in the forward (+1) order 5 1 3 2 6 4; 0 for the invalid states. */
+static const uint8_t forward_next[8] = {0U, 3U, 6U, 2U, 5U, 1U, 4U, 0U};
+
 static bool state_is_valid(uint8_t hall_state)
 {
     return (hall_state != STATE_INVALID_LOW) && (hall_state != STATE_INVALID_HIGH);
@@ -46,13 +52,15 @@ void euc_hall_init(struct euc_hall_state *state)
     for (uint32_t i = 0U; i < EUC_HALL_RING_EDGES; i++) {
         state->edge_calls[i] = (uint16_t)EDGE_CALLS_AT_POWER_ON;
     }
+    state->entry_line = EUC_HALL_NO_LINE;
+    state->suspect_line = EUC_HALL_NO_LINE;
 }
 
 /* Glitch filter: a line that toggled stays locked for LINE_LOCK_CALLS calls, unless another line toggles. */
 static uint8_t filter_lines(struct euc_hall_state *state, uint8_t lines)
 {
     for (uint32_t line = 0U; line < EUC_HALL_LINES; line++) {
-        const uint8_t level = (uint8_t)((lines >> line) & 1U);
+        const uint8_t level = (uint8_t)(((uint32_t)lines >> line) & 1U);
         if ((!state->line_locked[line]) || (state->line_lock_calls[line] == 0)) {
             const bool toggled = (level != state->line_level[line]);
             state->line_level[line] = level;
@@ -77,9 +85,6 @@ static uint8_t filter_lines(struct euc_hall_state *state, uint8_t lines)
 static void count_steps(struct euc_hall_state *state, uint8_t hall_state, uint16_t pwm_frequency_hz,
                         struct euc_hall_out *out)
 {
-    /* Next state in the forward (+1) order 5 1 3 2 6 4. */
-    static const uint8_t forward_next[8] = {0U, 3U, 6U, 2U, 5U, 1U, 4U, 0U};
-
     if (hall_state != state->step_sector) {
         const bool both_valid = state_is_valid(hall_state) && state_is_valid(state->step_sector);
         if (both_valid && (forward_next[state->step_sector] == hall_state)) {
@@ -215,6 +220,125 @@ static void interpolate_angle(struct euc_hall_state *state, bool state_valid)
     }
 }
 
+/* With one line stuck the lines change four times per turn, so the last four edge periods make one turn:
+ * spread it over the six edges the rebuilt state will see. */
+static void reseed_edge_periods(struct euc_hall_state *state)
+{
+    uint32_t turn_calls = 0U;
+    uint32_t index = state->edge_index;
+    for (uint32_t i = 0U; i < STUCK_LINE_EDGES_PER_TURN; i++) {
+        index = (index + EUC_HALL_RING_EDGES - 1U) % EUC_HALL_RING_EDGES;
+        turn_calls += state->edge_calls[index];
+    }
+    const uint32_t sector_calls = turn_calls / EUC_HALL_RING_EDGES;
+    for (uint32_t i = 0U; i < EUC_HALL_RING_EDGES; i++) {
+        state->edge_calls[i] = (uint16_t)sector_calls;
+    }
+}
+
+/* The line whose bit is the only one set in `toggled`, or EUC_HALL_NO_LINE. */
+static uint8_t single_line(uint8_t toggled)
+{
+    uint8_t line = EUC_HALL_NO_LINE;
+    for (uint8_t i = 0U; i < EUC_HALL_LINES; i++) {
+        if (toggled == (uint8_t)(1U << i)) {
+            line = i;
+        }
+    }
+    return line;
+}
+
+/* Clean: invalid episodes entered through one line and left through another name the third line as silent;
+ * EUC_HALL_LINE_FAULT_EPISODES of them in a row, with that line never toggling, latch line_fault. */
+static void check_stuck_line(struct euc_hall_state *state, uint8_t lines, struct euc_hall_out *out)
+{
+    const uint8_t previous = state->lines_previous;
+    state->lines_previous = lines;
+    if ((lines == previous) || state->line_fault) {
+        return;
+    }
+    const uint8_t toggled = (uint8_t)(lines ^ previous);
+    const uint8_t line = single_line(toggled);
+    if ((state->suspect_line < EUC_HALL_LINES) && ((((uint32_t)toggled >> state->suspect_line) & 1U) != 0U)) {
+        state->suspect_episodes = 0U; /* the suspect is alive */
+    }
+    const bool was_valid = state_is_valid(previous);
+    const bool is_valid = state_is_valid(lines);
+    if (was_valid && (!is_valid)) {
+        state->entry_line = line;
+    } else if ((!was_valid) && is_valid) {
+        const uint8_t entry = state->entry_line;
+        state->entry_line = EUC_HALL_NO_LINE;
+        if ((entry < EUC_HALL_LINES) && (line < EUC_HALL_LINES) && (entry != line)) {
+            const uint8_t silent = (uint8_t)((EUC_HALL_LINES - entry) - line); /* lines 0 + 1 + 2 = 3 */
+            if (silent == state->suspect_line) {
+                state->suspect_episodes++;
+            } else {
+                state->suspect_line = silent;
+                state->suspect_episodes = 1U;
+            }
+            if (state->suspect_episodes >= EUC_HALL_LINE_FAULT_EPISODES) {
+                state->line_fault = true;
+                state->lost_line = silent;
+                state->working_lines = WORKING_LINES_UNKNOWN; /* this call enters a zone */
+                reseed_edge_periods(state);
+                out->line_fault_raised = true;
+            }
+        }
+    } else {
+        /* valid to valid, or between the two invalid states */
+    }
+}
+
+/* Clean, after line_fault: the state from the two working lines. A zone of one sector fixes the lost line's
+ * level; in a zone of two sectors the state moves to the second one sector time after the zone entry. */
+static uint8_t rebuild_state(struct euc_hall_state *state, uint8_t lines)
+{
+    const uint8_t lost = (uint8_t)(1U << state->lost_line);
+    const uint8_t low = (uint8_t)(lines & (uint8_t)~lost);
+    const uint8_t high = (uint8_t)(lines | lost);
+    const uint8_t working = low;
+
+    if (working != state->working_lines) {
+        state->working_lines = working;
+        state->zone_calls = 0U;
+        state->zone_second = false;
+        const uint8_t previous = state->sector;
+        if ((forward_next[previous] == low) || (forward_next[low] == previous)) {
+            state->zone_first = low; /* next to the sector we came from */
+        } else if ((forward_next[previous] == high) || (forward_next[high] == previous)) {
+            state->zone_first = high;
+        } else {
+            /* no valid neighbour: the first sector in the direction of travel */
+            const bool low_before_high = forward_next[low] == high;
+            const bool forward = state->direction >= 0;
+            state->zone_first = (low_before_high == forward) ? low : high;
+        }
+    } else if (state->zone_calls < UINT16_MAX) {
+        state->zone_calls++;
+    } else {
+        /* saturated */
+    }
+
+    if (state_is_valid(low) != state_is_valid(high)) {
+        return state_is_valid(low) ? low : high;
+    }
+    uint32_t turn_calls = 0U;
+    for (uint32_t i = 0U; i < EUC_HALL_RING_EDGES; i++) {
+        turn_calls += state->edge_calls[i];
+    }
+    const uint32_t sector_calls = turn_calls / EUC_HALL_RING_EDGES;
+    const bool moving = sector_calls < EDGE_TIMEOUT_CALLS;
+    if (moving && ((uint32_t)state->zone_calls >= sector_calls)) {
+        state->zone_second = true; /* held: the edge it makes changes the sector time */
+    }
+    const uint8_t first = state->zone_first;
+    if (!state->zone_second) {
+        return first;
+    }
+    return (first == low) ? high : low;
+}
+
 void euc_hall_step(struct euc_hall_state *state, uint8_t lines, uint16_t pwm_frequency_hz,
                    struct euc_hall_out *out)
 {
@@ -223,15 +347,24 @@ void euc_hall_step(struct euc_hall_state *state, uint8_t lines, uint16_t pwm_fre
 
     out->odometer_step = false;
     out->fault_raised = false;
+    out->line_fault_raised = false;
 
-    const uint8_t hall_state = filter_lines(state, lines);
+    const uint8_t read_state = filter_lines(state, lines);
+    uint8_t hall_state = read_state;
+    if (!EUC_QUIRK(HALL_SINGLE_LINE_UNDETECTED)) {
+        check_stuck_line(state, read_state, out);
+        if (state->line_fault) {
+            hall_state = rebuild_state(state, read_state);
+        }
+    }
     const bool state_valid = state_is_valid(hall_state);
     if (state_valid) {
         state->angle = sector_centre[hall_state];
     }
     count_steps(state, hall_state, pwm_frequency_hz, out);
 
-    if (state_valid) {
+    /* On the lines as read: a rebuilt state does not hide a further lost line. */
+    if (state_is_valid(read_state)) {
         state->invalid_calls = 0U;
     } else {
         state->invalid_calls++;

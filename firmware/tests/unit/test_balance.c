@@ -237,6 +237,29 @@ static void test_speed_tiltback(void)
     TEST_ASSERT_FLOAT_WITHIN(1e-5F, before * 0.999F, state.tiltback_speed_deg);
 }
 
+static void test_lost_hall_line_lowers_the_speed_tiltback(void)
+{
+    struct euc_balance_state state;
+    struct euc_balance_in in = level_input(); /* tiltback 25 km/h */
+    euc_balance_init(&state);
+    state.speed_m_per_s = 5.0F; /* 18 km/h */
+    euc_balance_step_tiltbacks(&state, &in);
+    TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_speed_deg);
+    in.hall_degraded = true; /* limp: 10 km/h = 2.778 m/s */
+    for (unsigned tick = 0U; tick < 1000U; tick++) {
+        euc_balance_step_tiltbacks(&state, &in);
+    }
+    const float overspeed_m_per_s = 5.0F - (10.0F / 3.6F);
+    TEST_ASSERT_FLOAT_WITHIN(0.1F, 10.0F * overspeed_m_per_s * (1.0F - powf(0.9995F, 1000.0F)),
+                             state.tiltback_speed_deg);
+    /* A lower setting stays */
+    euc_balance_init(&state);
+    in.settings.tiltback_speed_kmh = 8U;
+    state.speed_m_per_s = 2.5F; /* 9 km/h: above 8, below the limp speed */
+    euc_balance_step_tiltbacks(&state, &in);
+    TEST_ASSERT_TRUE(state.tiltback_speed_deg > 0.0F);
+}
+
 static void test_battery_tiltback_window(void)
 {
     struct euc_balance_state state;
@@ -343,6 +366,24 @@ static void test_recovery_blocked_by_a_hard_fault(void)
     }
     TEST_ASSERT_TRUE(state.motor_disabled);
     TEST_ASSERT_FALSE(state.fallen);
+    TEST_ASSERT_EQUAL_UINT8(0U, out.beep_count);
+}
+
+static void test_recovery_blocked_by_a_lost_hall_line(void)
+{
+    struct euc_balance_state state;
+    struct euc_balance_out out;
+    struct euc_balance_in in = level_input();
+    euc_balance_init(&state);
+    state.motor_disabled = true;
+    state.fallen = true;
+    state.attitude.tilt_centideg[2] = 8800;
+    in.hall_degraded = true;
+    memset(&out, 0, sizeof(out));
+    for (unsigned tick = 0U; tick < 101U; tick++) {
+        euc_balance_step_recovery(&state, &in, &out);
+    }
+    TEST_ASSERT_TRUE(state.motor_disabled);
     TEST_ASSERT_EQUAL_UINT8(0U, out.beep_count);
 }
 
@@ -492,11 +533,13 @@ int main(void)
     RUN_TEST(test_soft_start_limit_settles_between_1050_and_1051);
     RUN_TEST(test_ramp_down_to_zero);
     RUN_TEST(test_speed_tiltback);
+    RUN_TEST(test_lost_hall_line_lowers_the_speed_tiltback);
     RUN_TEST(test_battery_tiltback_window);
     RUN_TEST(test_pwm_tiltback_needs_the_setting_and_clamps);
     RUN_TEST(test_pedal_trim_slews_without_overshoot);
     RUN_TEST(test_pitch_cutoff_then_recovery);
     RUN_TEST(test_recovery_blocked_by_a_hard_fault);
+    RUN_TEST(test_recovery_blocked_by_a_lost_hall_line);
     RUN_TEST(test_error_cutoff_beeps_once);
     RUN_TEST(test_overload_cutoff_after_1_5_s);
     RUN_TEST(test_roll_cutoffs);

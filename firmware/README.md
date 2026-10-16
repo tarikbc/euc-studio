@@ -132,6 +132,11 @@ covers the motor gates):
   sample count are `board.h` placeholders until the power stage is measured), out-of-range FOC values saturate
   instead of wrapping (`INT16_WRAP`), and the angle holds while the hall state is invalid
   (`HALL_INVALID_ANGLE_RUN`).
+- **One lost hall line.** The stock firmware never notices one stuck hall line: it rides on with a wrong
+  angle in two sectors of six and a speed reading a third of the truth. Clean finds the silent line within
+  three electrical turns, rebuilds the state from the other two lines, raises error bit 0x40 (fault beeps),
+  lowers the speed tiltback to 10 km/h and allows no automatic restart after the next stop
+  (`HALL_SINGLE_LINE_UNDETECTED`). The 62.5 ms invalid-state fault stays on the lines as read.
 
 ## Size budget
 

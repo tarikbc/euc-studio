@@ -163,8 +163,8 @@ static void test_park_and_inverse_park_round_trip(void)
              * of 1; with the truncations the round trip stays within 0.7 % plus 4 counts. */
             const int32_t q = vectors[i].q_q15;
             const int32_t d = vectors[i].d_q15;
-            TEST_ASSERT_INT_WITHIN(4 + ((7 * abs(q)) / 1000), q, back.q_q15);
-            TEST_ASSERT_INT_WITHIN(4 + ((7 * abs(d)) / 1000), d, back.d_q15);
+            TEST_ASSERT_INT_WITHIN((uint32_t)(4 + ((7 * abs(q)) / 1000)), q, back.q_q15);
+            TEST_ASSERT_INT_WITHIN((uint32_t)(4 + ((7 * abs(d)) / 1000)), d, back.d_q15);
         }
     }
 }

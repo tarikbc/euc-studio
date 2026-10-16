@@ -35,7 +35,7 @@ static void hall_step(void)
     if (out.odometer_step) {
         app.odometer_steps++;
     }
-    if (out.fault_raised) {
+    if (out.fault_raised || out.line_fault_raised) {
         app.motor_alerts |= (uint8_t)EUC_ALERT_HALL_SENSOR;
     }
 }
@@ -207,9 +207,32 @@ static void display_tick(void)
         app.sensors.battery_voltage_cv,
         app.alarm_out.time_base,
     };
+    app.display_speed = (uint8_t)(euc_display_speed(in.speed_mm_per_s) & 0xFFU);
     uint8_t grids[EUC_DISPLAY_GRIDS];
     euc_display_render(&in, grids);
     stm32f1_display_send(grids);
+}
+
+/* LED strip: the tick part reads the time base before this tick's alarm task, the render the one after. */
+static void strip_tick(void)
+{
+    const struct euc_strip_tick_in in = {app.alarm_out.time_base, app.display_speed,
+                                         app.balance.speed_mm_per_s};
+    euc_strip_tick(&app.strip, &in);
+}
+
+static void strip_render(void)
+{
+    const struct euc_strip_render_in in = {app.alarm_out.time_base, app.display_speed,
+                                           app.balance_out.roll_deg, app.lights.strip_pattern};
+    euc_strip_render(&app.strip, &in);
+    const uint32_t changed = euc_strip_take_changed(&app.strip);
+    for (uint32_t i = 0U; i < EUC_STRIP_LEDS; i++) {
+        if (((changed >> i) & 1U) != 0U) {
+            const struct euc_strip_pixel pixel = app.strip.pixels[i];
+            stm32f1_led_strip_set(i, pixel.red, pixel.green, pixel.blue);
+        }
+    }
 }
 
 /* Events from the motor interrupts. */
@@ -272,6 +295,7 @@ static void balance(void)
     in->pwm_alarm_active = app.alarm_out.pwm_alarm;
     in->hard_inhibit = app.motor.hard_cut || app.foc_hard_cut_request;
     in->hall_fault = app.motor.hall.fault;
+    in->hall_degraded = app.motor.hall.line_fault;
     in->disable_request = app.disable_request;
     app.disable_request = false;
 
@@ -386,6 +410,7 @@ static void storage(void)
 void app_rtc_tick(void)
 {
     app.rtc_ticks++;
+    strip_tick();
     euc_tlm_count_tick(&app.telemetry);
     euc_bms_tick(&app.bms);
     display_tick();
@@ -403,6 +428,7 @@ void app_rtc_tick(void)
     lights_and_buttons();
     storage();
     stm32f1_buzzer_set(app.alarms.beeper.compare);
+    strip_render();
 }
 
 /* Main loop

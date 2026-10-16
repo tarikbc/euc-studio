@@ -32,12 +32,13 @@ void tearDown(void)
 
 static struct euc_hall_out run(struct euc_hall_state *state, uint8_t lines, uint32_t calls, uint16_t f)
 {
-    struct euc_hall_out out = {false, false};
-    struct euc_hall_out any = {false, false};
+    struct euc_hall_out out = {false, false, false};
+    struct euc_hall_out any = {false, false, false};
     for (uint32_t i = 0U; i < calls; i++) {
         euc_hall_step(state, lines, f, &out);
         any.odometer_step = any.odometer_step || out.odometer_step;
         any.fault_raised = any.fault_raised || out.fault_raised;
+        any.line_fault_raised = any.line_fault_raised || out.line_fault_raised;
     }
     return any;
 }
@@ -63,6 +64,57 @@ static void turn(struct euc_hall_state *state, int direction, uint32_t edges, ui
         index = (direction > 0) ? ((index + 1U) % 6U) : ((index + 5U) % 6U);
         (void)run(state, forward_order[index], period, f);
     }
+}
+
+/* `lines` with line `stuck` (EUC_HALL_NO_LINE: none) held at `level`. */
+static uint8_t hold_line(uint8_t lines, uint8_t stuck, uint8_t level)
+{
+    if (stuck >= EUC_HALL_LINES) {
+        return lines;
+    }
+    const uint8_t bit = (uint8_t)(1U << stuck);
+    return (level != 0U) ? (uint8_t)(lines | bit) : (uint8_t)(lines & (uint8_t)~bit);
+}
+
+/* A wheel turning through true sectors (index into forward_order) with one line held. */
+struct stuck_ride {
+    struct euc_hall_state state;
+    size_t index;
+    uint8_t stuck;
+    uint8_t level;
+    uint32_t wrong_calls; /* calls whose state differs from the true sector */
+    struct euc_hall_out any;
+};
+
+static void ride(struct stuck_ride *r, int direction, uint32_t edges, uint32_t period)
+{
+    r->wrong_calls = 0U;
+    for (uint32_t e = 0U; e < edges; e++) {
+        r->index = (direction > 0) ? ((r->index + 1U) % 6U) : ((r->index + 5U) % 6U);
+        const uint8_t truth = forward_order[r->index];
+        for (uint32_t call = 0U; call < period; call++) {
+            const struct euc_hall_out out =
+                run(&r->state, hold_line(truth, r->stuck, r->level), 1U, F_CURRENT_MODE);
+            if (r->state.sector != truth) {
+                r->wrong_calls++;
+            }
+            r->any.fault_raised = r->any.fault_raised || out.fault_raised;
+            r->any.line_fault_raised = r->any.line_fault_raised || out.line_fault_raised;
+        }
+    }
+}
+
+/* At rest in state 5, two healthy turns in `direction`, then line `stuck` held at `level`. */
+static void ride_start(struct stuck_ride *r, int direction, uint8_t stuck, uint8_t level)
+{
+    r->index = 0U; /* state 5 */
+    r->stuck = EUC_HALL_NO_LINE;
+    r->level = 0U;
+    r->any = (struct euc_hall_out){false, false, false};
+    start_at_rest(&r->state, F_CURRENT_MODE);
+    ride(r, direction, 12U, 100U);
+    r->stuck = stuck;
+    r->level = level;
 }
 
 static void test_sector_centres(void)
@@ -262,6 +314,83 @@ static void test_invalid_state_angle_runs_on_in_compat_only(void)
     }
 }
 
+static void test_stuck_line_goes_unnoticed_in_compat(void)
+{
+    struct stuck_ride r;
+    ride_start(&r, 1, 0U, 1U); /* line A reads high */
+    const int16_t before = r.state.position;
+    ride(&r, 1, 60U, 100U); /* ten turns */
+    TEST_ASSERT_FALSE(r.state.line_fault);
+    TEST_ASSERT_FALSE(r.state.fault);
+    /* Only 5 -> 1 and 1 -> 3 count: two steps per turn instead of six. */
+    TEST_ASSERT_EQUAL_INT16(20, r.state.position - before);
+}
+
+static void test_clean_finds_a_stuck_line_and_rebuilds_the_state(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct stuck_ride r;
+    ride_start(&r, 1, 0U, 1U); /* line A reads high: state 7 where 6 should be */
+    ride(&r, 1, 18U, 100U);    /* three turns: three episodes 3 -> 7 (C) -> 5 (B) */
+    TEST_ASSERT_TRUE(r.state.line_fault);
+    TEST_ASSERT_TRUE(r.any.line_fault_raised);
+    TEST_ASSERT_EQUAL_UINT8(0U, r.state.lost_line);
+    TEST_ASSERT_FALSE(r.state.fault);
+    const int16_t before = r.state.position;
+    ride(&r, 1, 12U, 100U);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.wrong_calls);
+    TEST_ASSERT_EQUAL_INT16(12, r.state.position - before); /* six steps per turn again */
+    TEST_ASSERT_FALSE(r.state.fault);
+}
+
+static void test_clean_finds_a_line_stuck_low_turning_backward(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct stuck_ride r;
+    ride_start(&r, -1, 1U, 0U); /* line B reads low: state 0 where 1 should be */
+    ride(&r, -1, 18U, 100U);
+    TEST_ASSERT_TRUE(r.state.line_fault);
+    TEST_ASSERT_EQUAL_UINT8(1U, r.state.lost_line);
+    const int16_t before = r.state.position;
+    ride(&r, -1, 12U, 100U);
+    TEST_ASSERT_EQUAL_UINT32(0U, r.wrong_calls);
+    TEST_ASSERT_EQUAL_INT16(-12, r.state.position - before);
+}
+
+static void test_clean_ignores_glitches_into_an_invalid_state(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct euc_hall_state state;
+    start_at_rest(&state, F_CURRENT_MODE);
+    for (uint32_t i = 0U; i < 10U; i++) {
+        (void)run(&state, 6U, 300U, F_CURRENT_MODE);
+        (void)run(&state, 7U, 250U, F_CURRENT_MODE); /* A glitches high and back: in and out through A */
+        (void)run(&state, 6U, 250U, F_CURRENT_MODE);
+        (void)run(&state, 7U, 250U, F_CURRENT_MODE); /* A high again, then B falls: names C */
+        (void)run(&state, 5U, 250U, F_CURRENT_MODE);
+        (void)run(&state, 1U, 250U, F_CURRENT_MODE); /* C toggles: it is alive */
+        (void)run(&state, 5U, 250U, F_CURRENT_MODE);
+        (void)run(&state, 4U, 250U, F_CURRENT_MODE);
+    }
+    TEST_ASSERT_FALSE(state.line_fault);
+}
+
+static void test_clean_stuck_line_still_faults_at_rest_in_the_invalid_sector(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct stuck_ride r;
+    ride_start(&r, 1, 0U, 1U);
+    ride(&r, 1, 24U, 100U);
+    TEST_ASSERT_TRUE(r.state.line_fault);
+    /* The wheel stops where line A should be low: the lines read 7 for good. */
+    while (forward_order[r.index] != 6U) {
+        ride(&r, 1, 1U, 100U);
+    }
+    const struct euc_hall_out out = run(&r.state, 7U, 1600U, F_CURRENT_MODE);
+    TEST_ASSERT_TRUE(r.state.fault);
+    TEST_ASSERT_TRUE(out.fault_raised);
+}
+
 static void test_odometer_every_118_changes(void)
 {
     struct euc_hall_state state;
@@ -297,6 +426,11 @@ int main(void)
     RUN_TEST(test_interpolation);
     RUN_TEST(test_invalid_state_latches_the_fault);
     RUN_TEST(test_invalid_state_angle_runs_on_in_compat_only);
+    RUN_TEST(test_stuck_line_goes_unnoticed_in_compat);
+    RUN_TEST(test_clean_finds_a_stuck_line_and_rebuilds_the_state);
+    RUN_TEST(test_clean_finds_a_line_stuck_low_turning_backward);
+    RUN_TEST(test_clean_ignores_glitches_into_an_invalid_state);
+    RUN_TEST(test_clean_stuck_line_still_faults_at_rest_in_the_invalid_sector);
     RUN_TEST(test_odometer_every_118_changes);
     return UNITY_END();
 }

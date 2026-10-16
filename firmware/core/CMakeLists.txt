@@ -32,6 +32,7 @@ add_library(euc_core STATIC
     bms/bms.c
     display/display.c
     lights/lights.c
+    lights/strip.c
     math/libm.c
     motor/current.c
     motor/foc_math.c

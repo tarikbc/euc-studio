@@ -77,12 +77,17 @@ static void render_temperature(float temperature_c, uint8_t grids[EUC_DISPLAY_GR
     grids[2] = (uint8_t)(euc_display_digit(tenths % 10U) | SEG_DP); /* dp = degree sign */
 }
 
-static void render_speed(int16_t speed_mm_per_s, uint8_t grids[EUC_DISPLAY_GRIDS])
+uint32_t euc_display_speed(int16_t speed_mm_per_s)
 {
     int32_t speed = (int32_t)speed_mm_per_s / 10;
     speed = (speed < 0) ? -speed : speed;
     const double kmh_exact = ((double)speed * 3.6) / 100.0;
-    uint32_t kmh = (uint32_t)kmh_exact;
+    return (uint32_t)kmh_exact;
+}
+
+static void render_speed(int16_t speed_mm_per_s, uint8_t grids[EUC_DISPLAY_GRIDS])
+{
+    uint32_t kmh = euc_display_speed(speed_mm_per_s);
     if (kmh > SPEED_LIMIT_KMH) {
         kmh = SPEED_LIMIT_KMH;
     }

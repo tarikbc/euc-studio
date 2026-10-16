@@ -6,6 +6,7 @@ set(EUC_C_WARNINGS
     -Wextra
     -Wpedantic
     -Wconversion
+    -Wsign-conversion
     -Wshadow
     -Wdouble-promotion
     -Wstrict-prototypes

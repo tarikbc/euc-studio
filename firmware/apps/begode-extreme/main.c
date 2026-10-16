@@ -189,6 +189,7 @@ static void init(void)
 
     stm32f1_backup_init();
     euc_lights_init(&app.lights, stm32f1_backup_read(BKP_LIGHT_MODE), 0U);
+    euc_strip_init(&app.strip);
     const uint16_t boot_count = (uint16_t)(stm32f1_backup_read(BKP_BOOT_COUNT) + 1U);
     stm32f1_backup_write(BKP_BOOT_COUNT, boot_count);
     app.trip_units = stm32f1_backup_read(BKP_TRIP);

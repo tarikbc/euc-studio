@@ -18,6 +18,18 @@
  * (quirk HALL_SPEED_FILTER_STALL).
  * Step count: signed steps per 20 ms window (fPWM / 25 + 2 calls) and the change of an 11-window sum.
  * Faults: an invalid state for more than fPWM / 8 calls (62.5 ms) latches a hall fault.
+ *
+ * One stuck line (clean profile; the stock firmware never notices, quirk HALL_SINGLE_LINE_UNDETECTED): a line
+ * stuck at one level turns one sector in six into state 0 or 7 and merges another into its neighbour, so the
+ * angle is wrong in two sectors and only two edges per turn are counted. At speed the invalid state never
+ * lasts 62.5 ms. The clean check watches the invalid episodes: each one entered through one line and left
+ * through another names the third line as silent. EUC_HALL_LINE_FAULT_EPISODES such episodes in a row, with
+ * the named line never toggling in between, latch line_fault. From then on the state comes from the two
+ * working lines: where they fix the lost line's level (a one-sector zone) it follows; where they leave it
+ * open (a two-sector zone) the state moves to the second sector one sector time (the last turn / 6) after
+ * the zone entry. The angle, step count, speed and odometer then see six edges per turn again. The 62.5 ms
+ * invalid check stays on the lines as read, so a further lost line, or the wheel stopped in the invalid
+ * sector, still latches the hall fault.
  */
 #ifndef EUC_MOTOR_HALL_H
 #define EUC_MOTOR_HALL_H
@@ -25,9 +37,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define EUC_HALL_LINES          3U
-#define EUC_HALL_RING_EDGES     6U   /* edges in one electrical turn */
-#define EUC_HALL_ODOMETER_STEPS 118U /* hall steps per odometer unit (about 1 m) */
+#define EUC_HALL_LINES               3U
+#define EUC_HALL_RING_EDGES          6U   /* edges in one electrical turn */
+#define EUC_HALL_ODOMETER_STEPS      118U /* hall steps per odometer unit (about 1 m) */
+#define EUC_HALL_LINE_FAULT_EPISODES 3U   /* clean: invalid episodes in a row that name one silent line */
+#define EUC_HALL_NO_LINE             0xFFU
 
 struct euc_hall_state {
     /* Glitch filter, per line */
@@ -66,11 +80,24 @@ struct euc_hall_state {
     int16_t steps_11_windows; /* block - previous block: balance input hall_steps_11_windows */
     int16_t steps_11_windows_max;
     uint8_t odometer_steps;
+
+    /* Clean stuck-line check (quirk HALL_SINGLE_LINE_UNDETECTED) */
+    uint8_t lines_previous;   /* filtered lines of the previous call */
+    uint8_t entry_line;       /* line that toggled into the current invalid state, or EUC_HALL_NO_LINE */
+    uint8_t suspect_line;     /* silent line named by the last invalid episodes, or EUC_HALL_NO_LINE */
+    uint8_t suspect_episodes; /* episodes in a row that named suspect_line */
+    bool line_fault;          /* latched until reset: lost_line is ignored */
+    uint8_t lost_line;
+    uint8_t working_lines; /* levels of the two working lines */
+    uint8_t zone_first;    /* state at the entry of a two-sector zone */
+    bool zone_second;      /* the state moved to the zone's second sector */
+    uint16_t zone_calls;   /* calls since the working lines last changed */
 };
 
 struct euc_hall_out {
-    bool odometer_step; /* 118 sector changes since the last unit: add one to odometer and trip */
-    bool fault_raised;  /* the hall fault latched in this call (alarm task: error bit 0x40) */
+    bool odometer_step;     /* 118 sector changes since the last unit: add one to odometer and trip */
+    bool fault_raised;      /* the hall fault latched in this call (alarm task: error bit 0x40) */
+    bool line_fault_raised; /* clean: a stuck line latched line_fault in this call (error bit 0x40, limp) */
 };
 
 /* Power-on state. */

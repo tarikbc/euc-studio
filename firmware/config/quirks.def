@@ -74,6 +74,8 @@ EUC_QUIRK_DEF(HALL_INVALID_ANGLE_RUN, 1, 0, "0x0800539C hall_update",
               "In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault.")
 EUC_QUIRK_DEF(MODE0_DEAD_TIME, 1, 0, "0x08007CD4 SVPWM_IcsInit",
               "Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns.")
+EUC_QUIRK_DEF(HALL_SINGLE_LINE_UNDETECTED, 1, 0, "0x0800539C hall_update",
+              "One stuck hall line is never detected: the motor runs on with a wrong angle in two sectors of six.")
 
 /* Sensors */
 EUC_QUIRK_DEF(NTC_REFERENCE_298_5, 1, 0, "0x08005218 ntc_temperature_measure",
@@ -84,6 +86,8 @@ EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",
               "'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest.")
 EUC_QUIRK_DEF(LOCK_LIGHT_STAYS_ON, 1, 0, "0x080073AC RTC tick, 0x08005538 button_light_mode",
               "In transport lock the telemetry shows the light off, but PB12 keeps its last duty.")
+EUC_QUIRK_DEF(STRIP_BREATH_PER_PASS, 1, 0, "0x08005A3C led_update_flag, 0x08005A5C led_strip_effects",
+              "The strip effects run on every main-loop pass, so the standstill breathing speed follows the CPU load.")
 
 /* BMS link (USART3) */
 EUC_QUIRK_DEF(BMS_PARTIAL_REPLY, 1, 0, "0x0800B318 usart3_rx_parse",

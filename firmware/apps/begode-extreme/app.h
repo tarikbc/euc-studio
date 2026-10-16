@@ -20,6 +20,7 @@
 #include "euc/balance/balance.h"
 #include "euc/bms/bms.h"
 #include "euc/lights/lights.h"
+#include "euc/lights/strip.h"
 #include "euc/motor/motor.h"
 #include "euc/power/power.h"
 #include "euc/protocol/commands.h"
@@ -44,6 +45,8 @@ struct app {
     struct euc_power_out power_out;
     struct euc_lights_state lights;
     struct euc_lights_out lights_out;
+    struct euc_strip_state strip;
+    uint8_t display_speed; /* the speed the display shows, for the strip */
     struct euc_bms_state bms;
     struct euc_service_state service;
     uint16_t trip_units;

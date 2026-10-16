@@ -27,6 +27,9 @@ struct euc_display_in {
     uint16_t time_base; /* alarm time base */
 };
 
+/* The speed the display shows, before its 199 limit: |speed| in whole km/h (mph with miles-scaled input). */
+uint32_t euc_display_speed(int16_t speed_mm_per_s);
+
 /* Seven-segment pattern of a decimal digit; 0 (dark) above 9. */
 uint8_t euc_display_digit(uint32_t digit);
 
