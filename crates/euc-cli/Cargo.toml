@@ -24,7 +24,9 @@ clap.workspace = true
 euc-core = { workspace = true, optional = true }
 euc-fwsource.workspace = true
 euc-image.workspace = true
+euc-physics.workspace = true
 euc-profile.workspace = true
+euc-proto-begode.workspace = true
 euc-sim.workspace = true
 euc-telemetry.workspace = true
 euc-unicorn = { workspace = true, optional = true }

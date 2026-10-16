@@ -1,4 +1,5 @@
-//! `euc sim run`: the wheel's controller firmware in the simulator.
+//! `euc sim run`: the wheel's controller firmware in the simulator (`euc sim serve` and
+//! `euc sim bridge-test` live in `serve.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,10 @@ use crate::{Context, Verdict};
 pub(crate) enum Command {
     /// Run a wheel's controller firmware in the simulator and report what it did.
     Run(Args),
+    /// Run a wheel at real time and bridge its BLE UART to a client over TCP (docs/bridge.md).
+    Serve(crate::serve::ServeArgs),
+    /// Connect to `euc sim serve`, write a few commands, and check the stream that comes back.
+    BridgeTest(crate::serve::BridgeTestArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -102,7 +107,11 @@ struct Steady {
 }
 
 pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
-    let Command::Run(args) = command;
+    let args = match command {
+        Command::Run(args) => args,
+        Command::Serve(args) => return crate::serve::serve(ctx, &args),
+        Command::BridgeTest(args) => return crate::serve::bridge_test(ctx, &args),
+    };
     let Some(backend) = BACKEND else {
         bail!(
             "this euc has no CPU backend. The Unicorn backend is GPL-2.0 and for development only; \
@@ -211,7 +220,7 @@ struct RideOutput<'a> {
     halted: Option<String>,
 }
 
-fn load_scenario(path: &Path) -> anyhow::Result<Scenario> {
+pub(crate) fn load_scenario(path: &Path) -> anyhow::Result<Scenario> {
     let text = fs::read_to_string(path).with_context(|| format!("cannot read {}", ui::path(path)))?;
     Scenario::from_toml(&text).with_context(|| format!("scenario {}", ui::path(path)))
 }
@@ -330,9 +339,9 @@ fn print_ride(wheel: &WheelProfile, scenario: &Scenario, args: &Args, output: &R
 /// The CPU backend this build has: Unicorn with the `unicorn` feature, none otherwise (our own
 /// core arrives in M3).
 #[cfg(feature = "unicorn")]
-const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = Some(unicorn);
+pub(crate) const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = Some(unicorn);
 #[cfg(not(feature = "unicorn"))]
-const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = None;
+pub(crate) const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = None;
 
 #[cfg(feature = "unicorn")]
 #[allow(unsafe_code)]
@@ -354,7 +363,7 @@ fn round(value: f64) -> f64 {
 
 /// The image and its label: the current pinned build from the cache (fetched if missing), or
 /// a file.
-fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyhow::Result<(Vec<u8>, String)> {
+pub(crate) fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyhow::Result<(Vec<u8>, String)> {
     if spec != "stock" {
         let path = Path::new(spec);
         let bytes = fs::read(path).with_context(|| format!("cannot read {}", ui::path(path)))?;
@@ -382,7 +391,7 @@ fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyhow::Result<(
 }
 
 /// `V`, `V@2.6` or `hex:5759@4`; without a time the i-th injection goes at 3.0 + 1.5 i seconds.
-fn injection(spec: &str, index: usize) -> anyhow::Result<(f64, Vec<u8>)> {
+pub(crate) fn injection(spec: &str, index: usize) -> anyhow::Result<(f64, Vec<u8>)> {
     let (data, at) = match spec.rsplit_once('@') {
         Some((data, at)) => (data, at.parse::<f64>().with_context(|| format!("bad time in \"{spec}\""))?),
         None => (spec, 3.0 + 1.5 * index as f64),

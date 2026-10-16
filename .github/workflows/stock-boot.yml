@@ -58,6 +58,12 @@ jobs:
         run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/balance-60s.toml
       - name: "Scenario: ride to 20 km/h and stop"
         run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/ride-20kmh-stop.toml
+      - name: BLE bridge (docs/bridge.md)
+        run: |
+          ./target/release/euc sim serve begode-extreme --seconds 15 &
+          server=$!
+          ./target/release/euc sim bridge-test --seconds 8
+          wait "$server"
       - name: Remove the image
         if: always()
         run: rm -rf "$EUC_CACHE_DIR"

@@ -140,7 +140,7 @@ fn timed_fault(mut table: toml::Table) -> Result<TimedFault, String> {
         let known: Vec<&str> = PlantFault::KINDS.iter().chain(DeviceFault::KINDS).copied().collect();
         return Err(format!("unknown fault \"{kind}\" (known: {})", known.join(", ")));
     };
-    if !(at_s >= 0.0) || for_s.is_some_and(|f| !(f > 0.0)) {
+    if at_s.is_nan() || at_s < 0.0 || for_s.is_some_and(|f| f.is_nan() || f <= 0.0) {
         return Err(format!("{kind}: at_s must not be negative and for_s must be positive"));
     }
     Ok(TimedFault { at_s, for_s, fault })

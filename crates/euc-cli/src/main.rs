@@ -4,6 +4,7 @@ mod fetch;
 mod firmware;
 mod image;
 mod paths;
+mod serve;
 mod sim;
 mod ui;
 

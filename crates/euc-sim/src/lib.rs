@@ -11,6 +11,7 @@
 //! and recordings, and [`scenario`]s script and judge a ride.
 
 mod board;
+pub mod bridge;
 pub mod config;
 mod machine;
 mod memory;

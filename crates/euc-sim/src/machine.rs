@@ -390,6 +390,18 @@ impl Machine {
             .collect()
     }
 
+    /// Takes the bytes the controller has sent over BLE since the last call (or since power-on),
+    /// with the cycle each started on the wire. A long-running viewer drains them so they do not
+    /// pile up; a report reads them all through [`Machine::board`] instead.
+    pub fn take_ble_tx(&mut self) -> Vec<(u64, u8)> {
+        let board = usize::from(self.board);
+        let Some(device) = self.sys.slots[board].device.as_deref_mut() else { return Vec::new() };
+        (device as &mut dyn std::any::Any)
+            .downcast_mut::<BoardLogic>()
+            .map(|logic| std::mem::take(&mut logic.ble_tx))
+            .unwrap_or_default()
+    }
+
     /// Sends `bytes` to the controller's BLE input now, as a phone would, while the machine runs
     /// (the configured injections are only for times known before the run).
     pub fn inject_ble(&mut self, bytes: &[u8]) {

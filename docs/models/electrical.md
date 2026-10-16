@@ -120,9 +120,15 @@ Two packs in parallel on the bus, each 32 cell groups in series. A cell group is
 voltage OCV(SOC), an ohmic resistance R0 and one RC pair (R1, τ). The packs share the load by their
 impedance (different charge states share unevenly); a negative load (regeneration) charges them. Pack
 temperature is a lumped node heated by `I²·R0` and the polarisation loss. The BMS readings per pack:
-32 cell voltages (all equal to the bus voltage / 32: cell imbalance is not modeled), the
-temperature at each of its 6 sensors, and the pack current. The smart BMS model reports pack A as
-blocks 0 and 1 and pack B as blocks 2 and 3.
+32 cell voltages (each cell group's OCV less its share of the pack's ohmic and polarisation drops,
+so a healthy pack shows the bus voltage / 32 on every cell and a `cell_low` fault shows on its
+cell), the temperature at each of its 6 sensors, and the pack current (discharge positive; the sign
+the real boards use is UNKNOWN). The simulator passes them through `PlantView::pack`, and the smart
+BMS model reports pack A as blocks 0 and 1 and pack B as blocks 2 and 3: cells 0-15 and 16-31,
+sensors 0-2 and 3-5, the pack current on both. A plant without packs (M1's static one) gives every
+cell the battery voltage / 32, as before. Checked on the stock image: a `cell_low` of 0.5 V on pack B
+cell 30 reaches the app's frame 03 as 3561 mV next to 4061 mV, and pack B, now the weaker one, shows
+−1.0 A as pack A charges it.
 
 ## Thermal
 
