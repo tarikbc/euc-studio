@@ -106,6 +106,11 @@ pub(crate) fn run(ctx: &Context, args: &Args) -> anyhow::Result<Verdict> {
                 bridge.send(&ServerMessage::Notify { t: out.at, hex: bridge::to_hex(&out.bytes) });
             }
         }
+        let stale = replayer.take_stale();
+        if stale > 0 {
+            let text = format!("the replay fell behind (was the program paused?): {stale} stale notifications skipped");
+            link.link.log().line(&Entry::Error { text: &text });
+        }
         if replayer.lap() != lap {
             lap = replayer.lap();
             link.link.log().line(&Entry::Lap { lap: lap + 1 });

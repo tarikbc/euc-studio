@@ -110,10 +110,13 @@ pub enum Entry<'a> {
         /// Notifications waiting.
         queued: usize,
     },
-    /// Notifications thrown away because the queue stayed full.
+    /// Notifications thrown away because the radio's queue overflowed (at most one line a
+    /// second).
     Dropped {
         /// How many, since the last such line.
         count: usize,
+        /// The queue's depth meanwhile.
+        queued: usize,
     },
 }
 
@@ -153,7 +156,7 @@ impl Entry<'_> {
                 format!("notify t={t:.3} char={characteristic} len={} hex={}", bytes.len(), hex(bytes))
             }
             Self::Busy { queued } => format!("busy t={t:.3} queued={queued}"),
-            Self::Dropped { count } => format!("dropped t={t:.3} count={count}"),
+            Self::Dropped { count, queued } => format!("dropped t={t:.3} count={count} queued={queued}"),
         };
         format!("ble {fields}")
     }
@@ -264,7 +267,7 @@ mod tests {
                 "ble notify t=1.250 char=FFE1 len=2 hex=55aa",
             ),
             (Entry::Busy { queued: 3 }, "ble busy t=1.250 queued=3"),
-            (Entry::Dropped { count: 7 }, "ble dropped t=1.250 count=7"),
+            (Entry::Dropped { count: 7, queued: 256 }, "ble dropped t=1.250 count=7 queued=256"),
         ];
         for (entry, line) in cases {
             assert_eq!(entry.render(1.25), line);

@@ -110,6 +110,9 @@ pub struct PlantState {
     pub electrical_speed: f64,
     /// Rotor-frame currents, ampere.
     pub current_dq: Dq,
+    /// Rotor-frame voltage the inverter applied in the last grid step, volt: the switching legs'
+    /// pole voltages after dead time. Zero while any leg is off.
+    pub voltage_dq: Dq,
     /// Phase currents a, b, c, ampere (positive into the motor).
     pub phase_current: [f64; 3],
     /// Torque on the wheel, newton-metre, positive forward.
@@ -151,6 +154,8 @@ pub struct ElectricalPlant {
     h: f64,
     time: u64,
     motor: Pmsm,
+    /// Voltage applied in the last grid step (see [`PlantState::voltage_dq`]).
+    voltage_dq: Dq,
     phase_current: [f64; 3],
     legs: [LegDrive; 3],
     wheel: Wheel,
@@ -177,6 +182,7 @@ impl ElectricalPlant {
         let battery = Battery::new(params.battery.clone(), ambient)?;
         let mut plant = Self {
             motor: Pmsm::new(params.motor),
+            voltage_dq: Dq::default(),
             hclk,
             grid,
             h: grid as f64 / hclk,
@@ -326,6 +332,7 @@ impl ElectricalPlant {
             electrical_angle: self.electrical_angle(self.time),
             electrical_speed: self.params.motor.electrical_speed(self.wheel.speed),
             current_dq: self.motor.current(),
+            voltage_dq: self.voltage_dq,
             phase_current: self.phase_current,
             wheel_torque: self.torque_nm(),
             bus_v: self.battery.voltage(),
@@ -381,8 +388,10 @@ impl ElectricalPlant {
         });
         let cut = self.faults.effects().cut;
         if let ([Some(a), Some(b), Some(c)], [false, false, false]) = (active, cut) {
-            self.motor.step(park([a, b, c], theta), omega_e, r, h);
+            self.voltage_dq = park([a, b, c], theta);
+            self.motor.step(self.voltage_dq, omega_e, r, h);
         } else {
+            self.voltage_dq = Dq::default();
             let circuit = Circuit { inductance: f64::midpoint(motor.ld_h, motor.lq_h), resistance: r, dt: h };
             inverter.step_with_open_legs(&mut current, active, motor.back_emf(theta, omega_e), vbus, circuit, cut);
             self.motor.set_current(park(current, theta));
@@ -521,6 +530,9 @@ pub(crate) mod tests {
         // 2/3 of the 2 % pole difference lies across phase a, through 0.082 Ω.
         let expected = 2.0 / 3.0 * 0.02 * s.bus_v / 0.082;
         assert!((s.phase_current[0] - expected).abs() < 0.01 * expected, "{} vs {expected}", s.phase_current[0]);
+        let applied = s.voltage_dq.d.hypot(s.voltage_dq.q);
+        let across_a = 2.0 / 3.0 * 0.02 * s.bus_v;
+        assert!((applied - across_a).abs() < 0.005 * across_a, "|V| {applied} V vs {across_a} V");
         let stored = plant.params.motor.magnetic_energy(s.current_dq);
         assert!((drawn - heat - stored).abs() < 0.01 * drawn, "drawn {drawn} J, heat {heat} J, stored {stored} J");
     }

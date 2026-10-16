@@ -25,6 +25,7 @@
 #include "euc/power/power.h"
 #include "euc/protocol/commands.h"
 #include "euc/protocol/telemetry.h"
+#include "euc/safety/riderless.h"
 #include "euc/safety/supervisor.h"
 #include "euc/sensors/sensors.h"
 #include "euc/service/service.h"
@@ -76,6 +77,9 @@ struct app {
     struct euc_supervisor_out supervisor_out;
     bool watchdog_running;
     struct euc_storage_write storage_write;
+
+    /* Clean riderless detector (quirk RIDERLESS_UNDETECTED): beeps and the limp speed limit */
+    struct euc_riderless_state riderless;
 
     /* RTC tick -> FOC */
     volatile int16_t foc_speed_dm_per_s;

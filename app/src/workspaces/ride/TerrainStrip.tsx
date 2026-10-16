@@ -1,49 +1,52 @@
 import { useMemo } from "react";
 import * as THREE from "three";
+import { surface } from "../../design/tokens.ts";
+import type { TerrainProfile } from "../../engine/types.ts";
+import { strip } from "./terrain.ts";
 
-// The scenario's ground along the path, in the physics world frame (x forward, y left, z up):
-// a strip of road that follows the slope and bumps. The studio floor stays flat at z 0, so a
-// pothole cannot be cut into it; the strip marks it darker instead.
+// The scenario's ground along the path, in the physics world frame (x forward, y left, z up): a
+// strip of road at the ground's true height, so the wheel and rider stand on it on a slope or in
+// a pothole. On such a run the strip is the floor (the flat studio grid is not drawn); a line
+// across it each metre shows the speed, and potholes are darker.
 
-/** Half the strip's width, m. */
-const HALF_WIDTH = 0.6;
+/** Half the strip's width: as wide as the physics ground, m. */
+const HALF_WIDTH = 1.5;
 const ROAD = new THREE.Color("#2E2E33");
 const HOLE = new THREE.Color("#000000");
 
-export function TerrainStrip({ profile }: { profile: [number, number][] }) {
-  const geometry = useMemo(() => {
-    const n = profile.length;
-    const positions = new Float32Array(n * 2 * 3);
-    const colors = new Float32Array(n * 2 * 3);
+export function TerrainStrip({ profile }: { profile: TerrainProfile }) {
+  const { road, marks } = useMemo(() => {
+    const s = strip(profile, HALF_WIDTH);
+    const colors = new Float32Array(s.positions.length);
     const index: number[] = [];
-    profile.forEach(([x, z], i) => {
-      // Just above the flat floor where the ground dips below it.
-      const h = Math.max(z, 0) + 0.0008;
-      const colour = z < -0.001 ? HOLE : ROAD;
-      for (const [k, y] of [
-        [0, HALF_WIDTH],
-        [1, -HALF_WIDTH],
-      ] as const) {
-        positions.set([x, y, h], (i * 2 + k) * 3);
-        colors.set([colour.r, colour.g, colour.b], (i * 2 + k) * 3);
-      }
+    s.holes.forEach((hole, i) => {
+      const c = hole ? HOLE : ROAD;
+      colors.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
       if (i > 0) {
         const a = (i - 1) * 2;
         index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
       }
     });
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    g.setIndex(index);
-    g.computeVertexNormals();
-    return g;
+    const road = new THREE.BufferGeometry();
+    road.setAttribute("position", new THREE.BufferAttribute(s.positions, 3));
+    road.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    road.setIndex(index);
+    road.computeVertexNormals();
+    const marks = new THREE.BufferGeometry();
+    marks.setAttribute("position", new THREE.BufferAttribute(s.marks, 3));
+    return { road, marks };
   }, [profile]);
 
   return (
-    <mesh geometry={geometry} receiveShadow>
-      {/* Matte: a PBR surface this large catches the environment at grazing angles and turns grey. */}
-      <meshLambertMaterial vertexColors side={THREE.DoubleSide} />
-    </mesh>
+    <>
+      <mesh geometry={road} receiveShadow>
+        {/* Matte: a PBR surface this large catches the environment at grazing angles and turns
+            grey. One-sided (it faces up): seen from below, the road never covers the wheel. */}
+        <meshLambertMaterial vertexColors />
+      </mesh>
+      <lineSegments geometry={marks}>
+        <lineBasicMaterial color={surface.lift} />
+      </lineSegments>
+    </>
   );
 }

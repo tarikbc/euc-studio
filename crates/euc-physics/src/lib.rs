@@ -22,7 +22,10 @@ use euc_telemetry::{BodyInfo, BodyRole, Geom, GeomKind, Pose};
 use mujoco_rs::prelude::*;
 use thiserror::Error;
 
-pub use params::{Assist, ParamError, Rider, RiderControl, Setup, Shapes, Shell, Solid, Tire, Torus, Wheel, WheelBody};
+pub use params::{
+    Assist, LetGo, ParamError, Rider, RiderControl, Setup, Shapes, Shell, Solid, Suspension, Tire, Torus, Wheel,
+    WheelBody,
+};
 pub use rider::{Intent, RiderController};
 pub use terrain::{Feature, Terrain};
 
@@ -43,6 +46,17 @@ const STEP_OFF_KICK_S: f64 = 0.2;
 
 /// Time the model settles on its stand before the clock starts, seconds.
 const SETTLE_S: f64 = 0.2;
+
+/// How the rider left the pedals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leaving {
+    /// Stepped off on purpose ([`Physics::step_off`]), with a push of the stepping foot.
+    SteppedOff,
+    /// Let go after the firmware cut the drive and the wheel tipped ([`LetGo::after_cut_deg`]).
+    LetGoAfterCut,
+    /// Let go as the wheel fell ([`LetGo::fall_deg`]).
+    LetGoFalling,
+}
 
 /// The model could not be built.
 #[derive(Debug, Error)]
@@ -81,6 +95,10 @@ pub struct BodyState {
     pub rider_lean_rad: f64,
     /// Wheel speed relative to the shell, rad/s, forward positive.
     pub wheel_rad_s: f64,
+    /// Suspension compression from full extension, metres of axle travel (0 without a suspension).
+    pub suspension_m: f64,
+    /// The shock's compression from full extension, metres (0 without a suspension).
+    pub shock_m: f64,
     /// Motor torque applied in the last step, N·m, forward positive.
     pub motor_torque_nm: f64,
     /// Ankle torque applied in the last step, N·m, tipping the rider forward when positive.
@@ -103,6 +121,8 @@ struct Ids {
     axle_dof: usize,
     lean_qpos: usize,
     lean_dof: usize,
+    /// The suspension joint's qpos and dof, if the wheel has one.
+    suspension: Option<(usize, usize)>,
     ankle: usize,
     accel: usize,
     gyro: usize,
@@ -121,6 +141,9 @@ struct Attitude {
     pitch_down_rate: f64,
     /// Roll rate about the heading, right side down positive.
     roll_rate: f64,
+    /// Turn rate about the vertical, left positive.
+    yaw_rate: f64,
+    /// Ground speed of the axle along the heading, m/s.
     speed: f64,
 }
 
@@ -135,8 +158,12 @@ pub struct Physics {
     motor_torque: f64,
     ankle_torque: f64,
     push_n: f64,
-    /// When the rider stepped off, seconds: no ankle, push, drag or roll aid any more.
-    stepped_off_at: Option<f64>,
+    /// When and how the rider left the pedals: no ankle, push, drag or roll aid any more.
+    left: Option<(f64, Leaving)>,
+    /// When the rider will let go (the trigger came, the reaction runs), and why.
+    letting_go: Option<(f64, Leaving)>,
+    /// The firmware has cut the drive (the session tells).
+    drive_cut: bool,
 }
 
 impl std::fmt::Debug for Physics {
@@ -166,6 +193,13 @@ impl Physics {
         let qpos = |joint: usize| model.jnt_qposadr()[joint] as usize;
         let dof = |joint: usize| model.jnt_dofadr()[joint] as usize;
         let sensor = |name: &str| id(MjtObj::mjOBJ_SENSOR, name).map(|s| model.sensor_adr()[s] as usize);
+        let suspension = match &setup.wheel.suspension {
+            Some(_) => {
+                let joint = id(MjtObj::mjOBJ_JOINT, names::SUSPENSION)?;
+                Some((qpos(joint), dof(joint)))
+            }
+            None => None,
+        };
         let ids = Ids {
             shell,
             wheel,
@@ -176,6 +210,7 @@ impl Physics {
             axle_dof: dof(axle),
             lean_qpos: qpos(lean),
             lean_dof: dof(lean),
+            suspension,
             ankle: id(MjtObj::mjOBJ_ACTUATOR, names::ANKLE)?,
             accel: sensor(names::IMU_ACCEL)?,
             gyro: sensor(names::IMU_GYRO)?,
@@ -195,7 +230,9 @@ impl Physics {
             motor_torque: 0.0,
             ankle_torque: 0.0,
             push_n: 0.0,
-            stepped_off_at: None,
+            left: None,
+            letting_go: None,
+            drive_cut: false,
         };
         // The stand and the tire are soft constraints: let them take the load before time starts,
         // so the first IMU sample already reads a wheel at rest.
@@ -233,15 +270,56 @@ impl Physics {
     /// ankle torque, the rider's pushes and drag and the roll aid stop, and the stepping foot gives
     /// the shell a short sideways push. It cannot be undone.
     pub fn step_off(&mut self) {
-        if self.stepped_off_at.is_none() {
+        self.leave(Leaving::SteppedOff);
+    }
+
+    /// The rider has left the pedals.
+    pub const fn rider_off(&self) -> bool {
+        self.left.is_some()
+    }
+
+    /// When and how the rider left the pedals.
+    pub const fn left_pedals(&self) -> Option<(f64, Leaving)> {
+        self.left
+    }
+
+    /// Tells the model whether the firmware has cut the drive: the rider then lets go once the
+    /// wheel tips past [`LetGo::after_cut_deg`].
+    pub const fn set_drive_cut(&mut self, cut: bool) {
+        self.drive_cut = cut;
+    }
+
+    fn leave(&mut self, how: Leaving) {
+        if self.left.is_none() {
             self.data.eq_active_mut()[self.ids.on_pedals] = false;
-            self.stepped_off_at = Some(self.time_s());
+            self.left = Some((self.time_s(), how));
         }
     }
 
-    /// The rider has stepped off.
-    pub const fn rider_off(&self) -> bool {
-        self.stepped_off_at.is_some()
+    /// A rider lets go of a wheel that goes down: once the drive is cut and the shell tips past
+    /// `after_cut_deg`, or past `fall_deg` in any case, after the reaction time. Letting go keeps
+    /// the rider's own momentum (no push, unlike a step-off).
+    fn watch_for_letting_go(&mut self, att: &Attitude) {
+        let rule = self.setup.rider.let_go;
+        if !rule.enabled || self.left.is_some() || self.held() {
+            return;
+        }
+        let now = self.time_s();
+        match self.letting_go {
+            Some((at, how)) if now >= at => self.leave(how),
+            Some(_) => {}
+            None => {
+                let tilt = att.pitch.abs().max(att.roll.abs()).to_degrees();
+                let how = if tilt > rule.fall_deg {
+                    Some(Leaving::LetGoFalling)
+                } else if self.drive_cut && tilt > rule.after_cut_deg {
+                    Some(Leaving::LetGoAfterCut)
+                } else {
+                    None
+                };
+                self.letting_go = how.map(|how| (now + rule.reaction_s, how));
+            }
+        }
     }
 
     /// Holds the wheel upright and still on a stand, or lets it go.
@@ -261,6 +339,7 @@ impl Physics {
         // Positions and velocities first, so the rider and the aids act on the current state.
         self.data.step1();
         let att = self.attitude();
+        self.watch_for_letting_go(&att);
         let lean = -att.pitch + self.data.qpos()[ids.lean_qpos];
         let lean_rate = att.pitch_down_rate + self.data.qvel()[ids.lean_dof];
         let setup = &self.setup;
@@ -276,21 +355,30 @@ impl Physics {
             gravity: setup.gravity,
             held: self.held(),
             pitch_up: att.pitch,
+            heading: att.heading[1].atan2(att.heading[0]),
+            yaw_rate: att.yaw_rate,
         };
         let rider_off = self.rider_off();
         self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
+        // The rider steers through feet and tire; a rigid rider cannot twist, so the twist acts
+        // on the shell directly, like the roll spring.
+        let steer = if rider_off { 0.0 } else { self.rider.steering_torque(&sense) };
         self.motor_torque = motor_torque_nm;
 
         let assist = if rider_off { Assist { roll_stiffness: 0.0, roll_damping: 0.0 } } else { self.setup.assist };
-        let kick = match self.stepped_off_at {
-            Some(at) if self.time_s() - at < STEP_OFF_KICK_S => STEP_OFF_KICK_NM,
+        let kick = match self.left {
+            Some((at, Leaving::SteppedOff)) if self.time_s() - at < STEP_OFF_KICK_S => STEP_OFF_KICK_NM,
             _ => 0.0,
         };
         let roll_torque = kick - (assist.roll_stiffness * att.roll + assist.roll_damping * att.roll_rate);
         let [hx, hy] = att.heading;
         self.data.ctrl_mut()[ids.ankle] = self.ankle_torque;
         self.data.qfrc_applied_mut()[ids.axle_dof] = motor_torque_nm;
-        self.data.xfrc_applied_mut()[ids.shell] = [0.0, 0.0, 0.0, roll_torque * hx, roll_torque * hy, 0.0];
+        if let (Some(s), Some((q, v))) = (&self.setup.wheel.suspension, ids.suspension) {
+            let (travel, rate) = (self.data.qpos()[q], self.data.qvel()[v]);
+            self.data.qfrc_applied_mut()[v] = -s.axle_force_n(travel, rate);
+        }
+        self.data.xfrc_applied_mut()[ids.shell] = [0.0, 0.0, 0.0, roll_torque * hx, roll_torque * hy, steer];
         let along = if rider_off { 0.0 } else { self.push_n - aero };
         self.data.xfrc_applied_mut()[ids.rider] = [along * hx, along * hy, 0.0, 0.0, 0.0, 0.0];
         self.data.step2();
@@ -300,6 +388,12 @@ impl Physics {
     /// Simulated seconds since the model was built.
     pub fn time_s(&self) -> f64 {
         self.data.time()
+    }
+
+    /// Suspension compression from full extension (metres) and its rate (m/s, compressing
+    /// positive); zero without a suspension.
+    pub fn suspension(&self) -> (f64, f64) {
+        self.ids.suspension.map_or((0.0, 0.0), |(q, v)| (self.data.qpos()[q], self.data.qvel()[v]))
     }
 
     /// The rotor's angle (radians) and speed (rad/s) relative to the stator, forward positive.
@@ -336,6 +430,8 @@ impl Physics {
             roll_rad: att.roll,
             rider_lean_rad: lean,
             wheel_rad_s: self.wheel().1,
+            suspension_m: self.suspension().0,
+            shock_m: self.setup.wheel.suspension.as_ref().map_or(0.0, |s| s.shock_m(self.suspension().0)),
             motor_torque_nm: self.motor_torque,
             ankle_torque_nm: self.ankle_torque,
             held: self.held(),
@@ -401,6 +497,18 @@ impl Physics {
         let left = [2.0 * (qx * qy - qw * qz), 1.0 - 2.0 * (qx * qx + qz * qz), 2.0 * (qy * qz + qw * qx)];
         let norm = fwd[0].hypot(fwd[1]).max(1e-9);
         let heading = [fwd[0] / norm, fwd[1] / norm];
+        // The free joint's linear velocity is the shell origin's, in the world; the axle moves
+        // along the suspension axis from there: add the shell's rotation and the slide.
+        let mut axle_vel = [vel[0], vel[1], vel[2]];
+        if let (Some(s), Some((q, v))) = (&self.setup.wheel.suspension, self.ids.suspension) {
+            let (q, q_rate) = (self.data.qpos()[q], self.data.qvel()[v]);
+            let up = cross(fwd, left);
+            let to_world = |l: [f64; 3]| std::array::from_fn(|i| l[0] * fwd[i] + l[1] * left[i] + l[2] * up[i]);
+            let axis: [f64; 3] = to_world(s.axis());
+            let omega: [f64; 3] = to_world([vel[3], vel[4], vel[5]]);
+            let spin = cross(omega, axis.map(|a| q * a));
+            axle_vel = std::array::from_fn(|i| axle_vel[i] + spin[i] + q_rate * axis[i]);
+        }
         Attitude {
             heading,
             pitch: fwd[2].clamp(-1.0, 1.0).asin(),
@@ -408,7 +516,13 @@ impl Physics {
             // The free joint's angular velocity is in the shell frame: x roll, y pitch (nose down).
             pitch_down_rate: vel[4],
             roll_rate: vel[3],
-            speed: vel[0] * heading[0] + vel[1] * heading[1],
+            // The vertical component of that rate in the world: the shell's axes' heights weigh it.
+            yaw_rate: vel[3] * fwd[2] + vel[4] * left[2] + vel[5] * cross(fwd, left)[2],
+            speed: axle_vel[0] * heading[0] + axle_vel[1] * heading[1],
         }
     }
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }

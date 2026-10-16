@@ -273,6 +273,43 @@ mod tests {
         data.xpos()[body][2]
     }
 
+    /// The ground's height at `x` as MuJoCo sees it: a ray cast straight down onto the floor geom.
+    fn surface(terrain: &Terrain, x: f64) -> f64 {
+        let xml = format!(
+            "<mujoco>\n{}\n  <worldbody>\n{}\n  </worldbody>\n</mujoco>",
+            terrain.asset().unwrap_or_default(),
+            terrain.ground()
+        );
+        let mut data = MjData::new(Box::new(MjModel::from_xml_string(&xml).unwrap()));
+        data.forward();
+        let (hit, distance) = data.ray(&[x, 0.0, 100.0], &[0.0, 0.0, -1.0], None, true, None, None);
+        assert!(hit.is_some(), "the ray at {x} m meets the ground");
+        100.0 - distance
+    }
+
+    #[test]
+    fn the_heightfield_surface_is_the_profile_within_a_millimetre() {
+        let hill = Terrain { slope_pct: 20.0, slope_start_m: 40.0, length_m: 300.0, ..Terrain::flat() };
+        let downhill = Terrain { slope_pct: -2.0, slope_start_m: 25.0, length_m: 250.0, ..Terrain::flat() };
+        let pothole = Terrain {
+            features: vec![Feature::Pothole { at_m: 50.0, depth_m: 0.02, length_m: 0.5 }],
+            length_m: 120.0,
+            ..Terrain::flat()
+        };
+        let cases: [(&Terrain, &[f64]); 4] = [
+            (&hill, &[-3.0, 0.0, 30.0, 45.0, 60.0, 150.0, 290.0]),
+            (&downhill, &[-3.0, 10.0, 40.0, 100.0, 240.0]),
+            (&pothole, &[-3.0, 20.0, 50.25, 80.0]),
+            (&pothole_and_bump(), &[1.0, 2.3, 4.25, 7.0]),
+        ];
+        for (terrain, xs) in cases {
+            for &x in xs {
+                let (ground, profile) = (surface(terrain, x), terrain.height(x));
+                assert!((ground - profile).abs() < 0.001, "at {x} m: MuJoCo {ground} m, profile {profile} m");
+            }
+        }
+    }
+
     #[test]
     fn mujoco_puts_the_ground_where_the_profile_says() {
         let t = pothole_and_bump();

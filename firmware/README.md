@@ -144,13 +144,20 @@ covers the motor gates):
   minute's climb, about 48 deg in the end). Clean stops that tiltback at 8 deg and applies the 10 km/h speed
   limit of limp mode instead (2.5 deg/s, at most 12 deg), until the voltage and temperature are back inside
   their window (`BATTERY_TILTBACK_UNBOUNDED`).
+- **Riderless wheel.** Stock drives an empty wheel on at speed until it falls on its side. Clean suspects an
+  empty wheel after a sudden load drop when the q current then stays under 3.5 A for 0.6 s at speed without
+  the wheel slowing down, then beeps and applies the 10 km/h speed limit of limp mode; a rider leaning against
+  it (7 A) or a stop releases it. Coasting, braking and cruising downhill do not trigger it in the simulator;
+  the response stays gentle because a wrong suspicion must never throw a rider
+  (`RIDERLESS_UNDETECTED`, [docs/riderless-detection.md](docs/riderless-detection.md)).
 - **One lost hall line.** The stock firmware never notices one stuck hall line: it rides on with a wrong
   angle in two sectors of six and a speed reading a third of the truth. Clean finds the silent line within
   three electrical turns, rebuilds the state from the other two lines, raises error bit 0x40 (fault beeps),
   lowers the speed tiltback to 10 km/h and allows no automatic restart after the next stop
   (`HALL_SINGLE_LINE_UNDETECTED`). The 62.5 ms invalid-state fault stays on the lines as read.
-- **Gyro range.** Stock sets the MPU-6500 gyro to +-500 deg/s; a pothole edge turns the shell faster, the gyro
-  clips and the attitude can read level while the shell is 24 deg nose down. Clean uses +-2000 deg/s (0.061
+- **Gyro range.** Stock sets the MPU-6500 gyro to +-500 deg/s; a hard edge that turns the shell faster clips
+  the gyro, and the attitude can read level while the shell is 24 deg nose down (the rigid-body pothole; with
+  the rear suspension the 2 cm pothole peaks at about 250 deg/s and does not clip). Clean uses +-2000 deg/s (0.061
   instead of 0.015 deg/s per count; calibration pages stay in +-500 deg/s counts) and, if an axis still reaches
   its rail, re-seeds the low-passed accelerometer and raises the correction gain for 1 s
   (`GYRO_500DPS_CLIP`).

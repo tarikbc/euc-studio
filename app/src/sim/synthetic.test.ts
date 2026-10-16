@@ -19,6 +19,8 @@ describe("DemoEngine", () => {
     for (const ch of CHANNEL_IDS) {
       const { min, max } = CHANNELS[ch];
       for (const v of e.channels[ch].toArray()) {
+        // NaN: a channel the demo does not model (suspension).
+        if (Number.isNaN(v)) continue;
         expect(v).toBeGreaterThanOrEqual(min);
         expect(v).toBeLessThanOrEqual(max);
       }

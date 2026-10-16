@@ -38,11 +38,16 @@ note = "Regeneration lifts the pack to about 131 V when the rider brakes, and th
 battery_v = 1.0
 
 [scenario.low-battery-tiltback]
-note = "The rider eases off for the battery tiltback (1.5 km/h per degree beyond 2°), so the few milliseconds between the two firmwares' tiltback ramps (up to 0.5° apart) become speed and distance differences."
+note = "The rider feels the firmware's commanded tiltback and eases off 1.5 km/h per degree beyond 2°, so the two firmwares' battery tiltback ramps (up to 0.8° apart; they part at 1.9 s, still on the stand) become speed, pitch and current differences."
 [scenario.low-battery-tiltback.channels]
-speed_kmh = 1.0
+speed_kmh = 2.5       # 1.7 km/h measured
+wheel_rad_s = 3.5     # 2.4 rad/s measured
+pitch_deg = 3.0       # 2.0° measured
 battery_v = 1.0
 distance_m = 0.6
+[scenario.low-battery-tiltback.channels_rms]
+iq_a = 10.0          # 6.5 A measured
+torque_nm = 8.5
 
 [scenario.hall-loss-while-riding]
 note = "KNOWN DIFFERENCE (timing-sensitive): on a total hall loss at 15 s the two firmwares drive the motor differently at once (Iq up to 365 A apart at 15.04 s), and compat's cut has not always come within 0.2 s as stock's does. Judged until the fault."
@@ -60,6 +65,10 @@ until_s = 16.5
 [scenario.overlean-top-speed-30pct]
 note = "As overlean-top-speed at 30 % charge."
 until_s = 16.5
+
+[scenario.overlean-no-pwm-tiltback]
+note = "As overlean-top-speed-30pct with the PWM tiltback off: near the limit the two firmwares' currents part ways (battery 0.5 V apart by 19.3 s). Judged until 18 s; both runs must still cut and fall (same_checks). The clean profile differs on purpose here (PWM_TILTBACK_VQ_ONLY: its headroom tiltback starts at about 19.9 s and the rider stays up); this file judges compat only."
+until_s = 18.0
 
 [scenario.hill-climb-low-battery]
 note = "The low pack sags several volts under the climb's current, so its voltage and current differ more; the 150 m ride adds up more distance."
@@ -81,3 +90,7 @@ until_s = 15.0
 [scenario.rider-steps-off-5kmh]
 note = "As rider-steps-off-15kmh, stepping off at 12 s."
 until_s = 12.0
+
+[scenario.ble-service-cut-standing]
+note = "The service sequence cuts the motor at 10.31 s on both and the standing wheel and rider fall over (11.52 s); a few cycles of timing change how they fall (roll up to 3° apart). Judged until the cut; the checks still compare."
+until_s = 10.3

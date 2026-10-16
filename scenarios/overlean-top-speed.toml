@@ -19,8 +19,12 @@ speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
 
 # The overleaning rider ignores the tiltback and keeps leaning: that is the danger this run shows.
+# With the rear suspension, a rider who leans at most 15° (the default) ends at the edge: the speed
+# and PWM tiltbacks hold the stock wheel near 71 km/h, and the outcome changes with the emulator's
+# timing. This rider leans up to 18°, as a rider who pushes harder at speed, and reaches the cutout.
 [rider.control]
 tiltback_feel_deg = 90.0      # never eases off, whatever the tiltback
+lean_max_deg = 18.0           # leans harder than the default 15°
 
 [[expect]]
 check = "record"

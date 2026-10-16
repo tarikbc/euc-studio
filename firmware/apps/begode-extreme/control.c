@@ -9,6 +9,7 @@
 #include "board.h"
 #include "euc/display/display.h"
 #include "euc/math/fixed.h"
+#include "euc/math/float_ops.h"
 #include "euc/quirks.h"
 #include "stm32f1/device.h"
 #include "stm32f1/port.h"
@@ -19,6 +20,7 @@
 #define DISPLAY_PERIOD_TICKS  100U
 #define SERVICE_WAIT_MS       200U
 #define UNITS_MILES           1U
+#define TILTBACK_ACTIVE_DEG   0.5F /* a tiltback offset above this keeps the riderless detector off */
 
 /* Interrupts ----------------------------------------------------------------------------------------------
  */
@@ -301,6 +303,17 @@ static void balance(void)
     in->hard_inhibit = app.motor.hard_cut || app.foc_hard_cut_request;
     in->hall_fault = app.motor.hall.fault;
     in->limp = app.motor.hall.line_fault || app.supervisor_out.main_loop_stalled;
+    const bool tiltback_active = (euc_f32_abs(app.balance.tiltback_speed_deg) > TILTBACK_ACTIVE_DEG) ||
+                                 (euc_f32_abs(app.balance.tiltback_battery_deg) > TILTBACK_ACTIVE_DEG) ||
+                                 (euc_f32_abs(app.balance.tiltback_pwm_deg) > TILTBACK_ACTIVE_DEG);
+    const struct euc_riderless_in riderless_in = {
+        .balancing = (app.balance.start_state == 1) && !app.balance.motor_disabled,
+        .other_limit = in->limp || in->hall_fault || in->hard_inhibit || app.balance.battery_limit ||
+                       app.balance.numeric_fault || tiltback_active,
+        .speed_m_per_s = app.balance.speed_m_per_s,
+        .current_01a = app.motor.iq_01a,
+    };
+    in->riderless = euc_riderless_tick(&app.riderless, &riderless_in);
     in->disable_request = app.disable_request;
     app.disable_request = false;
 
@@ -361,6 +374,7 @@ static void alarms(void)
         .powering_off = app.power.powering_off,
         .hall_fault = app.motor.hall.fault,
         .main_loop_stalled = app.supervisor_out.main_loop_stalled,
+        .riderless = app.riderless.suspected,
         .bms_fault = app.bms.fault,
         .horn_request = app.horn_request,
         .handle_double_beep = app.balance_out.handle_double_beep,

@@ -18,6 +18,11 @@ pub const GROUP_GAP_S: f64 = 0.1;
 /// Lap period of a replay with fewer than two groups, seconds (the Begode group period).
 pub const GROUP_PERIOD_S: f64 = 0.304;
 
+/// A notification more than this late is stale, seconds: after the program was paused, a replay
+/// skips what it missed instead of sending it in one burst. A real wheel never sends old
+/// telemetry, and a burst would fill the radio's queue.
+pub const STALE_S: f64 = 0.5;
+
 /// A capture that cannot be replayed.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ReplayError {
@@ -72,6 +77,8 @@ pub struct Replayer {
     immediate: Vec<Notification>,
     /// Write lines of the capture left out.
     skipped_writes: usize,
+    /// Stale notifications skipped since the last [`take_stale`](Self::take_stale).
+    stale: usize,
 }
 
 impl std::fmt::Debug for Replayer {
@@ -139,6 +146,7 @@ impl Replayer {
             chunk: profile.chunk(),
             immediate: Vec::new(),
             skipped_writes,
+            stale: 0,
         })
     }
 
@@ -162,6 +170,11 @@ impl Replayer {
         self.skipped_writes
     }
 
+    /// Stale notifications skipped since the last call (see [`STALE_S`]).
+    pub const fn take_stale(&mut self) -> usize {
+        std::mem::replace(&mut self.stale, 0)
+    }
+
     /// Laps started so far beyond the first (0 during the first).
     pub const fn lap(&self) -> u64 {
         self.lap
@@ -177,7 +190,9 @@ impl Replayer {
         self.entries[index].t - self.origin + lap as f64 * self.period
     }
 
-    /// Everything due by `now` (seconds since the replay started), in order.
+    /// Everything due by `now` (seconds since the replay started), in order. Captured
+    /// notifications more than [`STALE_S`] late are skipped; the firmware's decisions at their
+    /// group times still count, and replies still go out.
     pub fn advance(&mut self, now: f64) -> Vec<Notification> {
         let mut out = std::mem::take(&mut self.immediate);
         loop {
@@ -203,7 +218,9 @@ impl Replayer {
                     }
                 };
             }
-            if self.sending {
+            if self.sending && now - at > STALE_S {
+                self.stale += 1;
+            } else if self.sending {
                 let entry = &self.entries[next];
                 out.push(Notification { at, characteristic: entry.characteristic, bytes: entry.bytes.clone() });
             }
@@ -286,6 +303,12 @@ mod tests {
         Replayer::new(capture, &BleProfile::hm10("T"), Box::new(Echo::default()), from, looping).unwrap()
     }
 
+    /// Everything from `from` to `until`, polling every 10 ms as a live loop does.
+    fn step(replayer: &mut Replayer, from: f64, until: f64) -> Vec<Notification> {
+        let steps = ((until - from) * 100.0).round() as u32;
+        (0..=steps).flat_map(|k| replayer.advance((from + f64::from(k) / 100.0).min(until))).collect()
+    }
+
     /// What went out by `until`, polling every 10 ms: `g<n>` for a group's first line, text otherwise.
     fn played(replayer: &mut Replayer, writes: &[(f64, &[u8])], until: f64) -> Vec<String> {
         let mut seen = Vec::new();
@@ -313,10 +336,22 @@ mod tests {
         assert_eq!(first, [Notification { at: 0.0, characteristic: CharId(0), bytes: vec![0xA0; 20] }]);
         assert_eq!(replayer.advance(0.009), Vec::<Notification>::new());
         assert_eq!(replayer.advance(0.011).len(), 1);
-        let rest = replayer.advance(10.0);
+        let rest = step(&mut replayer, 0.02, 10.0);
         assert_eq!(rest.len(), 4);
         assert!((rest[0].at - 0.3).abs() < 1e-9 && (rest[3].at - 0.61).abs() < 1e-9);
         assert!(replayer.finished());
+    }
+
+    #[test]
+    fn after_a_pause_stale_notifications_are_skipped_not_burst() {
+        let mut replayer = start(&capture(20), 0.0, false);
+        assert_eq!(replayer.advance(0.0).len(), 1);
+        // Paused until 5.05 s: what was due before 4.55 s is stale; the group at 4.8 s still goes.
+        let late = replayer.advance(5.05);
+        let firsts: Vec<u8> = late.iter().filter(|n| n.bytes.len() == 20).map(|n| n.bytes[0] - 0xA0).collect();
+        assert_eq!(firsts, [16]);
+        assert_eq!(replayer.take_stale(), 31, "the 4-byte line at 0.01 s and groups 1 to 15");
+        assert_eq!(replayer.take_stale(), 0);
     }
 
     #[test]
@@ -333,7 +368,7 @@ mod tests {
         let mut replayer = start(&capture(4), 0.0, false);
         replayer.advance(0.05);
         replayer.write(0.05, CharId(1), b"now");
-        assert_eq!(replayer.advance(1.0).len(), 6, "nothing changed");
+        assert_eq!(step(&mut replayer, 0.06, 1.0).len(), 6, "nothing changed");
     }
 
     #[test]
@@ -350,7 +385,7 @@ mod tests {
     fn loops_one_group_period_after_the_last_group() {
         let mut replayer = start(&capture(3), 0.0, true);
         assert!((replayer.period() - 0.9).abs() < 1e-9, "0.6 to the last group, plus 0.3");
-        assert_eq!(replayer.advance(0.89).len(), 6);
+        assert_eq!(step(&mut replayer, 0.0, 0.89).len(), 6);
         assert_eq!(replayer.lap(), 0);
         let next = replayer.advance(0.901);
         assert_eq!((next.len(), replayer.lap()), (1, 1));

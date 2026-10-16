@@ -67,6 +67,7 @@ struct euc_balance_in {
     bool hall_fault;                 /* hall sensor fault: no automatic recovery */
     bool limp;            /* clean, degraded drive (lost hall line, stalled main loop): speed tiltback at
                            * the limp speed at most, no automatic recovery */
+    bool riderless;       /* clean, the wheel looks riderless: speed tiltback at the limp speed at most */
     bool disable_request; /* soft disable from commands or faults; takes effect after this tick */
 };
 

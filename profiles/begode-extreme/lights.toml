@@ -158,7 +158,7 @@ evidence = "OBSERVED"
 [[state]]
 id = "standing_mode0"
 trigger = "LED mode 0, speed below 2"
-pattern = "LEDs 1-24 red, breathing 0 to about 130 and back; starts 0.83 s after stopping; period depends on the main-loop speed: about 2.1 s on the owner's wheel (video), 0.49 s in the simulator"
+pattern = "LEDs 1-24 red, breathing 0 to about 130 and back; starts 0.83 s after stopping; period depends on the main-loop speed: 0.49 s in the simulator at CPI 1.25, about 1.1 s with the wait-state model (docs/models/cpu-timing.md)"
 evidence = "OBSERVED"   # simulator; the period from the owner's video
 
 [[state]]
@@ -170,7 +170,7 @@ evidence = "OBSERVED"
 [[state]]
 id = "standing_mode1"
 trigger = "LED mode 1, speed below 2"
-pattern = "the colour window frozen, at the breathing brightness"
+pattern = "the colour window frozen, at the breathing brightness; period about 2.1 s on the owner's wheel (video, LED mode 1 INFERRED), 0.92 s in the simulator at CPI 1.25, about 2.3 s with the wait-state model (docs/models/cpu-timing.md)"
 evidence = "OBSERVED"
 
 [[state]]

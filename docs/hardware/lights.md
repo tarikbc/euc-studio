@@ -63,9 +63,10 @@ how it lights up (OBSERVED unless marked):
 - The halves stay orange-red when the LEDs are at their dimmest: the diffuser is tinted. Red light
   passes; green and blue light would show only faintly. `lights.toml` gives an estimated tint.
 - Both rings breathe together, red, with a period of about 2.1 s (peaks 2.1 s apart). The red
-  looks the same in every hot spot. This is the standing pattern; whether the wheel was in LED mode
-  0 or 1 cannot be told, because mode 1 at a standstill also shows red-containing colours that the
-  tinted diffuser makes look alike.
+  looks the same in every hot spot. This is the standing pattern. The colours alone cannot tell
+  LED mode 0 from mode 1, because mode 1 at a standstill also shows red-containing colours that the
+  tinted diffuser makes look alike. The owner's settings capture is in LED mode 1, and the period
+  fits mode 1 (see below), so the video is taken to show mode 1 (INFERRED).
 - A small blue light at the top of the centre band, on its right edge, stays on at a steady
   brightness while the red breathes. The owner identifies it as the status LED of the controller's
   Bluetooth (BLE) data module, which sits inside the tube: it is not on the strip, and the
@@ -102,11 +103,14 @@ Details:
 
 - **Standstill timer.** After the speed falls below 2 km/h, the breathing starts after 41 steps of
   10 ticks (0.83 s); until then the brightness holds its last value. Moving again resets it.
-- **Breathing speed depends on the CPU.** The breathing changes the brightness by one step per
-  main-loop pass during every 10th tick, so its period depends on how many main-loop passes fit in a
-  tick. On the owner's wheel it is about 2.1 s (video), so about 2.5 passes per tick; in the
-  simulator it is 0.49 s, about 11 passes per tick: the simulated main loop runs about 4 times too
-  often for the time the interrupts leave it.
+- **Breathing speed depends on the CPU and the LED mode.** The breathing changes the brightness by
+  one step per main-loop pass during every 10th tick, so its period depends on how many main-loop
+  passes fit in a tick, and a mode-1 pass costs about 1.8 times a mode-0 pass. On the owner's wheel,
+  in LED mode 1, it is about 2.1 s (video). In the simulator with today's timing (CPI 1.25) mode 0
+  gives 0.49 s and mode 1 0.92 s; with a model of the flash wait states, mode 1 gives about 2.3 s
+  (2.5 passes per tick) and mode 0 about 1.1 s. The 0.49 s first compared with the video was mode 0
+  (blank settings), so most of the gap was the LED mode; the rest is the CPU timing model. See
+  [cpu-timing.md](../models/cpu-timing.md).
 - **Animation position.** `p` advances while the signed speed is above +4 and goes back while it is
   below -4 (firmware units), so tiny creep at a standstill can move it slowly. It wraps over 73
   values, so the comet pattern skips one step at the wrap.
@@ -133,7 +137,8 @@ read from the firmware's DMA buffer every 2 to 5 ms.
 - **Ring layout (UNKNOWN).** A close, slow-motion video of one half while riding slowly in mode 0
   shows which way the comets go round.
 - **LED mode in the video.** The same standing video after `W` `M` `0` and after `W` `M` `1` shows
-  whether mode 1 looks different through the diffuser.
+  whether mode 1 looks different through the diffuser, and confirms which mode breathes at 2.1 s
+  (mode 0 should be about 2 times faster).
 - **The BLE status LED.** A video of the blue light before and after a phone connects shows its
   blink pattern.
 - **Brake flash on the real light.** A video from behind during a hard stop.

@@ -151,6 +151,8 @@ const WHEEL_RADIUS = 0.28; // m, 22 inch tire
 const CELLS = 32;
 const PACK_AH = 17.8;
 const PACK_R = 0.18; // ohm
+/** The applied voltage against the PWM figure: the inverter's dead time takes about 2 %. */
+const DEAD_TIME_LOSS = 0.98;
 const ABS_SPEED_MAX = 68; // km/h at 100 % PWM on a full pack, roughly
 
 export class DemoEngine implements EngineClient {
@@ -162,6 +164,7 @@ export class DemoEngine implements EngineClient {
   readonly display = null;
   readonly lights = null;
   readonly terrain = null;
+  readonly suspension = null;
   readonly beeps = 0;
   subscribeTones(): () => void {
     return () => {};
@@ -181,6 +184,7 @@ export class DemoEngine implements EngineClient {
     t: 0,
     speed: 0,
     pwm: 0,
+    modulation: 0,
     current: 0,
     voltage: 0,
     pitch: 0,
@@ -189,6 +193,8 @@ export class DemoEngine implements EngineClient {
     battery: 0,
     isr: 0,
     grade: 0,
+    suspension: Number.NaN,
+    shock: Number.NaN,
     distance: 0,
     wheelAngle: 0,
     poses: null,
@@ -355,6 +361,7 @@ export class DemoEngine implements EngineClient {
       t: 0,
       speed: 0,
       pwm: 2,
+      modulation: 2 * DEAD_TIME_LOSS,
       current: 0,
       voltage: this.ocv(),
       pitch: 0,
@@ -438,6 +445,7 @@ export class DemoEngine implements EngineClient {
       0,
       100,
     );
+    const modulation = pwm * DEAD_TIME_LOSS;
     const temp = L.temp + (current * current * 0.0009 - (L.temp - 34) * 0.01) * DT;
     const isr = 31 + pwm * 0.09 + 1.2 * this.walk("isr", 0.1);
 
@@ -447,6 +455,7 @@ export class DemoEngine implements EngineClient {
       t,
       speed,
       pwm,
+      modulation,
       current,
       voltage,
       pitch,
@@ -465,11 +474,14 @@ export class DemoEngine implements EngineClient {
     this.time.push(t);
     this.channels.speed.push(speed);
     this.channels.pwm.push(pwm);
+    this.channels.modulation.push(modulation);
     this.channels.current.push(current);
     this.channels.voltage.push(voltage);
     this.channels.pitch.push(pitch);
     this.channels.temp.push(temp);
     this.channels.battery.push(this.soc * 100);
     this.channels.isr.push(isr);
+    // The demo has no suspension model.
+    this.channels.suspension.push(Number.NaN);
   }
 }

@@ -20,6 +20,7 @@ import { Scope } from "./Scope.tsx";
 
 const LANES: { id: ChannelId; color: string }[] = [
   { id: "pwm", color: series.pwm },
+  { id: "modulation", color: series.modulation },
   { id: "speed", color: series.speed },
   { id: "current", color: series.current },
 ];
@@ -28,6 +29,7 @@ const CHANNEL_ROWS: { id: ChannelId; color: string }[] = [
   { id: "voltage", color: series.voltage },
   { id: "pitch", color: series.pitch },
   { id: "temp", color: series.temp },
+  { id: "suspension", color: series.suspension },
 ];
 
 function LiveValue({ id }: { id: ChannelId }) {

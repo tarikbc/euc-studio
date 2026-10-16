@@ -88,6 +88,30 @@ What the scan cannot give:
   the axle, which changes the tangential accelerations it feels; a photo of the open wheel settles it.
 - **Display board.** The window is measured; the board is assumed centred under it.
 
+## Suspension
+
+On each side the axle sits in a carriage that slides on a vertical rod inside the channel between the
+fore and aft packs. The rods are 30.0 mm (cylinder fit, spread 0.1 mm) at x -0.2, y +63.6 and -64.9 mm,
+vertical within 0.15 degrees (top 0.13 degrees rearward). The carriage block's top face is at z
+251 mm; the rod is free above it for 108.5 mm up to a ring on the rod (lower face at 359.5 mm, likely
+a bump stop or boot) and 132 mm up to the frame's top plate (383 mm). Below the axle a frame block
+holds the rods (z -52 to -20 mm). The scanned wheel stood unloaded, so the carriage is taken to be at
+the bottom of its travel (topped out); the shock's stroke, not the rod, limits the real travel.
+
+The shock sits behind the rear packs on two 20 mm cross shafts: top (x -139.5, z 367.5 mm) and
+bottom (x -226.5, z 183.5 mm), 203.5 mm apart (the owner's DNM is 200 mm eye to eye). Long plates run
+from the bottom shaft to a pivot at (x -132, z 333 mm, +-3) and short plates from there to the top
+shaft. The owner's parts photo shows the linkage as a rocker (three holes) and a link (two holes),
+so the suspension is carriage -> link -> rocker -> shock. Which scan pivot is the rocker's frame
+pivot, which carries the moving shock eye and where the link meets the carriage is UNRESOLVED; the
+scan does not show the space between the packs where the link reaches the carriage. The motion
+ratio waits for the owner's hole spacings and a press test.
+
+What moves with the axle (INFERRED from the layout): the carriage, the axle, the whole motor, rim and
+tire. The pedal hinge brackets sit outside the packs at the axle height with their plate at the
+packs' bottom plane (z -29.8 mm), so they are taken to be on the frame (sprung). The controller board
+is not visible in the scan.
+
 ## Rolling radius and the electrical model
 
 `docs/models/electrical.md` takes the rolling radius from the firmware's 0.0505 m per electrical turn
@@ -171,14 +195,14 @@ the scan (the tools live in the private research folder):
    around a black centre band with the BLE status LED; the scanned end caps become the two speakers.
 6. **Packs, shock and rear handle.** The four battery packs are modelled as boxes with 4 mm rounded
    edges and 8 mm chamfers on the faces measured above, with the rivet rows read on a height map of
-   the side (four groups of five near each outer end). The rear shock is a **DNM-type coil-over
-   without reservoir, per owner photos 2026-10-16; spring rate unknown** (the 2026-10 scan shows an
-   older shock with a piggyback reservoir). Its eyes sit on the scan's cross shafts (top x -140.5,
-   z 368.1 mm; bottom about x -224, z 182 mm, +-5 mm); the rest is scaled from the photo by the
-   204 mm eye-to-eye length and is ESTIMATE: threaded body (29 mm) with a ridged end cap at the
-   bottom eye, slotted preload collar, black spring (52 mm outside, 8 mm wire, 7 coils), chrome
-   shaft (12 mm) and a red rebound knob at the top eye. The link plates and cross shafts are the
-   scan's. The **rear handle** is the orange CNC U-handle of the photos: the lower part of each arm
+   the side (four groups of five near each outer end). The rear shock is a DNM coil-over without
+   reservoir: **200 mm eye to eye and 750 lb/in, MEASURED by the owner**; a 56 mm x 115 mm spring
+   (DNM size chart for 200 mm), 8 mm x 24 mm eyelets, threaded body with a slotted collar at the
+   bottom eye, red rebound knob at the top eye; stroke ESTIMATE (50 mm). It sits on the scan's two
+   cross shafts (top x -139.5, z 367.5 mm; bottom x -226.5, z 183.5 mm; 203.5 mm apart, within the
+   mounting tolerance). The linkage is a rocker plus a link (owner's parts photo); which shaft moves
+   with the axle carriage is UNRESOLVED, so the shock, plates and shafts stay static in the model.
+   The **rear handle** is the orange CNC U-handle of the photos: the lower part of each arm
    (frame bolt at x -115, z 415 mm to the roller axis, three windows, outer face at |y| 58.7 mm) is
    in the scan as the "roller arms"; the part above the roller (85 mm, bent 15 degrees up) and the
    black grip bar (26 mm) are ESTIMATES scaled with the roller. The scanned faces these models
@@ -197,3 +221,19 @@ the scan (the tools live in the private research folder):
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, satin aluminium handle tube, black anodised pedals with gold pins, smoked display
    window. Ambient occlusion is baked into the vertex colours.
+
+## Open
+
+What the owner can measure to close the remaining gaps (centre to centre, in mm):
+
+- **Rocker linkage.** The rocker's three hole-to-hole distances (left tip to upper right, upper right
+  to the lower-right bolt, left tip to the lower-right bolt) and the link's hole-to-hole distance.
+  One straight side photo with the cover off, at rest and with the seat pressed down (or a short
+  video), to show which rocker hole is on the frame, which carries the shock eye and where the link
+  meets the axle carriage. With these the motion ratio (axle travel per shock travel) can be given
+  as a curve; until then the shock, plates and shafts stay static and the ratio is UNRESOLVED.
+- **Shock stroke.** Printed on the shock or in its listing (50 mm is an ESTIMATE).
+- **Pedals.** Width at the front, middle and back, and the thickness. A tape photo reads the length
+  at about 300 mm (model: 290 mm ESTIMATE); the outline and pin layout are not yet taken from it.
+- **Rear handle.** Distance from the roller axis to the grip centre.
+- **Controller.** Where the controller board sits (for the IMU height above the axle).

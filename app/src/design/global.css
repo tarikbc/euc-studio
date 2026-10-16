@@ -49,9 +49,18 @@
     outline: none;
   }
 
-  :focus-visible {
+  /* The ring shows for keyboard focus only: after a click the last input is the pointer
+     (lib/modality.ts), even when a component moves focus in code. Text fields keep it, since it
+     marks where typing goes. Before any input (no data-modality yet) the ring shows. */
+  :root:not([data-modality="pointer"]) :focus-visible,
+  :is(input, textarea, select, [contenteditable="true"]):focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+  }
+
+  /* Tabs sit in clipped bars: draw their ring inside, so it is never cut off. */
+  :root:not([data-modality="pointer"]) [role="tab"]:focus-visible {
+    outline-offset: -2px;
   }
 
   button,

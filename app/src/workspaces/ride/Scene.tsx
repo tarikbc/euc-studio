@@ -11,6 +11,7 @@ import { setLowPower } from "../../lib/power.ts";
 import { EucModel } from "./EucModel.tsx";
 import { LiveBodies } from "./LiveBodies.tsx";
 import { wheelPosition } from "./poses.ts";
+import { type Slope, slopeAt } from "./terrain.ts";
 import { TerrainStrip } from "./TerrainStrip.tsx";
 import { LOW_FPS, type Quality, chooseQuality, qualityOverride, rendererName } from "./quality.ts";
 
@@ -18,10 +19,13 @@ const TARGET = new THREE.Vector3(0.02, 0.34, 0);
 /** Where the camera looks: the axle area of the wheel, wherever the wheel has gone. */
 const focus = new THREE.Vector3();
 const wheelAt = new THREE.Vector3();
+/** The slope under the live wheel (flat ground: z 0). */
+const ground: Slope = { z: 0, pitch: 0 };
 function focusPoint(out: THREE.Vector3): THREE.Vector3 {
   if (engine.kind === "live" && wheelPosition(wheelAt)) {
-    // With a rider on board, frame the whole person: look at the hips, not the axle.
-    const y = hasRider() ? 0.85 : TARGET.y;
+    // With a rider on board, frame the whole person: look at the hips, not the axle. Up or
+    // down a slope, the view goes with the ground.
+    const y = slopeAt(engine.terrain, wheelAt.x, ground).z + (hasRider() ? 0.85 : TARGET.y);
     return out.set(wheelAt.x + TARGET.x, y, wheelAt.z + TARGET.z);
   }
   return out.copy(TARGET);
@@ -31,12 +35,18 @@ function hasRider(): boolean {
   return engine.bodies.some((b) => b.role === "rider");
 }
 
-/** Keeps its children under the live wheel (floor light, contact shadow); still for the demo. */
+/**
+ * Keeps its children under the live wheel (floor light, contact shadow), laid on the slope there;
+ * still for the demo.
+ */
 function FollowWheel({ children }: { children: React.ReactNode }) {
   const group = useRef<THREE.Group>(null);
   useFrame(() => {
     if (group.current && engine.kind === "live" && wheelPosition(wheelAt)) {
-      group.current.position.set(wheelAt.x, 0, wheelAt.z);
+      slopeAt(engine.terrain, wheelAt.x, ground);
+      // Physics x is three.js x and physics z is three.js y: the pitch turns about three.js z.
+      group.current.position.set(wheelAt.x, ground.z, wheelAt.z);
+      group.current.rotation.z = ground.pitch;
     }
   });
   return <group ref={group}>{children}</group>;
@@ -45,8 +55,12 @@ const FOLLOW_OFFSET = new THREE.Vector3(1.05, 0.52, 1.95);
 const sway = new THREE.Vector3();
 const shift = new THREE.Vector3();
 
-/** Ground grid that scrolls under the wheel, so speed reads even though the wheel stays put. */
-function Floor() {
+/**
+ * Ground grid that scrolls under the wheel, so speed reads even though the wheel stays put. Only
+ * on flat ground (`flat`): on a scenario's terrain the road strip is the floor, and a flat grid
+ * would cover the road where it goes downhill.
+ */
+function Floor({ flat }: { flat: boolean }) {
   const grid = useRef<THREE.Mesh>(null);
   useFrame(() => {
     // The demo wheel stays put and the floor scrolls; the live wheel moves over a still floor.
@@ -55,23 +69,27 @@ function Floor() {
   });
   return (
     <>
-      <Grid
-        ref={grid}
-        infiniteGrid
-        cellSize={0.25}
-        sectionSize={1}
-        cellThickness={0.6}
-        sectionThickness={1}
-        cellColor={surface.raised}
-        sectionColor={surface.lift}
-        fadeDistance={11}
-        fadeStrength={2.2}
-        position={[0, 0.0005, 0]}
-      />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[40, 40]} />
-        <shadowMaterial transparent opacity={0.35} />
-      </mesh>
+      {flat && (
+        <>
+          <Grid
+            ref={grid}
+            infiniteGrid
+            cellSize={0.25}
+            sectionSize={1}
+            cellThickness={0.6}
+            sectionThickness={1}
+            cellColor={surface.raised}
+            sectionColor={surface.lift}
+            fadeDistance={11}
+            fadeStrength={2.2}
+            position={[0, 0.0005, 0]}
+          />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[40, 40]} />
+            <shadowMaterial transparent opacity={0.35} />
+          </mesh>
+        </>
+      )}
       <FollowWheel>
         <Spot />
       </FollowWheel>
@@ -314,7 +332,7 @@ export function Scene({ active, onReady, onFirstFrame }: SceneProps) {
       <fog attach="fog" args={[surface.bg, 5, 13]} />
       <Suspense fallback={null}>
         <Lights />
-        <Floor />
+        <Floor flat={!engine.terrain} />
         {engine.terrain && (
           // The physics world (z up) in three.js (y up), as the live bodies.
           <group rotation={[-Math.PI / 2, 0, 0]}>

@@ -36,7 +36,7 @@ EUC_QUIRK_DEF(KEIL_FTZ, 1, 0, "Keil soft-float library (every float and double o
 EUC_QUIRK_DEF(DT_500HZ, 1, 0, "0x080037A8 ahrs_update",
               "The attitude filter integrates with a 2.000 ms step; the tick is 2.016 ms (rates 0.8 % low).")
 EUC_QUIRK_DEF(GYRO_500DPS_CLIP, 1, 0, "0x08006390 imu_init (GYRO_CONFIG 0x08)",
-              "The gyro range is +-500 deg/s: a pothole edge clips it and the attitude believes the wheel is level.")
+              "The gyro range is +-500 deg/s: a hard edge clips it and the attitude believes the wheel is level.")
 
 /* Commands and telemetry (USART1, BLE module) */
 EUC_QUIRK_DEF(CMD_LAST_BYTE_WINS, 1, 0, "0x08009A94 usart1_isr_body",
@@ -89,6 +89,8 @@ EUC_QUIRK_DEF(PWM_TILTBACK_VQ_ONLY, 1, 0, "0x0800678C balance task, 0x0800B880 a
               "PWM tiltback needs 'e' and reads Vq before the circle limit (66 % at speed while the vector is full).")
 EUC_QUIRK_DEF(BATTERY_TILTBACK_UNBOUNDED, 1, 0, "0x0800678C balance task",
               "Below 99.2 V or above 80 degC the pedals tilt back 2.4 deg/s without a limit, at any speed.")
+EUC_QUIRK_DEF(RIDERLESS_UNDETECTED, 1, 0, "none: the balance task never checks for a rider",
+              "With nobody on the pedals the wheel drives on at speed until it falls on its side (roll cut-off).")
 
 /* Sensors */
 EUC_QUIRK_DEF(NTC_REFERENCE_298_5, 1, 0, "0x08005218 ntc_temperature_measure",

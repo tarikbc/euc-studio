@@ -7,8 +7,15 @@ and sizes from the target compiler itself: it compiles offsetof() and sizeof() o
 to assembly and reads the numbers back, so the file always matches the code. A probe uses the stock map's
 name when it holds the same quantity, so `euc sim compare` pairs the two firmwares' values.
 
-usage: gen_probes.py --cc ARM_GCC [--check]
-  --check   fail (exit 1) when the file is out of date instead of writing it; the image build runs this
+The file also carries the id of the measured layout (`layout`, a CRC-32 over every probe's member, offset and
+size and the size of struct app). The image build links the same id in as the absolute ELF symbol
+euc_probe_layout (--emit-ld), and the simulator refuses a probes.toml whose id differs from the image's, so a
+stale map (a CLI built before the struct changed, say) never reads the wrong bytes.
+
+usage: gen_probes.py --cc ARM_GCC [--check] [--emit-ld FILE]
+  --check         fail (exit 1) when the file is out of date instead of writing it; the image build runs this
+  --emit-ld FILE  write the linker script line that defines euc_probe_layout (only when it changes); do not
+                  touch probes.toml
 """
 
 import argparse
@@ -17,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import zlib
 
 FIRMWARE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WHEEL = "begode-extreme"
@@ -46,6 +54,9 @@ PROBES = [
     ("attitude_roll_deg", "balance.attitude.roll_deg", "f32", None, "the firmware's own roll estimate, degrees"),
     ("hall_line_fault", "motor.hall.line_fault", "u8", None,
      "clean: one hall line found stuck; the state is rebuilt from the other two"),
+    ("riderless", "riderless.suspected", "u8", None,
+     "clean: the wheel looks riderless (beeps and the limp speed limit)"),
+    ("riderless_triggers", "riderless.triggers", "u8", None, "clean: riderless suspicions since power-on"),
     # Tail light (core/lights/strip.c), for the app's state label.
     ("strip_mode", "lights.strip_pattern", "u8", None, "LED mode: 0 red comets, 1 colour wheel ('W' 'M')"),
     ("strip_brake_count", "strip.brake_count", "u8", None, "brake flash while 4 or more (40 after a 3 km/h drop)"),
@@ -76,6 +87,7 @@ def measure(cc):
     for i, (_, member, _, _, _) in enumerate(PROBES):
         lines.append("const unsigned probe_offset_%d = offsetof(struct app, %s);" % (i, member))
         lines.append("const unsigned probe_size_%d = sizeof(((struct app *)0)->%s);" % (i, member))
+    lines.append("const unsigned probe_app_size = sizeof(struct app);")
     with tempfile.TemporaryDirectory() as tmp:
         source = os.path.join(tmp, "probes.c")
         with open(source, "w") as f:
@@ -88,11 +100,20 @@ def measure(cc):
     result = []
     for i in range(len(PROBES)):
         result.append((int(values["probe_offset_%d" % i]), int(values["probe_size_%d" % i])))
-    return result
+    return result, int(values["probe_app_size"])
 
 
-def render(measured):
+def layout_id(measured, app_size):
+    """CRC-32 of the probed layout: what the offsets are only valid for."""
+    text = "".join("%s:%s:%d:%d;" % (name, member, offset, size)
+                   for (name, member, _, _, _), (offset, size) in zip(PROBES, measured))
+    return zlib.crc32((text + "app:%d" % app_size).encode())
+
+
+def render(measured, app_size):
     out = [HEADER]
+    out.append("layout = 0x%08x  # id of the measured layout; the image carries it as euc_probe_layout\n"
+               % layout_id(measured, app_size))
     for (name, member, kind, role, note), (offset, size) in zip(PROBES, measured):
         if SIZES[kind] != size:
             sys.exit("gen_probes: %s (app.%s) is %d bytes, kind %s wants %d" % (name, member, size, kind, SIZES[kind]))
@@ -113,8 +134,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cc", required=True, help="the target C compiler (arm-none-eabi-gcc)")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--emit-ld", metavar="FILE")
     args = parser.parse_args()
-    text = render(measure(args.cc))
+    measured, app_size = measure(args.cc)
+    if args.emit_ld:
+        line = "euc_probe_layout = 0x%08x;\n" % layout_id(measured, app_size)
+        current = open(args.emit_ld).read() if os.path.exists(args.emit_ld) else ""
+        if current != line:
+            with open(args.emit_ld, "w") as f:
+                f.write(line)
+        return
+    text = render(measured, app_size)
     current = open(OUT).read() if os.path.exists(OUT) else ""
     if args.check:
         if current != text:

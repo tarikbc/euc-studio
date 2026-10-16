@@ -45,10 +45,13 @@ pub enum RadioEvent {
         /// Notifications waiting.
         queued: usize,
     },
-    /// Notifications thrown away because too many were waiting.
+    /// Notifications thrown away because the radio's queue overflowed (reported at most once a
+    /// second).
     Dropped {
-        /// How many.
+        /// How many since the last report.
         count: usize,
+        /// The queue's depth: the most notifications that waited meanwhile.
+        queued: usize,
     },
     /// Something failed.
     Error(String),

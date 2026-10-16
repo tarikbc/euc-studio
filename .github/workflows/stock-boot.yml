@@ -52,7 +52,7 @@ jobs:
       - name: Boot tests (Unicorn backend, and our core alone)
         run: |
           cargo test --release --locked -p euc-unicorn
-          cargo test --release --locked -p euc-armv7m --test stock_boot
+          cargo test --release --locked -p euc-armv7m --test stock_boot --test stock_ride
       # The shipped build: no `unicorn` feature, so `euc sim` runs on our own core (--cpu own).
       - name: Build euc as shipped (our core)
         run: cargo build --release --locked -p euc-cli

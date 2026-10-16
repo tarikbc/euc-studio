@@ -22,6 +22,9 @@ mod control;
 mod link;
 mod log;
 mod module;
+// Only the CoreBluetooth radio sends through it; its tests run in every build.
+#[cfg_attr(not(all(feature = "radio", target_os = "macos")), allow(dead_code))]
+mod outbox;
 mod profile;
 mod protocol;
 mod radio;
@@ -38,7 +41,7 @@ pub use profile::{
 };
 pub use protocol::{Group, Opaque, Protocol, Responder};
 pub use radio::{Radio, RadioError, RadioEvent};
-pub use replay::{GROUP_GAP_S, GROUP_PERIOD_S, ReplayError, Replayer};
+pub use replay::{GROUP_GAP_S, GROUP_PERIOD_S, ReplayError, Replayer, STALE_S};
 
 /// Cuts `bytes` into notifications of at most `max` bytes, as a module does with a long reply.
 ///

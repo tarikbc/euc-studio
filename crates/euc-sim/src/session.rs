@@ -4,12 +4,22 @@
 //! and, after each, reports a [`Snapshot`] (signals and body poses) and any [`Event`]s: stand
 //! released, cutoffs, falls, firmware resets and blockers.
 
-use euc_physics::Intent;
+use euc_physics::{Intent, Leaving};
 use euc_telemetry::{BodyInfo, Event, EventKind, Signals, Snapshot};
 
 use crate::config::{ROLE_CUTOFF, StockMap};
 use crate::machine::Machine;
 use crate::plant::Live;
+
+/// The firmware's tiltback offsets (stock map and probe names), degrees, nose up positive: what
+/// the rider feels as tiltback when the firmware's map names them.
+const TILTBACK_VARS: [&str; 3] = ["tiltback_speed_deg", "tiltback_battery_deg", "tiltback_pwm_deg"];
+
+/// The firmware's commanded q voltage (stock map and probe name), in Q15 of Vbus/√3. Its app
+/// frame (Begode frame 07) reports it as PWM: `-vq / 315` in whole percent, so 31 500 is 100 %.
+const PWM_VAR: &str = "vq_active";
+/// Q15 counts of the firmware's q voltage per percent of its PWM figure.
+const Q15_PER_PWM_PERCENT: f64 = 315.0;
 
 /// A firmware variable the session watches.
 #[derive(Debug, Clone)]
@@ -32,6 +42,8 @@ pub struct Session {
     ram: Vec<Watched>,
     cutoff: Option<String>,
     fallen: bool,
+    /// The rider's leaving the pedals is on the timeline.
+    rider_off_logged: bool,
     seen_events: usize,
     events: Vec<Event>,
 }
@@ -65,6 +77,7 @@ impl Session {
             ram,
             cutoff: None,
             fallen: false,
+            rider_off_logged: false,
             seen_events: 0,
             events: Vec::new(),
         }
@@ -185,9 +198,21 @@ impl Session {
 
     /// Runs one sample period and returns the snapshot at its end.
     pub fn step(&mut self) -> Snapshot {
+        self.feel_tiltback();
+        let cut = self.cutoff.is_some();
+        self.live_mut().physics_mut().set_drive_cut(cut);
         self.machine.run(self.sample_cycles);
         self.watch();
         self.snapshot()
+    }
+
+    /// Tells the rider the firmware's tiltback, the sum of its nose-up offsets, when the map names
+    /// any of them; without them the rider judges the tiltback by the pedals.
+    fn feel_tiltback(&mut self) {
+        let offsets: Vec<f64> =
+            TILTBACK_VARS.iter().filter_map(|v| self.firmware_value(v)).filter(|d| d.is_finite()).collect();
+        let felt = (!offsets.is_empty()).then(|| offsets.iter().map(|d| d.max(0.0)).sum::<f64>().to_radians());
+        self.live_mut().physics_mut().rider().set_commanded_tiltback(felt);
     }
 
     /// The state now.
@@ -196,9 +221,14 @@ impl Session {
         let body = live.physics().state();
         let plant = live.electrical().snapshot();
         let phase = plant.phase_current.map(|i| i as f32);
+        // As the frame carries it: C integer division (truncation), then the magnitude.
+        let pwm = self.firmware_value(PWM_VAR).map_or(f32::NAN, |vq| (-vq / Q15_PER_PWM_PERCENT).trunc().abs() as f32);
+        let full_modulation = plant.bus_v / 3f64.sqrt() * Q15_PER_PWM_PERCENT * 100.0 / 32768.0;
+        let modulation = plant.voltage_dq.d.hypot(plant.voltage_dq.q) / full_modulation * 100.0;
         let signals = Signals {
             speed_kmh: (body.speed_mps * 3.6) as f32,
             wheel_rad_s: body.wheel_rad_s as f32,
+            pwm_pct: pwm,
             phase_a_a: phase[0],
             phase_b_a: phase[1],
             phase_c_a: phase[2],
@@ -215,6 +245,9 @@ impl Session {
             motor_temp_c: plant.winding_c as f32,
             distance_m: body.distance_m as f32,
             rider_lean_deg: body.rider_lean_rad.to_degrees() as f32,
+            suspension_mm: (body.suspension_m * 1000.0) as f32,
+            shock_mm: (body.shock_m * 1000.0) as f32,
+            modulation_pct: if plant.bus_v > 0.0 { modulation as f32 } else { f32::NAN },
             ..Signals::default()
         };
         Snapshot { t_s: self.time_s(), signals, bodies: live.physics().poses() }
@@ -247,6 +280,19 @@ impl Session {
             self.push(EventKind::Fault, "the wheel fell over".to_owned());
         }
         self.fallen = fallen;
+        if let Some((t_s, how)) = self.live().physics().left_pedals()
+            && !self.rider_off_logged
+        {
+            self.rider_off_logged = true;
+            let text = match how {
+                Leaving::SteppedOff => None,
+                Leaving::LetGoAfterCut => Some("rider off: lets go of the pedals (drive cut, the wheel tips)"),
+                Leaving::LetGoFalling => Some("rider off: lets go of the pedals (the wheel falls)"),
+            };
+            if let Some(text) = text {
+                self.events.push(Event { t_s, kind: EventKind::Fault, text: text.to_owned() });
+            }
+        }
         let hclk = self.hclk as f64;
         let new: Vec<Event> = self.machine.sys.diag.events[self.seen_events..]
             .iter()

@@ -295,6 +295,9 @@ mod tests {
         let capture = capture::load(std::path::Path::new(CAPTURE)).unwrap();
         let mut replayer = replay_of(&capture);
         assert!((0.30..0.32).contains(&(replayer.period() / 76.0)), "{}", replayer.period());
-        assert_eq!(replayer.advance(1e9).len(), 456);
+        let steps = (replayer.period() * 100.0) as u32;
+        let played: usize = (0..=steps).map(|k| replayer.advance(f64::from(k) / 100.0).len()).sum();
+        assert_eq!(played, 456);
+        assert_eq!(replayer.take_stale(), 0, "a loop that keeps up skips nothing");
     }
 }

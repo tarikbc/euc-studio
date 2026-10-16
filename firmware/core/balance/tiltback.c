@@ -6,8 +6,9 @@
  *                           without a limit (about 48 deg in the end); clean caps it at 8 deg and limits
  *                           the speed instead (quirk BATTERY_TILTBACK_UNBOUNDED)
  *   speed                   above the tiltback speed (setting 'W' 'Y', or 200 = off). In limp mode and,
- *                           in clean, with the battery or temperature out of its window: at most
- *                           EUC_BALANCE_LIMP_SPEED_KMH, growing at most 2.5 deg/s, at most 12 deg
+ *                           in clean, with the battery or temperature out of its window or a riderless
+ *                           wheel: at most EUC_BALANCE_LIMP_SPEED_KMH, growing at most 2.5 deg/s, at most
+ *                           12 deg
  *   PWM                     PWM alarm active and PWM tiltback on ('e'), clamped at +-12 deg; clean also
  *                           whenever the voltage vector |Vd, Vq| passes 75 % (quirk PWM_TILTBACK_VQ_ONLY)
  *   pedal trim              setting 'W' 'U': slews toward (d - 4) x 1.2 deg
@@ -172,7 +173,7 @@ void euc_balance_step_tiltbacks(struct euc_balance_state *state, const struct eu
             /* the gap between the windows: hold */
         }
     }
-    const bool speed_limited = in->limp || state->battery_limit;
+    const bool speed_limited = in->limp || in->riderless || state->battery_limit;
 
     uint16_t tiltback_speed_kmh = in->settings.tiltback_speed_kmh;
     if (speed_limited && (tiltback_speed_kmh > EUC_BALANCE_LIMP_SPEED_KMH)) {

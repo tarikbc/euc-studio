@@ -31,6 +31,7 @@ import {
   SAMPLE_RATE,
   type ScenarioInfo,
   type SimEvent,
+  type TerrainProfile,
 } from "./types.ts";
 
 interface BackendStatus {
@@ -53,7 +54,8 @@ type Message =
   | { type: "display"; layout: DisplayLayout | null }
   | { type: "lights"; layout: LightsLayout | null }
   | { type: "buzzer"; tones: Tone[] }
-  | { type: "terrain"; profile: [number, number][] | null }
+  | { type: "terrain"; profile: TerrainProfile | null }
+  | { type: "suspension"; info: EngineClient["suspension"] }
   | { type: "events"; events: TelemetryEvent[] }
   | { type: "frames"; frames: PhoneFrame[] }
   | { type: "outputs"; outputs: Outputs };
@@ -69,12 +71,14 @@ interface EngineInfo {
 const LANE: Record<ChannelId, number> = {
   speed: CH.speed_kmh,
   pwm: CH.pwm_pct,
+  modulation: CH.modulation_pct,
   current: CH.iq_a,
   voltage: CH.battery_v,
   pitch: CH.pitch_deg,
   temp: CH.motor_temp_c,
   battery: CH.soc_pct,
   isr: CH.isr_load_pct,
+  suspension: CH.suspension_mm,
 };
 
 const MAX_EVENTS = 300;
@@ -106,6 +110,7 @@ export class LiveEngine implements EngineClient {
     t: 0,
     speed: Number.NaN,
     pwm: Number.NaN,
+    modulation: Number.NaN,
     current: Number.NaN,
     voltage: Number.NaN,
     pitch: Number.NaN,
@@ -116,6 +121,8 @@ export class LiveEngine implements EngineClient {
     grade: 0,
     distance: 0,
     wheelAngle: 0,
+    suspension: Number.NaN,
+    shock: Number.NaN,
     poses: null,
   };
   bodies: BodyInfo[] = [];
@@ -125,7 +132,8 @@ export class LiveEngine implements EngineClient {
   outputs: Outputs | null = null;
   display: DisplayLayout | null = null;
   lights: LightsLayout | null = null;
-  terrain: [number, number][] | null = null;
+  terrain: TerrainProfile | null = null;
+  suspension: EngineClient["suspension"] = null;
   beeps = 0;
   status: EngineStatus = { state: "starting", message: "Connecting to the engine", backend: "…" };
   playing = true;
@@ -201,6 +209,7 @@ export class LiveEngine implements EngineClient {
     l.t = b.t[last] as number;
     l.speed = at(CH.speed_kmh);
     l.pwm = at(CH.pwm_pct);
+    l.modulation = at(CH.modulation_pct);
     l.current = at(CH.iq_a);
     l.voltage = at(CH.battery_v);
     l.pitch = at(CH.pitch_deg);
@@ -209,6 +218,8 @@ export class LiveEngine implements EngineClient {
     l.battery = at(CH.soc_pct);
     l.isr = at(CH.isr_load_pct);
     l.distance = at(CH.distance_m);
+    l.suspension = at(CH.suspension_mm);
+    l.shock = at(CH.shock_mm);
     if (b.bodies > 0) {
       const size = b.bodies * POSE_FLOATS;
       const from = last * size;
@@ -256,6 +267,9 @@ export class LiveEngine implements EngineClient {
         break;
       case "terrain":
         this.terrain = m.profile;
+        break;
+      case "suspension":
+        this.suspension = m.info;
         break;
       case "buzzer":
         for (const t of m.tones) {

@@ -28,10 +28,12 @@
   --color-danger-tint-hover: #522322;
   --color-series-speed: #64D2FF;
   --color-series-pwm: #FF7A1A;
+  --color-series-modulation: #FFB066;
   --color-series-current: #FF375F;
   --color-series-voltage: #30D158;
   --color-series-pitch: #F2F2F7;
   --color-series-temp: #FFD60A;
+  --color-series-suspension: #BF5AF2;
   --color-hairline: rgba(255, 255, 255, 0.08);
   --color-hairline-strong: rgba(255, 255, 255, 0.14);
   --color-transparent: transparent;

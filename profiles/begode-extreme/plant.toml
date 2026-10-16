@@ -59,11 +59,11 @@ ambient_c = 25.0
 stage = { heat_capacity_j_per_k = 400.0, resistance_k_per_w = 0.5 }    # DEFAULT
 motor = { heat_capacity_j_per_k = 3000.0, resistance_k_per_w = 0.3 }   # DEFAULT
 
-# Mechanics: tire, spinning wheel and shell. Read by crates/euc-physics (through euc-sim);
-# docs/models/body.md explains every value. DEFAULT values are estimates, not measurements;
-# MEASURED ones come from the 3D scan (geometry.toml, docs/hardware/geometry.md). The collision
-# shapes (tire torus, shell solids) come from geometry.toml [collision]. Heights are from the axle,
-# positive up.
+# Mechanics: tire, spinning wheel, shell and rear suspension. Read by crates/euc-physics (through
+# euc-sim); docs/models/body.md explains every value. DEFAULT and ESTIMATE values are estimates,
+# not measurements; MEASURED ones come from the 3D scan (geometry.toml, docs/hardware/geometry.md).
+# The collision shapes (tire torus, shell solids) come from geometry.toml [collision]. Heights are
+# from the axle at full extension (as scanned), positive up.
 [body.tire]
 radius_m = 0.2251             # INFERRED: loaded rolling radius; 28 pole pairs x 0.0505 m / 2 pi (free radius 0.2296 MEASURED)
 half_width_m = 0.0407         # MEASURED: 3.00-12 tire, 81.4 mm wide
@@ -72,12 +72,37 @@ crr = 0.012                   # DEFAULT: rolling resistance coefficient
 contact_time_s = 0.02         # DEFAULT: tire softness, about 200 kN/m under the loaded wheel
 
 [body.wheel]
-mass_kg = 16.0                # DEFAULT: rotor, magnets, rim and tire (the stator is part of the shell)
+mass_kg = 16.0                # DEFAULT: rotor, magnets, rim and tire (the stator rides on the suspension carriage)
 spin_inertia_kgm2 = 0.487     # DEFAULT: 0.6 m r^2, most of the mass near the rim
 
 [body.shell]
-mass_kg = 26.0                # DEFAULT: 42 kg with the wheel
-com_above_axle_m = 0.10       # DEFAULT: battery packs reach above the axle
-inertia_kgm2 = [0.85, 0.92, 0.46]  # DEFAULT: roll, pitch, yaw of a 0.35 x 0.30 x 0.55 m box
-pedal_below_axle_m = -0.010   # ESTIMATE (scan): the decks rest 10 mm above the axle, +-15 mm
-imu_above_axle_m = 0.15       # DEFAULT: controller board above the axle
+# The sprung part: frame, packs, controller, pedals. With the carriage's 6 kg and the wheel's 16 kg
+# the wheel weighs 42 kg (DEFAULT). The centre of mass and inertia are those of a 26 kg shell with
+# the stator (6 kg on the axle) taken out: com 0.10 -> 0.13 m, inertia minus the stator's own
+# (a 0.08 m disc) and its offset.
+mass_kg = 20.0                # DEFAULT
+com_above_axle_m = 0.13       # DEFAULT: battery packs reach above the axle
+inertia_kgm2 = [0.76, 0.82, 0.45]  # DEFAULT: roll, pitch, yaw (from a 0.35 x 0.30 x 0.55 m box)
+pedal_below_axle_m = -0.012   # MEASURED (approx.): deck tops 12 mm above the axle; scan pins +7.5 mm + half a 9 mm deck; the owner's ~240 mm floor-to-deck (unloaded, 2026-10-16) minus the 229.6 mm free radius gives ~10 mm
+imu_above_axle_m = 0.15       # DEFAULT: controller board above the axle, on the frame (sprung)
+
+[body.suspension]
+# Rear coil-over shock on a rocker linkage (per side: carriage -> link -> triangular rocker ->
+# shock, owner photo 2026-10-16); the motor's axle slides up into the frame on two vertical 30 mm
+# rods (geometry.toml [suspension]). The shock is a DNM coil-over, 200 mm eye to eye, 750 lb/in
+# (owner). The rocker's leverage changes along the travel: model maps it from the scan and the
+# owner's photos into `ratio_curve`; until then one constant ESTIMATE. With a 78 + 2 kg rider the
+# sag is 8 mm (13 % of the 66 mm axle travel); the sprung mass bounces at about 4.8 Hz with a
+# damping ratio of about 0.25.
+unsprung_mass_kg = 6.0        # ESTIMATE: stator, axle clamps and slider blocks (the wheel's 16 kg also moves)
+axis_forward_deg = -0.13      # MEASURED (scan): the rods lean 0.13 deg with the top to the rear
+spring_rate_n_per_mm = 131.3  # MEASURED: "DNM - 750 LBS/IN" printed on the owner's spring
+preload_mm = 2.0              # ESTIMATE
+stroke_mm = 55.0              # ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm of stroke
+eye_to_eye_mm = 200.0         # MEASURED (owner); the scan's older shock was 204 mm
+# The owner's sag (about 20 mm at the pedals with the rider on, about 5 mm of it the tire) implies a
+# ratio of about 1.7 (1.6-1.9 with 0-2 mm preload); set it in the next phase, or replace it with the
+# rocker curve.
+linkage_ratio = 1.2           # ESTIMATE: axle travel per mm of shock travel (used while ratio_curve is empty)
+ratio_curve = []              # [[axle travel mm, ratio], ...] from full extension; waits for model's rocker curve
+damping_n_s_per_m = 2200.0    # ESTIMATE: at the shock, compression and rebound alike

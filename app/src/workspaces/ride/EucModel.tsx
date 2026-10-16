@@ -243,6 +243,56 @@ export function ShellVisual({ accent }: { accent: string }) {
 
 /** Axle height of the scanned tire, unloaded. */
 const SCAN_AXLE_Y = 0.2296;
+/**
+ * Animating the rear shock waits for Tarik's press test (does the mount move with the axle?): until
+ * then the shock and its mount stay as modelled, and the travel shows as the wheel moving against
+ * the frame and as the Suspension channel. `?shock=animate` turns the motion below on.
+ */
+const ANIMATE_SHOCK =
+  typeof location !== "undefined" &&
+  new URLSearchParams(location.search).get("shock") === "animate";
+
+const span = new THREE.Vector3();
+
+/**
+ * The GLB's shock parts and where the mount sits at full extension. The contract with the model:
+ * "shock" has its origin on the eye that stays with the frame and is built along its local y;
+ * "shock_mount" is whatever moves with the axle carriage, with its origin on the other eye.
+ */
+interface ShockRig {
+  root: THREE.Object3D;
+  shock: THREE.Object3D;
+  mount: THREE.Object3D;
+  mountRest: THREE.Vector3;
+  /** The shock's local direction toward the mount (+y or -y, whichever the model chose). */
+  toMount: THREE.Vector3;
+  /** Eye to eye at rest, m. */
+  rest: number;
+}
+
+function shockRig(root: THREE.Object3D): ShockRig | null {
+  const shock = root.getObjectByName("shock");
+  const mount = root.getObjectByName("shock_mount");
+  if (!shock || !mount) return null;
+  const toMount = mount.position.clone().sub(shock.position);
+  const rest = toMount.length();
+  toMount.applyQuaternion(shock.quaternion.clone().invert()).normalize();
+  return { root, shock, mount, mountRest: mount.position.clone(), toMount, rest };
+}
+
+/**
+ * Moves the mount up with the axle carriage by the axle travel and turns the shock from its fixed
+ * eye toward the mount. Its length comes from the engine's shock channel (the linkage is a rocker
+ * whose ratio changes along the travel); without it, from the distance to the mount.
+ */
+function poseShock(rig: ShockRig, travelM: number, shockM: number) {
+  rig.mount.position.copy(rig.mountRest);
+  rig.mount.position.y += travelM;
+  span.subVectors(rig.mount.position, rig.shock.position);
+  rig.shock.quaternion.setFromUnitVectors(rig.toMount, span.clone().normalize());
+  const length = Number.isFinite(shockM) ? rig.rest - shockM : span.length();
+  rig.shock.scale.y = length / rig.rest;
+}
 
 /** The spinning part: the scanned tire, hub and rim when the model loaded, else the stylized wheel. */
 export function WheelPart({ model }: { model: WheelModel | null }) {
@@ -256,6 +306,20 @@ export function WheelPart({ model }: { model: WheelModel | null }) {
  */
 export function BodyPart({ model, accent }: { model: WheelModel | null; accent: string }) {
   const scanned = useMemo(() => model?.body.clone(true), [model]);
+  // The shock follows the suspension channel (behind ANIMATE_SHOCK; the links stay with the frame).
+  const rig = useRef<ShockRig | null>(null);
+  useFrame(() => {
+    if (!scanned || !ANIMATE_SHOCK) return;
+    if (rig.current?.root !== scanned) {
+      rig.current = shockRig(scanned);
+      if (!rig.current) return;
+    }
+    // A wheel without suspension in its profile, or a run that does not model it: at rest.
+    const l = engine.latest;
+    const travel = engine.suspension && Number.isFinite(l.suspension) ? l.suspension : 0;
+    const shock = engine.suspension ? l.shock : Number.NaN;
+    poseShock(rig.current, travel / 1000, shock / 1000);
+  });
   if (!scanned) return <ShellVisual accent={accent} />;
   return (
     <>

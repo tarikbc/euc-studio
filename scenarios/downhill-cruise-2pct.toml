@@ -1,0 +1,63 @@
+# A rider cruises at 20 km/h down a gentle 2 % slope for about 20 s, then stops. Downhill, gravity
+# pays for the rolling resistance and the air drag, so the motor gives almost no torque while a
+# rider stands on the pedals. A regression guard for riderless detection: a near-zero torque with a
+# rider on must not trip it (no cutoff, no fall), and the wheel must stop normally at the end.
+#
+# Rider: the default rider, on the maintainer's settings.
+schema = 1
+name = "downhill-cruise-2pct"
+description = "Cruise at 20 km/h down a 2 % slope, then stop: near-zero torque with a rider on must not trip anything."
+wheel = "begode-extreme"
+seconds = 46.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [10, 20], [34, 20], [38, 0]]
+settings = "tarik-2026-10-15"
+
+[terrain]
+slope_pct = -2.0
+slope_start_m = 25.0
+length_m = 250.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"
+
+[[expect]]
+check = "stopped_at_end"
+max_abs_kmh = 1.0
+
+[[expect]]
+check = "record"
+signal = "distance_m"
+stat = "first_above"
+threshold = 35.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "mean"
+from_s = 16.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "max"
+from_s = 16.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "min"
+from_s = 16.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "mean"
+from_s = 16.0
+by_s = 34.0

@@ -6,6 +6,7 @@ import { onFrame } from "../../lib/frameloop.ts";
 import { isLowPower } from "../../lib/power.ts";
 import type { RingBuffer } from "../../lib/ring.ts";
 import { SAMPLE_RATE } from "../../engine/types.ts";
+import { scopeRange } from "./scopeRange.ts";
 
 export interface ScopeProps {
   time: RingBuffer;
@@ -49,6 +50,12 @@ export function Scope({
     const cap = Math.ceil(seconds * SAMPLE_RATE) + 2;
     const xs = new Float64Array(cap);
     const ys = new Float64Array(cap);
+    // The y range starts at the channel's scale and grows past the session's extremes
+    // (scopeRange.ts); a run that starts over (sim time going back) resets it.
+    let [lo, hi] = [min, max];
+    let seenLo = Infinity;
+    let seenHi = -Infinity;
+    let lastNow = -Infinity;
 
     const opts: uPlot.Options = {
       width: Math.max(10, el.clientWidth),
@@ -65,7 +72,7 @@ export function Scope({
       select: { show: false, left: 0, top: 0, width: 0, height: 0 },
       scales: {
         x: { time: false, range: () => [-seconds, 0] },
-        y: { range: () => [min, max] },
+        y: { range: () => [lo, hi] },
       },
       axes: [
         {
@@ -88,7 +95,7 @@ export function Scope({
           gap: 4,
           ticks: { show: false },
           grid: { stroke: grid, width: 1 },
-          splits: () => [min, (min + max) / 2, max],
+          splits: () => [lo, (lo + hi) / 2, hi],
           values: (_u, splits) => splits.map((v) => `${Math.round(v)}`),
         },
       ],
@@ -126,7 +133,18 @@ export function Scope({
       lastAt = frameAt;
       const n = Math.min(time.copyTo(xs, cap), values.copyTo(ys, cap));
       const now = n > 0 ? (xs[n - 1] as number) : 0;
-      for (let i = 0; i < n; i++) xs[i] = (xs[i] as number) - now;
+      if (now < lastNow) {
+        seenLo = Infinity;
+        seenHi = -Infinity;
+      }
+      lastNow = now;
+      for (let i = 0; i < n; i++) {
+        xs[i] = (xs[i] as number) - now;
+        const v = ys[i] as number;
+        if (v < seenLo) seenLo = v;
+        if (v > seenHi) seenHi = v;
+      }
+      [lo, hi] = scopeRange(min, max, seenLo, seenHi);
       plot.setData([xs.subarray(0, n), ys.subarray(0, n)], true);
     });
 

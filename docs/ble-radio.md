@@ -70,10 +70,15 @@ UUIDs: manufacturer data and TX power are left out, and an `error` line says so 
 central reads after connecting is the Mac's name; apps that match the advertised local name (as EUC Remote
 does) see the wheel's name.
 
-Backpressure: when CoreBluetooth's transmit queue is full (`updateValue` returns false), notifications wait for
-`peripheralManagerIsReadyToUpdateSubscribers` and go out in order. At most 256 wait (about 10 s of Begode
-telemetry); beyond that the oldest are dropped and a `dropped` line says how many. A notification longer than
-a central's limit is cut to it (never the case for the module's 20 bytes).
+Backpressure: when CoreBluetooth's transmit queue is full (`updateValue` returns false), the refused
+notification and every later one wait in the radio's own queue, in order, until
+`peripheralManagerIsReadyToUpdateSubscribers` (or, should that callback never come, a new try after 1 s). At
+most 256 wait (about 13 s of Begode telemetry); only when that queue overflows do the oldest go, and a `dropped`
+line (at most one a second) says how many and how deep the queue was. With `--verbose`, a `busy` line marks each
+refusal. A notification longer than a central's limit is cut to it (never the case for the module's 20 bytes).
+
+While the radio runs, `euc` holds a latency-critical activity with macOS: App Nap would otherwise slow its
+timers by seconds once the terminal is in the background, and idle system sleep would stop the wheel.
 
 ## Test controls
 
@@ -123,7 +128,7 @@ ble <event> t=<seconds> <field>=<value> ...
 | `ble error t=0.030 text=cannot advertise: ...` | something failed, or a stdin line was not a control |
 | `ble lap t=23.810 lap=2` | `replay --loop` started the capture again |
 | `ble end t=23.255` | `replay` reached the end of its capture (without `--loop`) |
-| `ble dropped t=40.000 count=7` | notifications thrown away because the radio stayed busy |
+| `ble dropped t=40.000 count=7 queued=256` | notifications thrown away because the radio's queue overflowed: `count` since the last such line, `queued` the queue's depth; at most one line a second |
 | `ble notify t=6.304 char=FFE1 len=20 hex=55aa...` | `--verbose`: one notification went out |
 | `ble busy t=6.305 queued=3` | `--verbose`: the transmit queue was full; notifications wait |
 
@@ -166,6 +171,11 @@ the first line at or after that capture time, which plays at once), on its chara
 (no re-splitting). Write lines are what the recording central wrote; the replay leaves them out (the live
 central writes for itself) and says how many. With `--loop`, a lap starts one group period (the median spacing
 of the capture's groups) after the last group of the lap before.
+
+If the program falls behind (it was paused), notifications more than 0.5 s late are skipped instead of sent in
+one burst, and an `error` line says how many (`text=the replay fell behind ...`); replies to writes still go
+out. `sim serve` does the same when the simulator catches up after a pause. A real wheel never sends old
+telemetry, and a burst would fill the radio's queue.
 
 Writes get the firmware's answers from the brand's responder. Begode's (`StockResponder`) does what the stock
 firmware does ([protocol page](protocol/begode.md), Commands):

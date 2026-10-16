@@ -18,6 +18,7 @@
  *                     3 beeps; otherwise the handle double beep (2 x 25 ticks) when the balance asks for it
  *   horn ('b')        two 35-tick beeps 99 ticks apart
  *   main loop stall   clean: 3 x 20-tick beeps every 500 ticks while the main loop is stalled
+ *   riderless         clean: a 50-tick beep every 250 ticks while the wheel looks riderless
  * A pattern stays quiet while a higher alarm (hard cut, PWM, temperature, voltage) is active.
  *
  * Alert byte (frame 04 byte 14): bits 0, 3, 4, 5 and 7 (transport lock) follow their condition; bits 1, 2
@@ -56,6 +57,7 @@ struct euc_alarm_in {
     bool powering_off;               /* the power-off path is running: no hard-cut reminder */
     bool hall_fault;
     bool main_loop_stalled; /* clean: the main loop stopped while the tick runs */
+    bool riderless;         /* clean: the riderless detector suspects an empty wheel */
     bool bms_fault;
     bool horn_request;       /* 'b' */
     bool handle_double_beep; /* balance: second handle press */

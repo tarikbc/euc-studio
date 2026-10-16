@@ -97,10 +97,13 @@ export const DEFAULT_ACCENT: AccentName = "orange";
 export const series = {
   speed: "#64D2FF",
   pwm: "#FF7A1A",
+  /** PWM's pair: the voltage really applied, a lighter orange. */
+  modulation: "#FFB066",
   current: "#FF375F",
   voltage: "#30D158",
   pitch: "#F2F2F7",
   temp: "#FFD60A",
+  suspension: "#BF5AF2",
 } as const;
 
 /** 1px hairlines are the only borders. They are translucent so they work on any surface. */

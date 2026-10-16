@@ -262,6 +262,7 @@ static void init(void)
     euc_sensors_init(&app.sensors);
     euc_service_init(&app.service);
     euc_supervisor_init(&app.supervisor);
+    euc_riderless_init(&app.riderless);
     if (app.settings.lock_state == EUC_SETTINGS_LOCKED) {
         app.foc_hard_cut_request = true;
         app.disable_request = true;

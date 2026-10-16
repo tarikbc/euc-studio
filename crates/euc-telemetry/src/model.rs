@@ -110,6 +110,9 @@ pub struct Signals {
     pub isr_load_pct: f32,
     pub rider_lean_deg: f32,
     pub target_speed_kmh: f32,
+    pub suspension_mm: f32,
+    pub shock_mm: f32,
+    pub modulation_pct: f32,
 }
 
 impl Default for Signals {
@@ -135,6 +138,9 @@ impl Default for Signals {
             isr_load_pct: f32::NAN,
             rider_lean_deg: f32::NAN,
             target_speed_kmh: f32::NAN,
+            suspension_mm: f32::NAN,
+            shock_mm: f32::NAN,
+            modulation_pct: f32::NAN,
         }
     }
 }
@@ -162,6 +168,9 @@ impl Signals {
             Channel::IsrLoadPct => self.isr_load_pct,
             Channel::RiderLeanDeg => self.rider_lean_deg,
             Channel::TargetSpeedKmh => self.target_speed_kmh,
+            Channel::SuspensionMm => self.suspension_mm,
+            Channel::ShockMm => self.shock_mm,
+            Channel::ModulationPct => self.modulation_pct,
         }
     }
 
@@ -187,6 +196,9 @@ impl Signals {
             Channel::IsrLoadPct => &mut self.isr_load_pct,
             Channel::RiderLeanDeg => &mut self.rider_lean_deg,
             Channel::TargetSpeedKmh => &mut self.target_speed_kmh,
+            Channel::SuspensionMm => &mut self.suspension_mm,
+            Channel::ShockMm => &mut self.shock_mm,
+            Channel::ModulationPct => &mut self.modulation_pct,
         };
         *slot = value;
     }

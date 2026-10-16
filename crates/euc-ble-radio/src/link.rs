@@ -179,7 +179,7 @@ impl Link {
                     actions.push(Action::Write { characteristic, bytes });
                 }
                 RadioEvent::Busy { queued } => self.log.line(&Entry::Busy { queued }),
-                RadioEvent::Dropped { count } => self.log.line(&Entry::Dropped { count }),
+                RadioEvent::Dropped { count, queued } => self.log.line(&Entry::Dropped { count, queued }),
                 RadioEvent::Error(text) => self.log.line(&Entry::Error { text: &text }),
             }
         }

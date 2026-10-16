@@ -2,8 +2,11 @@
 //!
 //! ```text
 //! world ── floor (plane, or terrain)
-//!   └─ shell (free joint)     measured solids (or generic packs, handle, pedals), IMU site; origin at the axle
-//!        ├─ wheel (hinge "axle", y)   tire: a torus as a ring of capsules (or an ellipsoid)
+//!   └─ shell (free joint)     measured solids (or generic packs, handle, pedals), IMU site; origin at
+//!        │                    the axle (at full extension, with a suspension)
+//!        ├─ carriage (slide "suspension")   only with a suspension: stator, clamps, slider blocks;
+//!        │    │                             spring, damper and travel limits on the joint
+//!        │    └─ wheel (hinge "axle", y)    tire: a torus as a ring of capsules (or an ellipsoid)
 //!        └─ feet (hinge "lean", y)    hinged at the ankles, ankle motor "ankle"
 //!   └─ rider (free joint)     the rider's mass and shapes, welded to the feet ("on_pedals") until
 //!                             the rider steps off
@@ -20,6 +23,8 @@ use crate::params::{Setup, Solid};
 pub(crate) mod names {
     pub const SHELL: &str = "shell";
     pub const WHEEL: &str = "wheel";
+    pub const CARRIAGE: &str = "carriage";
+    pub const SUSPENSION: &str = "suspension";
     pub const RIDER: &str = "rider";
     pub const ROOT: &str = "root";
     pub const AXLE: &str = "axle";
@@ -76,6 +81,19 @@ impl Layout {
     }
 }
 
+/// Radius of the stator for the carriage's inertia, metres (ESTIMATE; the carriage cannot turn in
+/// the shell, so its inertia only adds to the shell's).
+const STATOR_RADIUS_M: f64 = 0.08;
+
+/// Time constant of the suspension's end stops (MuJoCo `solreflimit`), seconds: a firm bump stop.
+const STOP_TIME_S: f64 = 0.004;
+
+/// The suspension's compression at rest with the rider on the pedals, metres (0 without one).
+pub(crate) fn sag_m(setup: &Setup) -> f64 {
+    let sprung = setup.wheel.shell.mass_kg + setup.rider.mass_kg;
+    setup.wheel.suspension.as_ref().map_or(0.0, |s| s.sag_m(sprung, setup.gravity))
+}
+
 /// Capsules in the ring that stands in for a torus: 48 keeps the radius within 0.4 mm.
 const TORUS_SEGMENTS: usize = 48;
 
@@ -105,7 +123,9 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     }
     x.line("  <worldbody>");
     x.line(setup.terrain.ground());
-    x.line(format!(r#"    <body name="{}" pos="0 0 {}">"#, names::SHELL, setup.wheel.tire.radius_m));
+    // The shell starts where the rider's weight holds it: the axle on the tire, the suspension at
+    // its sag.
+    x.line(format!(r#"    <body name="{}" pos="0 0 {}">"#, names::SHELL, setup.wheel.tire.radius_m - sag_m(setup)));
     x.line(format!(r#"      <freejoint name="{}"/>"#, names::ROOT));
     shell(&mut x, setup, &layout);
     wheel(&mut x, setup);
@@ -113,6 +133,11 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line("    </body>");
     rider(&mut x, setup, &layout);
     x.line("  </worldbody>");
+    // The tire runs inside the shell (MuJoCo only skips parent-child pairs, and the carriage sits
+    // between them with a suspension).
+    x.line("  <contact>");
+    x.line(format!(r#"    <exclude body1="{}" body2="{}"/>"#, names::SHELL, names::WHEEL));
+    x.line("  </contact>");
     x.line("  <actuator>");
     let max = setup.rider.control.ankle_max_nm;
     x.line(format!(r#"    <motor name="{}" joint="{}" ctrlrange="-{max} {max}"/>"#, names::ANKLE, names::LEAN));
@@ -195,6 +220,22 @@ fn wheel(x: &mut Xml, setup: &Setup) {
     let wheel = setup.wheel.wheel;
     let (r, hw) = (tire.radius_m, tire.half_width_m);
     let side = 0.5 * wheel.spin_inertia_kgm2;
+    if let Some(s) = &setup.wheel.suspension {
+        // The joint counts compression from full extension and the model is built at the sag
+        // (`ref`). Spring and damper act through the linkage, whose leverage changes along the
+        // travel, so `Physics::step` applies their force; the joint keeps the end stops.
+        let sag = sag_m(setup);
+        let [ax, ay, az] = s.axis();
+        let m = s.unsprung_mass_kg.max(0.01);
+        let (flat, axial) = (0.25 * m * STATOR_RADIUS_M * STATOR_RADIUS_M, 0.5 * m * STATOR_RADIUS_M * STATOR_RADIUS_M);
+        x.line(format!(r#"      <body name="{}" pos="{} {} {}">"#, names::CARRIAGE, sag * ax, sag * ay, sag * az));
+        x.line(format!(
+            r#"        <joint name="{}" type="slide" axis="{ax} {ay} {az}" range="0 {}" ref="{sag}" solreflimit="{STOP_TIME_S} 1"/>"#,
+            names::SUSPENSION,
+            s.travel_m(),
+        ));
+        x.line(format!(r#"        <inertial pos="0 0 0" mass="{m}" diaginertia="{flat} {axial} {flat}"/>"#));
+    }
     x.line(format!(r#"      <body name="{}">"#, names::WHEEL));
     x.line(format!(r#"        <joint name="{}" type="hinge" axis="0 1 0"/>"#, names::AXLE));
     x.line(format!(
@@ -226,6 +267,9 @@ fn wheel(x: &mut Xml, setup: &Setup) {
         }
     }
     x.line("      </body>");
+    if setup.wheel.suspension.is_some() {
+        x.line("      </body>");
+    }
 }
 
 /// The rigid rider, hinged at the ankles; its shapes are for drawing and never collide.
@@ -262,14 +306,14 @@ fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
     // Body landmarks as fractions of standing height, measured from the ankle joint.
     let h = rider.height_m;
     let (hip, shoulder, head) = (0.53 * h - ankle, 0.82 * h - ankle, 0.93 * h - ankle);
-    let ghost = r#"contype="0" conaffinity="0""#;
-    // The feet and the torso touch the ground (group 2 meets the floor only, never the wheel or the
-    // shell): once off the pedals the rider stands, or lies, beside the wheel.
-    let ground_only = r#"contype="2" conaffinity="2""#;
+    // Every part of the rider touches the ground (group 2 meets the floor only, never the wheel or
+    // the shell): once off the pedals the rider stands, or lies, beside the wheel, and after a fall
+    // no limb sinks into the ground.
+    let ground_only = r#"contype="2" conaffinity="2" solref="0.005 1""#;
     x.line(format!(
         r#"    <body name="{}" pos="0 0 {}">"#,
         names::RIDER,
-        setup.wheel.tire.radius_m + ankle_above_axle(setup)
+        setup.wheel.tire.radius_m - sag_m(setup) + ankle_above_axle(setup)
     ));
     x.line(format!(r#"      <freejoint name="{}"/>"#, names::RIDER_FREE));
     x.line(format!(
@@ -282,17 +326,17 @@ fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
             0.03 - ankle
         ));
         x.line(format!(
-            r#"        <geom name="leg_{side}" type="capsule" fromto="0 {y} 0 0 {} {hip}" size="0.07" {ghost}/>"#,
+            r#"        <geom name="leg_{side}" type="capsule" fromto="0 {y} 0 0 {} {hip}" size="0.07" {ground_only}/>"#,
             0.6 * y
         ));
         let arm = 1.6 * y;
         x.line(format!(
-            r#"        <geom name="arm_{side}" type="capsule" fromto="0 {arm} {shoulder} 0 {arm} {hip}" size="0.045" {ghost}/>"#
+            r#"        <geom name="arm_{side}" type="capsule" fromto="0 {arm} {shoulder} 0 {arm} {hip}" size="0.045" {ground_only}/>"#
         ));
     }
     x.line(format!(
         r#"        <geom name="torso" type="capsule" fromto="0 0 {hip} 0 0 {shoulder}" size="0.15" {ground_only}/>"#
     ));
-    x.line(format!(r#"        <geom name="head" type="sphere" size="0.1" pos="0 0 {head}" {ghost}/>"#));
+    x.line(format!(r#"        <geom name="head" type="sphere" size="0.1" pos="0 0 {head}" {ground_only}/>"#));
     x.line("    </body>");
 }

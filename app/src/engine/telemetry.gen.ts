@@ -8,7 +8,7 @@ export const BATCH_HEADER_BYTES = 32;
 export const BATCH_FLAG_POSES = 1;
 export const POSE_FLOATS = 7;
 
-export type ChannelKey = "speed_kmh" | "wheel_rad_s" | "pwm_pct" | "phase_a_a" | "phase_b_a" | "phase_c_a" | "iq_a" | "torque_nm" | "battery_v" | "battery_a" | "soc_pct" | "pitch_deg" | "roll_deg" | "board_temp_c" | "motor_temp_c" | "distance_m" | "isr_load_pct" | "rider_lean_deg" | "target_speed_kmh";
+export type ChannelKey = "speed_kmh" | "wheel_rad_s" | "pwm_pct" | "phase_a_a" | "phase_b_a" | "phase_c_a" | "iq_a" | "torque_nm" | "battery_v" | "battery_a" | "soc_pct" | "pitch_deg" | "roll_deg" | "board_temp_c" | "motor_temp_c" | "distance_m" | "isr_load_pct" | "rider_lean_deg" | "target_speed_kmh" | "suspension_mm" | "shock_mm" | "modulation_pct";
 export type RateClass = "fast" | "slow";
 
 export interface ChannelSpec {
@@ -40,6 +40,9 @@ export const CHANNELS: readonly ChannelSpec[] = [
   { id: 16, key: "isr_load_pct", label: "ISR load", unit: "%", rate: "slow" },
   { id: 17, key: "rider_lean_deg", label: "Rider lean", unit: "°", rate: "fast" },
   { id: 18, key: "target_speed_kmh", label: "Target speed", unit: "km/h", rate: "fast" },
+  { id: 19, key: "suspension_mm", label: "Suspension", unit: "mm", rate: "fast" },
+  { id: 20, key: "shock_mm", label: "Shock", unit: "mm", rate: "fast" },
+  { id: 21, key: "modulation_pct", label: "Modulation", unit: "%", rate: "fast" },
 ];
 
 /** Channel id by key. */
@@ -63,6 +66,9 @@ export const CH = {
   isr_load_pct: 16,
   rider_lean_deg: 17,
   target_speed_kmh: 18,
+  suspension_mm: 19,
+  shock_mm: 20,
+  modulation_pct: 21,
 } as const satisfies Record<ChannelKey, number>;
 
 export type EventKind = "alarm" | "cutoff" | "tiltback" | "command" | "firmware" | "scenario" | "fault";

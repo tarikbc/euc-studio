@@ -6,7 +6,8 @@
 #   <name>.map   GNU ld map file
 #   size-report.json   per-module flash/RAM totals, checked against size-budget.toml (over budget = failed build)
 # For the Begode Extreme it also checks that profiles/begode-extreme/probes.toml matches struct app
-# (tools/gen_probes.py --check; regenerate with the `probes` target).
+# (tools/gen_probes.py --check; regenerate with the `probes` target), and links the id of that layout in
+# as the absolute symbol euc_probe_layout, which the simulator checks the map against.
 #
 # The board target (euc_board_<board-id>) brings the linker script, the board headers and the MCU port.
 function(euc_add_image name)
@@ -56,6 +57,18 @@ function(euc_add_image name)
         COMMENT "Image ${name}.bin and size report"
         VERBATIM)
     if(arg_BOARD STREQUAL "begode-extreme")
+        # Measured on every build (a fraction of a second); the file only changes, and the image only
+        # relinks, when struct app's probed layout does.
+        set(layout_ld "${out_dir}/${name}-probe-layout.ld")
+        add_custom_target(${name}-probe-layout
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gen_probes.py"
+                --cc "${CMAKE_C_COMPILER}" --emit-ld "${layout_ld}"
+            BYPRODUCTS "${layout_ld}"
+            COMMENT "Probe layout id"
+            VERBATIM)
+        add_dependencies(${name} ${name}-probe-layout)
+        target_link_options(${name} PRIVATE "${layout_ld}")
+        set_property(TARGET ${name} APPEND PROPERTY LINK_DEPENDS "${layout_ld}")
         add_custom_command(TARGET ${name} POST_BUILD
             COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gen_probes.py"
                 --cc "${CMAKE_C_COMPILER}" --check

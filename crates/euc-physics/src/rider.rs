@@ -1,14 +1,19 @@
-//! The rider's controller: target speed to lean, lean to ankle torque.
+//! The rider's controller: target speed to lean, lean to ankle torque, and steering.
 //!
 //! An EUC rider rides by leaning: lean forward and the wheel speeds up to stay under you, lean
 //! back and it slows. The controller turns a target speed into a lean from vertical, ramped at
 //! a human rate, and the ankles hold that lean with a stiff spring and damper. The ankle torque
 //! pushes on the pedals with the opposite sign; that is what the firmware's balance loop feels.
+//! The rider also steers: feet and legs twist the wheel back onto the line.
 
 use crate::params::RiderControl;
 
 /// Speed error inside which the rider trims with the integral term, m/s.
 const INTEGRAL_BAND_MPS: f64 = 1.0;
+
+/// Time constant of the riding pitch, seconds: the pedal angle the rider is used to, against
+/// which a tiltback is felt when the firmware's own tiltback is not known.
+const RIDING_PITCH_S: f64 = 3.0;
 
 /// What the rider wants.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,12 +43,13 @@ impl Drag {
     }
 }
 
-/// The speed the rider aims for: `wanted`, unless the pedals tip back while the rider wants to go
-/// forward and is not already slowing down. Then the rider eases off, the more the steeper the
-/// tiltback, as a rider does when the wheel pushes the toes up: down to a stop, never backwards,
-/// and a stopped rider waits for the pedals to level before setting off again.
-fn eased(wanted: f64, s: &Sense, c: &RiderControl) -> f64 {
-    let tilt = (s.pitch_up - c.tiltback_feel_deg.to_radians()).max(0.0).to_degrees();
+/// The speed the rider aims for: `wanted`, unless the pedals tip back (`felt`, radians of
+/// tiltback) while the rider wants to go forward and is not already slowing down. Then the rider
+/// eases off, the more the steeper the tiltback, as a rider does when the wheel pushes the toes
+/// up: down to a stop, never backwards, and a stopped rider waits for the tiltback to go before
+/// setting off again.
+fn eased(wanted: f64, felt: f64, s: &Sense, c: &RiderControl) -> f64 {
+    let tilt = (felt - c.tiltback_feel_deg.to_radians()).max(0.0).to_degrees();
     if tilt <= 0.0 || c.tiltback_ease_kmh_per_deg <= 0.0 || wanted <= 0.0 || wanted < s.speed {
         return wanted;
     }
@@ -69,6 +75,10 @@ pub(crate) struct Sense {
     pub held: bool,
     /// The pedals' pitch, radians, nose up positive (tiltback lifts the nose).
     pub pitch_up: f64,
+    /// Heading away from the line (world +x), radians, left positive.
+    pub heading: f64,
+    /// Its rate about the vertical, rad/s, left positive.
+    pub yaw_rate: f64,
 }
 
 /// The rider's controller.
@@ -78,12 +88,48 @@ pub struct RiderController {
     intent: Intent,
     lean_command: f64,
     integral: f64,
+    /// The pedal pitch the rider is used to, radians nose up.
+    riding_pitch: f64,
+    /// The firmware's tiltback, radians nose up, when the simulator can read it.
+    commanded_tiltback: Option<f64>,
 }
 
 impl RiderController {
     /// A rider who wants to stand still.
     pub const fn new(control: RiderControl) -> Self {
-        Self { control, intent: Intent::Speed(0.0), lean_command: 0.0, integral: 0.0 }
+        Self {
+            control,
+            intent: Intent::Speed(0.0),
+            lean_command: 0.0,
+            integral: 0.0,
+            riding_pitch: 0.0,
+            commanded_tiltback: None,
+        }
+    }
+
+    /// Tells the rider the firmware's tiltback (radians, nose up), or `None` when it is not known.
+    /// A known tiltback is what the rider feels; otherwise the rider feels the pedals' pitch above
+    /// the riding pitch, the angle they are used to.
+    pub const fn set_commanded_tiltback(&mut self, tiltback: Option<f64>) {
+        self.commanded_tiltback = tiltback;
+    }
+
+    /// The tiltback the rider feels now, radians, nose up positive.
+    fn felt_tiltback(&self, s: &Sense) -> f64 {
+        self.commanded_tiltback.unwrap_or(s.pitch_up - self.riding_pitch)
+    }
+
+    /// Follows the riding pitch: slowly, and never upwards while a tiltback is felt, so a lasting
+    /// tiltback stays felt instead of becoming the new normal.
+    fn track_riding_pitch(&mut self, s: &Sense) {
+        if s.held {
+            self.riding_pitch = s.pitch_up;
+            return;
+        }
+        let feeling = s.pitch_up - self.riding_pitch > self.control.tiltback_feel_deg.to_radians();
+        if !feeling || s.pitch_up < self.riding_pitch {
+            self.riding_pitch += (s.pitch_up - self.riding_pitch) * (s.dt / RIDING_PITCH_S).min(1.0);
+        }
     }
 
     /// Changes what the rider wants, from the next step on.
@@ -106,10 +152,12 @@ impl RiderController {
     pub(crate) fn ankle_torque(&mut self, s: &Sense) -> f64 {
         let c = self.control;
         let max_lean = c.lean_max_deg.to_radians();
+        let felt = self.felt_tiltback(s);
+        self.track_riding_pitch(s);
         let target = match self.intent {
             Intent::Lean(lean) => lean,
             Intent::Speed(wanted) => {
-                let speed = eased(wanted, s, &c);
+                let speed = eased(wanted, felt, s, &c);
                 let brake_max = if speed < wanted { c.brake_max.min(c.tiltback_ease_brake) } else { c.brake_max };
                 let error = speed - s.speed;
                 let accel = c.speed_kp * error + c.speed_ki * self.integral;
@@ -131,6 +179,13 @@ impl RiderController {
         let torque = c.lean_kp * (self.lean_command - s.lean) - c.lean_kd * s.lean_rate;
         torque.clamp(-c.ankle_max_nm, c.ankle_max_nm)
     }
+
+    /// The steering torque for this step, N·m about the vertical (positive turns left): feet and
+    /// legs twist the wheel back onto the line, no harder than a rider can.
+    pub(crate) fn steering_torque(&self, s: &Sense) -> f64 {
+        let c = self.control;
+        (-(c.steer_kp * s.heading + c.steer_kd * s.yaw_rate)).clamp(-c.steer_max_nm, c.steer_max_nm)
+    }
 }
 
 #[cfg(test)]
@@ -147,6 +202,8 @@ mod tests {
             gravity: 9.81,
             held: false,
             pitch_up: 0.0,
+            heading: 0.0,
+            yaw_rate: 0.0,
         }
     }
 
@@ -182,17 +239,57 @@ mod tests {
     #[test]
     fn eases_off_when_the_pedals_tip_back() {
         let c = RiderControl::default();
-        let riding = |pitch_up_deg: f64| Sense { pitch_up: f64::to_radians(pitch_up_deg), ..sense(10.0) };
-        assert_eq!(eased(12.0, &riding(1.0), &c), 12.0, "a little tilt is fine");
-        let eased_speed = eased(12.0, &riding(6.0), &c);
+        let riding = sense(10.0);
+        let felt = f64::to_radians;
+        assert_eq!(eased(12.0, felt(1.0), &riding, &c), 12.0, "a little tilt is fine");
+        let eased_speed = eased(12.0, felt(6.0), &riding, &c);
         assert!((eased_speed - (10.0 - 1.5 * 4.0 / 3.6)).abs() < 1e-9, "4° beyond the feel: {eased_speed}");
-        assert_eq!(eased(5.0, &riding(6.0), &c), 5.0, "already braking: no change");
-        assert_eq!(eased(12.0, &riding(30.0), &c), 0.0, "a steep tiltback stops the rider, never reverses");
-        let stopped = Sense { pitch_up: f64::to_radians(6.0), ..sense(-0.1) };
-        assert_eq!(eased(12.0, &stopped, &c), 0.0, "stopped: waits for the pedals to level");
-        assert_eq!(eased(-2.0, &stopped, &c), -2.0, "riding backwards: no change");
+        assert_eq!(eased(5.0, felt(6.0), &riding, &c), 5.0, "already braking: no change");
+        assert_eq!(eased(12.0, felt(30.0), &riding, &c), 0.0, "a steep tiltback stops the rider, never reverses");
+        let stopped = sense(-0.1);
+        assert_eq!(eased(12.0, felt(6.0), &stopped, &c), 0.0, "stopped: waits for the tiltback to go");
+        assert_eq!(eased(-2.0, felt(6.0), &stopped, &c), -2.0, "riding backwards: no change");
         let none = RiderControl { tiltback_ease_kmh_per_deg: 0.0, ..c };
-        assert_eq!(eased(12.0, &riding(6.0), &none), 12.0, "ignoring it rides through");
+        assert_eq!(eased(12.0, felt(6.0), &riding, &none), 12.0, "ignoring it rides through");
+    }
+
+    #[test]
+    fn feels_tiltback_against_the_riding_pitch() {
+        let mut rider = RiderController::new(RiderControl::default());
+        rider.set_intent(Intent::Speed(10.0));
+        // Riding nose down at full lean for a while: that becomes the riding pitch.
+        let lean_down = Sense { pitch_up: f64::to_radians(-6.0), ..sense(10.0) };
+        for _ in 0..20_000 {
+            rider.ankle_torque(&lean_down);
+        }
+        assert!((rider.riding_pitch.to_degrees() + 6.0).abs() < 0.01, "{}", rider.riding_pitch.to_degrees());
+        // A 9° tiltback lifts the pedals only to +3°, but the rider feels all 9° of it, and keeps
+        // feeling it while it lasts.
+        let tipped = Sense { pitch_up: f64::to_radians(3.0), ..lean_down };
+        for _ in 0..30_000 {
+            rider.ankle_torque(&tipped);
+        }
+        assert!(
+            (rider.felt_tiltback(&tipped).to_degrees() - 9.0).abs() < 0.5,
+            "{}",
+            rider.felt_tiltback(&tipped).to_degrees()
+        );
+        // A tiltback the firmware reports is felt as it is.
+        rider.set_commanded_tiltback(Some(f64::to_radians(4.0)));
+        assert!((rider.felt_tiltback(&tipped).to_degrees() - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn steers_back_onto_the_line_within_human_strength() {
+        let rider = RiderController::new(RiderControl::default());
+        let c = RiderControl::default();
+        let off_left = Sense { heading: 0.01, ..sense(5.0) };
+        let torque = rider.steering_torque(&off_left);
+        assert!(torque < 0.0 && (torque + c.steer_kp * 0.01).abs() < 1e-9, "turns right: {torque}");
+        let far_off = Sense { heading: 1.0, yaw_rate: 1.0, ..sense(5.0) };
+        assert_eq!(rider.steering_torque(&far_off), -c.steer_max_nm, "limited");
+        let turning_back = Sense { heading: 0.01, yaw_rate: -0.5, ..sense(5.0) };
+        assert!(rider.steering_torque(&turning_back) > 0.0, "damps the turn");
     }
 
     #[test]

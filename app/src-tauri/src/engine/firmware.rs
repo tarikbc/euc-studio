@@ -3,13 +3,14 @@
 
 use euc_fwsource::{FetchOptions, FirmwareCache, UreqClient};
 use euc_profile::{Channel, FirmwareSource, ProfileSource, Sha256, WheelProfile};
+use euc_sim::scenario::Scenario;
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 
 use super::cpu;
 use super::display::DisplayLayout;
 use super::host::{RideHost, StillHost};
 use super::lights::LightsLayout;
-use super::runner::Built;
+use super::runner::{Built, SuspensionInfo};
 use super::scenarios;
 
 /// Snapshots per simulated second; the runner steps in 1/120 s.
@@ -35,6 +36,14 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
         .ok()
         .and_then(|text| LightsLayout::parse(&text).map_err(|e| problems.push(e)).ok());
     let note = (!problems.is_empty()).then(|| problems.join("; "));
+    let suspension = files.body.suspension.as_ref().and_then(|s| {
+        let geometry = source.read(&wheel.id, "geometry.toml").ok()?;
+        shock_eyes(&geometry).map(|(eye_top_m, eye_bottom_m)| SuspensionInfo {
+            linkage_ratio: s.linkage_ratio,
+            eye_top_m,
+            eye_bottom_m,
+        })
+    });
     let (image, label) = stock_image(wheel, progress)?;
     let sha256 = Sha256::digest(&image);
     // Stock-map addresses only mean something in the build they were taken from.
@@ -63,17 +72,7 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
-    // The ground the scenario rides on, as points for the web view to draw (none when flat).
-    let terrain = (!scenario.terrain.is_flat()).then(|| {
-        let step = 0.05;
-        let end = scenario.terrain.length_m;
-        (0..=((end + 5.0) / step) as usize)
-            .map(|i| {
-                let x = -5.0 + i as f64 * step;
-                [x as f32, scenario.terrain.height(x.max(0.0)) as f32]
-            })
-            .collect::<Vec<_>>()
-    });
+    let terrain = terrain_profile(&scenario);
     match files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()) {
         Ok(live) => {
             let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
@@ -86,6 +85,7 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 display,
                 lights,
                 terrain,
+                suspension,
             })
         }
         // Without a body model the firmware still runs, on a wheel that stands still.
@@ -102,9 +102,43 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 display,
                 lights,
                 terrain: None,
+                suspension: None,
             })
         }
     }
+}
+
+/// The ground the scenario rides on, as points for the web view to draw (none when flat): every
+/// 5 cm from 5 m behind the start, `[x, z, slope z]` in metres, where `slope z` is the slope alone
+/// (no bumps or potholes), so the view can lay its shadows on the slope and mark the potholes.
+fn terrain_profile(scenario: &Scenario) -> Option<Vec<[f32; 3]>> {
+    let terrain = &scenario.terrain;
+    if terrain.is_flat() {
+        return None;
+    }
+    let mut slope = terrain.clone();
+    slope.features.clear();
+    let step = 0.05;
+    let samples = ((terrain.length_m + 5.0) / step) as usize;
+    Some(
+        (0..=samples)
+            .map(|i| {
+                let x = -5.0 + i as f64 * step;
+                [x as f32, terrain.height(x.max(0.0)) as f32, slope.height(x.max(0.0)) as f32]
+            })
+            .collect(),
+    )
+}
+
+/// The shock's eyes from `geometry.toml` `[shock]` (`eye_top_m`, `eye_bottom_m`), if it has them.
+fn shock_eyes(geometry: &str) -> Option<([f64; 3], [f64; 3])> {
+    let table: toml::Table = toml::from_str(geometry).ok()?;
+    let shock = table.get("shock")?;
+    let eye = |key: &str| -> Option<[f64; 3]> {
+        let v: Vec<f64> = shock.get(key)?.as_array()?.iter().map(toml::Value::as_float).collect::<Option<_>>()?;
+        v.try_into().ok()
+    };
+    Some((eye("eye_top_m")?, eye("eye_bottom_m")?))
 }
 
 /// The current pinned stock build, from the cache or fetched into it.
@@ -144,6 +178,29 @@ mod tests {
     use super::super::host::Host;
     use super::super::phone::{PhoneDecoder, PhoneFrame};
     use super::*;
+
+    #[test]
+    fn the_terrain_profile_keeps_the_ground_below_zero() {
+        assert_eq!(terrain_profile(&scenarios::load("ride-20kmh-stop").unwrap()), None, "flat: nothing to draw");
+        let at = |profile: &[[f32; 3]], x: f32| *profile.iter().find(|p| (p[0] - x).abs() < 0.01).unwrap();
+        // 2 % down from 25 m (a 10 m ramp): at 100 m the ground is 1.4 m below the start.
+        let down = terrain_profile(&scenarios::load("downhill-cruise-2pct").unwrap()).unwrap();
+        let [_, z, slope] = at(&down, 100.0);
+        assert!((z + 1.4).abs() < 1e-4 && z == slope, "{z} {slope}");
+        // The pothole is 2 cm below the slope; the slope itself stays at 0 there.
+        let hole = terrain_profile(&scenarios::load("pothole-20kmh").unwrap()).unwrap();
+        let [_, z, slope] = at(&hole, 50.25);
+        assert!((z + 0.02).abs() < 1e-4 && slope == 0.0, "{z} {slope}");
+        assert_eq!(at(&hole, 49.0)[1..], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn the_extreme_profile_gives_the_shock_eyes() {
+        let geometry = ProfileSource::Builtin.read("begode-extreme", "geometry.toml").unwrap();
+        let (top, bottom) = shock_eyes(&geometry).expect("the Extreme has a shock");
+        assert!(top[2] > bottom[2], "the top eye is above the bottom one");
+        assert_eq!(shock_eyes("[seat]\nheight_m = 0.47"), None, "no [shock], no eyes");
+    }
 
     /// The host and what a phone made of its BLE output so far.
     struct Rig<'a> {
@@ -213,6 +270,29 @@ mod tests {
         assert!(events.iter().any(|e| e.text.starts_with("Beep")), "b sounds the buzzer");
         assert!(outputs.display_on, "the display is lit");
         assert_eq!(outputs.leds.len(), 32, "the light strip has 32 LEDs");
+    }
+
+    /// The poses the 3D view draws (a guard for the drawing: a changed body tree shows here
+    /// first): wheel, shell and rider in that order; the wheel's centre one rolling radius above
+    /// the ground, the shell's origin (the axle at full extension) the sag below it, the rider's
+    /// origin (the ankle) above it.
+    #[test]
+    #[ignore = "needs the stock image in the local firmware cache"]
+    fn live_poses_stand_on_the_ground() {
+        let mut built = build_host("balance-60s", &mut |_| {}).expect("host");
+        let host = built.host.as_mut();
+        let roles: Vec<_> = host.bodies().iter().map(|b| b.role).collect();
+        assert_eq!(roles, [BodyRole::Wheel, BodyRole::Shell, BodyRole::Rider]);
+        while host.time_s() < 1.0 {
+            host.step(1.0 / 120.0);
+        }
+        let mut snap = Snapshot::default();
+        host.snapshot(&mut snap);
+        let [wheel, shell, rider] = [0, 1, 2].map(|i| snap.bodies[i].pos[2]);
+        println!("at 1 s: wheel z {wheel:.4} m, shell z {shell:.4} m, rider z {rider:.4} m");
+        assert!((wheel - 0.225).abs() < 0.005, "the wheel centre rides one rolling radius up: {wheel}");
+        assert!((0.0..0.02).contains(&(wheel - shell)), "the shell sits the sag below the axle: {shell}");
+        assert!(rider > wheel, "the rider stands above the axle: {rider}");
     }
 
     /// The whole ride, as the studio steps it: the scenario's checks pass.

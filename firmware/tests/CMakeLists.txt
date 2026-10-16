@@ -110,3 +110,7 @@ euc_add_unit_test(test_service
 euc_add_unit_test(test_supervisor
     SOURCES unit/test_supervisor.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_riderless
+    SOURCES unit/test_riderless.c
+    LIBRARIES euc_port_sim)

@@ -68,8 +68,22 @@ pub struct Built {
     pub display: Option<DisplayLayout>,
     /// The tail light's LED layout, if the profile describes it.
     pub lights: Option<LightsLayout>,
-    /// The ground's height along the path, `[x, z]` metres, when it is not flat.
-    pub terrain: Option<Vec<[f32; 2]>>,
+    /// The ground along the path, `[x, z, slope z]` metres, when it is not flat (`terrain_profile`).
+    pub terrain: Option<Vec<[f32; 3]>>,
+    /// The rear suspension's shock, for drawing it compressed; none on a wheel without one.
+    pub suspension: Option<SuspensionInfo>,
+}
+
+/// The wheel's rear shock as the 3D view draws it: where its eyes are and how axle travel maps to
+/// shock travel. From the profile: `plant.toml` `[body.suspension]` and `geometry.toml` `[shock]`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SuspensionInfo {
+    /// Axle travel per unit of shock travel.
+    pub linkage_ratio: f64,
+    /// The eye that stays with the frame, wheel frame (x forward, y left, z up), metres.
+    pub eye_top_m: [f64; 3],
+    /// The eye that the linkage moves.
+    pub eye_bottom_m: [f64; 3],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,7 +125,11 @@ pub enum Message {
     },
     /// The ground's height along the path (sent with the bodies; `null` on flat ground).
     Terrain {
-        profile: Option<Vec<[f32; 2]>>,
+        profile: Option<Vec<[f32; 3]>>,
+    },
+    /// The rear shock (sent with the bodies; `null` on a wheel without suspension).
+    Suspension {
+        info: Option<SuspensionInfo>,
     },
     Events {
         events: Vec<Event>,
@@ -250,6 +268,7 @@ fn pump(outbox: &Mutex<Outbox>, sinks: &Mutex<Option<Sinks>>, stop: &AtomicBool)
                     | Message::Display { .. }
                     | Message::Lights { .. }
                     | Message::Terrain { .. }
+                    | Message::Suspension { .. }
             )
         });
         for m in early {
@@ -275,7 +294,8 @@ struct Sim {
     note: Option<String>,
     display: Option<DisplayLayout>,
     lights: Option<LightsLayout>,
-    terrain: Option<Vec<[f32; 2]>>,
+    terrain: Option<Vec<[f32; 3]>>,
+    suspension: Option<SuspensionInfo>,
     error: Option<String>,
     outputs: Option<Outputs>,
     outputs_at: Option<Instant>,
@@ -312,6 +332,7 @@ impl Sim {
             display: None,
             lights: None,
             terrain: None,
+            suspension: None,
             error: None,
             outputs: None,
             outputs_at: None,
@@ -408,6 +429,7 @@ impl Sim {
                     out.messages.push(Message::Display { layout: built.display.clone() });
                     out.messages.push(Message::Lights { layout: built.lights.clone() });
                     out.messages.push(Message::Terrain { profile: built.terrain.clone() });
+                    out.messages.push(Message::Suspension { info: built.suspension.clone() });
                 }
                 self.build = Some(built.build);
                 self.label = Some(built.label);
@@ -415,6 +437,7 @@ impl Sim {
                 self.display = built.display;
                 self.lights = built.lights;
                 self.terrain = built.terrain;
+                self.suspension = built.suspension;
                 self.outputs = None;
                 self.host = Some(built.host);
                 self.phone = PhoneDecoder::default();
@@ -467,6 +490,7 @@ impl Sim {
                     self.post(Message::Display { layout: self.display.clone() });
                     self.post(Message::Lights { layout: self.lights.clone() });
                     self.post(Message::Terrain { profile: self.terrain.clone() });
+                    self.post(Message::Suspension { info: self.suspension.clone() });
                 }
                 self.outputs = None;
                 self.post_status();

@@ -11,6 +11,8 @@
 
 schema = 1
 
+layout = 0xe061d25e  # id of the measured layout; the image carries it as euc_probe_layout
+
 [[var]]
 name = "telemetry_pause"
 symbol = "app"
@@ -133,6 +135,22 @@ offset = 529  # app.motor.hall.line_fault
 size = 1
 kind = "u8"
 note = "clean: one hall line found stuck; the state is rebuilt from the other two"
+
+[[var]]
+name = "riderless"
+symbol = "app"
+offset = 1384  # app.riderless.suspected
+size = 1
+kind = "u8"
+note = "clean: the wheel looks riderless (beeps and the limp speed limit)"
+
+[[var]]
+name = "riderless_triggers"
+symbol = "app"
+offset = 1385  # app.riderless.triggers
+size = 1
+kind = "u8"
+note = "clean: riderless suspicions since power-on"
 
 [[var]]
 name = "strip_mode"

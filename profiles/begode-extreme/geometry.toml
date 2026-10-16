@@ -147,18 +147,42 @@ speaker_caps_m = [[-0.1868, 0.0505, 0.4491], [-0.1868, -0.0505, 0.4491]]  # norm
 speaker_grille_m = [0.012, 0.022]    # inner and outer radius
 ble_led_m = [-0.1868, -0.008, 0.4754]  # ESTIMATE (owner video): top of the band, right edge
 
+[suspension]
+# The axle sits in a carriage on each side that slides on a vertical rod inside the channel
+# between the fore and aft packs. All positions MEASURED on the scan (unloaded wheel); which part
+# moves is INFERRED from the layout.
+rod_diameter_m = 0.0300                 # MEASURED: cylinder fit, spread 0.1 mm
+rod_axis_xy_m = [[-0.0002, 0.0636], [-0.0002, -0.0649]]   # left, right; MEASURED
+rod_tilt_deg = 0.13                     # MEASURED: top tilted rearward; vertical within 0.15 deg
+carriage_top_z_m = 0.2510               # MEASURED: up-facing face of the carriage block
+rod_stop_z_m = 0.3595                   # MEASURED: lower face of the ring on the rod (bump stop or
+                                        # boot, INFERRED); the frame's top plate underside at 0.383
+free_rod_above_carriage_m = 0.1085      # to the ring; 0.132 to the top plate
+frame_bottom_mount_z_m = [-0.052, -0.020]  # MEASURED: block around the rod below the axle (INFERRED frame)
+state_in_scan = "topped out (INFERRED: unloaded wheel, carriage at the bottom of the rods)"
+moving = "INFERRED: rods and pedal brackets on the frame (sprung); carriage, axle, motor, tire unsprung"
+linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2265, 0.1835], plate_upper = [-0.132, 0.333] }
+# MEASURED: cross shafts 20 mm, plate_upper +-0.003; long plates run shock_bottom -> plate_upper,
+# short plates plate_upper -> shock_top. The owner's parts photo shows a rocker (three holes) and a
+# link (two holes): which scan pivot is which, and which part meets the carriage, is UNRESOLVED.
+
 [shock]
-# Current shock, per owner photos 2026-10-16: DNM-type coil-over without reservoir, black spring,
-# threaded body with a slotted preload collar, chrome shaft, red rebound knob at the top eye.
-# Spring rate unknown. The 2026-10 scan shows an older shock with a piggyback reservoir.
-eye_top_m = [-0.1405, 0.0, 0.3681]      # MEASURED (scan): centre of the top cross shaft
-eye_bottom_m = [-0.224, 0.0, 0.182]     # MEASURED (scan), +-0.005
-eye_to_eye_m = 0.204
+# Current shock: DNM coil-over without reservoir. Owner photos 2026-10-16: body and threaded collar
+# at the bottom eye, shaft and red rebound knob at the top eye. It sits on the scan's two cross
+# shafts. Which eye moves with the axle carriage is UNRESOLVED (rocker linkage; press test pending).
+eye_top_m = [-0.1395, 0.0, 0.3675]      # MEASURED (scan): top cross shaft
+eye_bottom_m = [-0.2265, 0.0, 0.1835]   # MEASURED (scan): bottom cross shaft
+eye_to_eye_m = 0.200                    # MEASURED (owner); the scan's shafts are 0.2035 apart
+stroke_m = 0.050                        # ESTIMATE (typical for a 200 mm DNM; not stated)
 body_at = "bottom eye"                  # owner photos: shaft and knob at the top eye
-spring_outer_diameter_m = 0.052         # ESTIMATE (photo, scaled by eye-to-eye)
+spring_outer_diameter_m = 0.056         # DNM size chart
+spring_length_m = 0.115                 # DNM size chart for 200 mm
 spring_wire_m = 0.008                   # ESTIMATE
 spring_coils = 7                        # owner photos
-spring_rate = "unknown"
+spring_rate_n_per_m = 131_300           # 750 lb/in, MEASURED (owner; printed on the spring)
+eyelet_bore_m = 0.008                   # DNM listing
+eyelet_width_m = 0.024                  # DNM listing
+motion_ratio = "UNRESOLVED: rocker + link linkage, hole spacings and mapping pending (owner)"
 
 [rear_handle]
 # Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
@@ -190,9 +214,8 @@ pack_right = { centre = [0.0, -0.0734, 0.1644], half = [0.1243, 0.0284, 0.2059] 
 top = { centre = [-0.0267, -0.0009, 0.4199], half = [0.1380, 0.0923, 0.0496] }
 front = { centre = [0.1495, 0.0, 0.4250], half = [0.0382, 0.0750, 0.0590] }
 roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radius = 0.0275 }
-# Shock: the envelope of the scanned one; the current shock (DNM-type, owner photos 2026-10-16)
-# sits on the same eyes and is slimmer (spring 52 mm outside, ESTIMATE).
-shock = { from = [-0.169, 0.0, 0.383], to = [-0.204, 0.0, 0.162], radius = 0.035 }
+# Shock: the current DNM between the two cross shafts, spring radius.
+shock = { from = [-0.1395, 0.0, 0.3675], to = [-0.2265, 0.0, 0.1835], radius = 0.028 }
 # ESTIMATE: rear handle grip bar (see [rear_handle]).
 rear_handle_grip = { from = [-0.2515, -0.0527, 0.5042], to = [-0.2515, 0.0527, 0.5042], radius = 0.013 }
 pedal_bracket_left = { centre = [0.0007, 0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
@@ -210,3 +233,7 @@ pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold abou
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
 handle_nodes = ["rear_handle"]
+# "shock": the coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye,
+# bottom eye at local (0, -0.2035, 0). "shock_links": plates and cross shafts. Both static until
+# the linkage is resolved (which eye moves is UNRESOLVED).
+shock_nodes = ["shock", "shock_links"]

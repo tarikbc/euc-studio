@@ -9,8 +9,8 @@
 #![allow(unsafe_code)]
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::Instant;
 
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::Retained;
@@ -22,15 +22,12 @@ use objc2_core_bluetooth::{
     CBManagerState, CBMutableCharacteristic, CBMutableService, CBPeripheralManager, CBPeripheralManagerDelegate,
     CBService, CBUUID,
 };
-use objc2_foundation::{NSArray, NSData, NSDictionary, NSError, NSString};
+use objc2_foundation::{NSActivityOptions, NSArray, NSData, NSDictionary, NSError, NSProcessInfo, NSString};
 
 use super::{RadioError, RadioEvent};
+use crate::outbox::{CAPACITY, Outbox};
 use crate::profile::full_uuid;
 use crate::{BleProfile, CharId, Properties};
-
-/// Most notifications that wait for the radio (about ten seconds of Begode telemetry); beyond
-/// that the oldest are dropped, as a module with a full buffer would.
-const BACKLOG: usize = 256;
 
 /// The dispatch queue's label, as Console and crash reports show it.
 const QUEUE_LABEL: &str = "com.tarikbc.euc-studio.ble-radio";
@@ -64,14 +61,14 @@ struct Ivars {
     values: RefCell<Vec<Vec<u8>>>,
     /// Subscriptions: central, characteristic, the central's largest notification.
     subscriptions: RefCell<Vec<(String, CharId, usize)>>,
-    /// Notifications waiting for the radio.
-    backlog: RefCell<VecDeque<(CharId, Vec<u8>)>>,
+    /// Notifications waiting for the radio while its own queue is full.
+    outbox: RefCell<Outbox>,
+    /// The radio's clock, for the outbox.
+    started: Instant,
     /// The wheel is on: serve and advertise whenever Bluetooth is.
     on: Cell<bool>,
     /// Bluetooth is powered on.
     powered: Cell<bool>,
-    /// `updateValue` found the transmit queue full; wait for `peripheralManagerIsReadyToUpdateSubscribers`.
-    busy: Cell<bool>,
 }
 
 define_class!(
@@ -148,13 +145,15 @@ define_class!(
         ) {
             let Some(id) = self.find(characteristic) else { return };
             let central_id = identifier(central);
-            let nobody = {
+            let (nobody_here, nobody_at_all) = {
                 let mut subscriptions = self.ivars().subscriptions.borrow_mut();
                 subscriptions.retain(|(c, char_id, _)| !(*c == central_id && *char_id == id));
-                !subscriptions.iter().any(|(_, char_id, _)| *char_id == id)
+                (!subscriptions.iter().any(|(_, char_id, _)| *char_id == id), subscriptions.is_empty())
             };
-            if nobody {
-                self.ivars().backlog.borrow_mut().retain(|(char_id, _)| *char_id != id);
+            if nobody_at_all {
+                self.ivars().outbox.borrow_mut().clear(None);
+            } else if nobody_here {
+                self.ivars().outbox.borrow_mut().clear(Some(id));
             }
             self.send(RadioEvent::Unsubscribed { central: central_id, characteristic: id });
         }
@@ -207,7 +206,7 @@ define_class!(
 
         #[unsafe(method(peripheralManagerIsReadyToUpdateSubscribers:))]
         fn ready_to_update(&self, manager: &CBPeripheralManager) {
-            self.ivars().busy.set(false);
+            self.ivars().outbox.borrow_mut().ready();
             self.pump(manager);
         }
     }
@@ -230,10 +229,10 @@ impl Delegate {
             characteristics: RefCell::new(Vec::new()),
             values: RefCell::new(vec![Vec::new(); count]),
             subscriptions: RefCell::new(Vec::new()),
-            backlog: RefCell::new(VecDeque::new()),
+            outbox: RefCell::new(Outbox::new(CAPACITY)),
+            started: Instant::now(),
             on: Cell::new(true),
             powered: Cell::new(false),
-            busy: Cell::new(false),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -313,8 +312,7 @@ impl Delegate {
 
     fn forget_centrals(&self) {
         self.ivars().subscriptions.borrow_mut().clear();
-        self.ivars().backlog.borrow_mut().clear();
-        self.ivars().busy.set(false);
+        self.ivars().outbox.borrow_mut().clear(None);
     }
 
     /// Queues one notification for the centrals subscribed to `id`, cut to the smallest limit.
@@ -329,39 +327,39 @@ impl Delegate {
         if !ivars.on.get() || !ivars.powered.get() {
             return;
         }
-        let dropped = {
-            let mut backlog = ivars.backlog.borrow_mut();
-            backlog.extend(crate::split(bytes, max).map(|part| (id, part.to_vec())));
-            let excess = backlog.len().saturating_sub(BACKLOG);
-            backlog.drain(..excess);
-            excess
-        };
-        if dropped > 0 {
-            self.send(RadioEvent::Dropped { count: dropped });
+        {
+            let mut outbox = ivars.outbox.borrow_mut();
+            for part in crate::split(bytes, max) {
+                outbox.push(id, part.to_vec());
+            }
         }
         if let Some(manager) = self.manager() {
             self.pump(&manager);
         }
     }
 
-    /// Sends waiting notifications until the radio's transmit queue is full.
+    /// Sends waiting notifications until the radio's own queue is full; the refused one waits
+    /// for `peripheralManagerIsReadyToUpdateSubscribers`. Reports drops.
     fn pump(&self, manager: &CBPeripheralManager) {
         let ivars = self.ivars();
-        while !ivars.busy.get() {
-            let Some((id, bytes)) = ivars.backlog.borrow_mut().pop_front() else { break };
+        let now = ivars.started.elapsed().as_secs_f64();
+        loop {
+            let Some((id, bytes)) = ivars.outbox.borrow_mut().next(now) else { break };
             let Some(characteristic) = ivars.characteristics.borrow().get(id.0).cloned() else { continue };
             let data = NSData::with_bytes(&bytes);
-            let sent =
-                unsafe { manager.updateValue_forCharacteristic_onSubscribedCentrals(&data, &characteristic, None) };
-            if !sent {
+            if !unsafe { manager.updateValue_forCharacteristic_onSubscribedCentrals(&data, &characteristic, None) } {
                 let queued = {
-                    let mut backlog = ivars.backlog.borrow_mut();
-                    backlog.push_front((id, bytes));
-                    backlog.len()
+                    let mut outbox = ivars.outbox.borrow_mut();
+                    outbox.refused(now, (id, bytes));
+                    outbox.len()
                 };
-                ivars.busy.set(true);
                 self.send(RadioEvent::Busy { queued });
+                break;
             }
+        }
+        let report = ivars.outbox.borrow_mut().report(now);
+        if let Some(report) = report {
+            self.send(RadioEvent::Dropped { count: report.count, queued: report.queued });
         }
     }
 
@@ -390,6 +388,9 @@ pub(super) fn authorization() -> &'static str {
 pub(super) struct Radio {
     queue: DispatchRetained<DispatchQueue>,
     delegate: OnQueue<Retained<Delegate>>,
+    /// Keeps macOS from napping or throttling the process while it is the wheel: App Nap delays
+    /// timers by seconds once the terminal is in the background, and the link then stalls.
+    activity: Retained<ProtocolObject<dyn NSObjectProtocol>>,
 }
 
 impl Radio {
@@ -421,7 +422,11 @@ impl Radio {
             };
             *delegate.ivars().manager.borrow_mut() = Some(manager);
         });
-        Ok((Self { queue, delegate: OnQueue(delegate) }, receiver))
+        let activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+            NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical,
+            &NSString::from_str("euc presents a wheel over Bluetooth in real time"),
+        );
+        Ok((Self { queue, delegate: OnQueue(delegate), activity }, receiver))
     }
 
     fn on_queue(&self, work: impl FnOnce(&Delegate) + 'static) {
@@ -446,6 +451,7 @@ impl Drop for Radio {
     fn drop(&mut self) {
         let delegate = OnQueue(self.delegate.0.clone());
         self.queue.exec_sync(move || delegate.into_inner().shut_down());
+        unsafe { NSProcessInfo::processInfo().endActivity(&self.activity) };
     }
 }
 

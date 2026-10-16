@@ -28,7 +28,11 @@ writes the same JSON to a file and still prints the table.
 - **Firmware variables** by name. The stock build's names come from `profiles/<wheel>/stockmap.toml`;
   our builds' names come from `profiles/<wheel>/probes.toml` (ELF symbol and offset, resolved against the
   `.elf` next to the `.bin`), using the stock map's name for the same quantity. A name only one run has
-  is listed as unpaired.
+  is listed as unpaired. The offsets only fit the `struct app` they were measured on: `probes.toml`
+  carries that layout's id (`layout`), the image carries the same id as the ELF symbol
+  `euc_probe_layout`, and a run whose map and image differ stops with an error instead of reading the
+  wrong bytes (the CLI compiles the profiles in, so rebuild it, or pass `--profiles profiles`, after
+  the struct changes).
 - **The BLE stream**: telemetry frames one by one (the first frame that differs, when it was sent, and
   the field of its first differing byte, as named in [protocol/begode.md](protocol/begode.md)), and the
   text between frames (boot messages, command replies).

@@ -1,0 +1,54 @@
+# A rider rides at 20 km/h on flat ground, then stops pushing and lets the wheel coast to a stop at
+# about 0.4 m/s² (20 km/h to 0 in 14 s), without braking. The motor gives little torque all the way
+# down. A regression guard for riderless detection: a long, gentle coast with a rider on must not
+# trip it (no cutoff, no fall), and the wheel must end standing still.
+#
+# Rider: the default rider, on the maintainer's settings.
+schema = 1
+name = "coasting-stop"
+description = "Ride at 20 km/h, then coast to a stop at about 0.4 m/s² without braking: nothing may trip."
+wheel = "begode-extreme"
+seconds = 38.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [10, 20], [20, 20], [34, 0]]
+settings = "tarik-2026-10-15"
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"
+
+# After a long coast the default rider creeps backwards at about 1.3 km/h (its speed integral still
+# asks for a little braking), so the end check allows 2 km/h.
+[[expect]]
+check = "stopped_at_end"
+max_abs_kmh = 2.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "mean"
+from_s = 20.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "min"
+from_s = 20.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "max"
+from_s = 20.0
+by_s = 34.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "first_below"
+threshold = 1.0
+from_s = 20.0

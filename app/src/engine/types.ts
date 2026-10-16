@@ -8,7 +8,16 @@ import type { BodyInfo, Outputs } from "./telemetry.gen.ts";
 
 /** The lanes and readouts the UI shows. Each engine maps its own signals onto them. */
 export type ChannelId =
-  "speed" | "pwm" | "current" | "voltage" | "pitch" | "temp" | "battery" | "isr";
+  | "speed"
+  | "pwm"
+  | "modulation"
+  | "current"
+  | "voltage"
+  | "pitch"
+  | "temp"
+  | "battery"
+  | "isr"
+  | "suspension";
 
 export interface ChannelInfo {
   label: string;
@@ -22,12 +31,14 @@ export interface ChannelInfo {
 export const CHANNELS: Record<ChannelId, ChannelInfo> = {
   speed: { label: "Speed", unit: "km/h", decimals: 1, min: 0, max: 40 },
   pwm: { label: "PWM", unit: "%", decimals: 0, min: 0, max: 100 },
+  modulation: { label: "Modulation", unit: "%", decimals: 0, min: 0, max: 100 },
   current: { label: "Phase current", unit: "A", decimals: 1, min: -40, max: 40 },
   voltage: { label: "Battery", unit: "V", decimals: 1, min: 100, max: 135 },
   pitch: { label: "Pitch", unit: "°", decimals: 1, min: -10, max: 10 },
   temp: { label: "Motor temp", unit: "°C", decimals: 1, min: 20, max: 90 },
   battery: { label: "Charge", unit: "%", decimals: 0, min: 0, max: 100 },
   isr: { label: "ISR load", unit: "%", decimals: 0, min: 0, max: 100 },
+  suspension: { label: "Suspension", unit: "mm", decimals: 0, min: 0, max: 60 },
 };
 
 export const CHANNEL_IDS = Object.keys(CHANNELS) as ChannelId[];
@@ -67,6 +78,11 @@ export interface Latest {
   t: number;
   speed: number;
   pwm: number;
+  /**
+   * The voltage the inverter really applies, on the PWM scale (100 % = the firmware's full
+   * modulation); a little under PWM at speed (dead time). NaN without a live plant.
+   */
+  modulation: number;
   current: number;
   voltage: number;
   pitch: number;
@@ -75,6 +91,10 @@ export interface Latest {
   battery: number;
   isr: number;
   grade: number;
+  /** Rear suspension compression from full extension (axle travel), mm (NaN when not modelled). */
+  suspension: number;
+  /** The shock's own compression from full extension (through the linkage), mm (NaN when not modelled). */
+  shock: number;
   /** Distance travelled (m) and wheel angle (rad), for the demo's kinematic 3D view. */
   distance: number;
   wheelAngle: number;
@@ -206,6 +226,12 @@ export interface LightsLayout {
 
 type Vec3 = [number, number, number];
 
+/**
+ * A scenario's ground along the path, every 5 cm (physics frame, m): `[x, z, slope z]`, where
+ * `slope z` is the slope alone, without bumps and potholes.
+ */
+export type TerrainProfile = [number, number, number][];
+
 export interface EngineClient {
   readonly kind: "demo" | "live";
   readonly time: RingBuffer;
@@ -223,8 +249,17 @@ export interface EngineClient {
   readonly display: DisplayLayout | null;
   /** The tail light's layout; null when the wheel has none (or for the demo). */
   readonly lights: LightsLayout | null;
-  /** The ground's height along the path, `[x, z]` m (physics frame); null on flat ground. */
-  readonly terrain: [number, number][] | null;
+  /**
+   * The rear shock from the wheel's profile: its eyes (wheel frame: x forward, y left, z up, m) and
+   * axle travel per unit of shock travel. Null on a wheel without suspension (and for the demo).
+   */
+  readonly suspension: {
+    linkage_ratio: number;
+    eye_top_m: [number, number, number];
+    eye_bottom_m: [number, number, number];
+  } | null;
+  /** The ground along the path (physics frame); null on flat ground. */
+  readonly terrain: TerrainProfile | null;
   /** Times the buzzer started sounding in this run. */
   readonly beeps: number;
   /** Buzzer changes as they arrive, at their simulated times (live engine only). */

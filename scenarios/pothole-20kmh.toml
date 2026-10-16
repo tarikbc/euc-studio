@@ -1,17 +1,16 @@
-# PRELIMINARY: the body is rigid and has no suspension yet (the Extreme has a rear shock), so the
-# impact reaches the shell harder than on the real wheel. Do not tune this run to pass.
+# PRELIMINARY: the rear suspension is modelled (measured spring; stroke and linkage ratio are
+# estimates), but the rider has no knees and the tire is a soft contact. Do not tune this run to pass.
 #
 # A pothole at 20 km/h: 2 cm deep, 50 cm long, with steep edges, on the maintainer's settings.
-# The wheel drops in and hits the far edge; the impact takes about a fifth of the wheel's speed
-# in 20 ms, the shell pitches nose down past 45° (so `upright` fails), and the firmware answers
-# with full forward torque. Its own fall detector (40° for 105 ms) does not trip: the wheel
-# recovers and rides on.
+# The wheel drops in and hits the far edge; the impact takes about a tenth of the wheel's speed, the
+# suspension compresses about 35 of its 66 mm, the shell dips about 8° nose down, and the firmware
+# answers with near-full forward current. The shell turns at about 250 °/s, inside the stock gyro's
+# ±500 °/s, so the firmware's attitude follows the truth. Deeper holes (3 and 5 cm) turn it faster
+# than the gyro's range: docs/models/scenarios.md and docs/findings/stock-firmware.md (finding 7).
 #
-# The outcome is decided by the mechanics within 0.1 s, faster than the firmware's balance loop
-# can change much, and it depends on the body model: a rigid rider without knees and a tire
-# without a carcass absorb an edge worse than a person and a real tire (docs/models/scenarios.md
-# has the depths tried). The `record` checks always pass; `upright` and `no_cutoff` are the
-# safety verdict.
+# The outcome is decided by the mechanics within 0.1 s, faster than the firmware's balance loop can
+# change much, and it depends on the body model. The `record` checks always pass; `upright` and
+# `no_cutoff` are the safety verdict.
 schema = 1
 name = "pothole-20kmh"
 description = "Hit a 2 cm deep pothole at 20 km/h: the impact, the firmware's answer, and whether the wheel stays up."
@@ -79,3 +78,9 @@ check = "upright"
 
 [[expect]]
 check = "no_cutoff"
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"     # travel used: 66 mm is the bottom-out
+stat = "max"
+from_s = 15.0

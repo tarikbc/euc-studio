@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 
 use anyhow::{Context as _, bail};
 use euc_ble_radio::{
-    Action, BleProfile, CharId, Control, Entry, Link, Log, Opaque, Protocol, Radio, Responder, UartBridge,
+    Action, BleProfile, CharId, Control, Entry, Link, Log, Opaque, Protocol, Radio, Responder, STALE_S, UartBridge,
 };
 use euc_profile::ProfileError;
 
@@ -124,10 +124,20 @@ impl WheelLink {
             module.uart(t, byte);
         }
         let mut sent = Vec::new();
+        let mut stale = 0;
         for notification in module.poll(now) {
-            if self.link.notify(notification.characteristic, &notification.bytes) {
+            // After a pause the simulator catches up at once; a real module would never send
+            // that much old telemetry in one burst.
+            if now - notification.at > STALE_S {
+                stale += 1;
+            } else if self.link.notify(notification.characteristic, &notification.bytes) {
                 sent.push((notification.at, notification.bytes));
             }
+        }
+        if stale > 0 {
+            let text =
+                format!("the simulator fell behind (was the program paused?): {stale} stale notifications skipped");
+            self.link.log().line(&Entry::Error { text: &text });
         }
         sent
     }

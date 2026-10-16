@@ -1,7 +1,8 @@
 # Body physics
 
 The body model is everything mechanical: the tire on the ground, the wheel spinning in the shell,
-the shell with its pedals and IMU, and the rider standing on the pedals. It runs in MuJoCo 3.9
+the rear suspension between them, the shell with its pedals and IMU, and the rider standing on the
+pedals. It runs in MuJoCo 3.9
 (through `mujoco-rs` 5.0) in `crates/euc-physics`, and couples to the electrical plant
 ([electrical.md](electrical.md)) and the emulated controller in `crates/euc-sim`. The wheel's values
 live under `[body]` in `profiles/<wheel>/plant.toml`; the rider and the aids come from the scenario,
@@ -59,10 +60,15 @@ matter while the roll spring keeps the wheel upright.
 
 ```
 world ── floor (plane, or the scenario's terrain)
-  └─ shell (free joint)     scanned solids (packs, seat, handle, roller, shock, pedals), IMU site; origin at the axle
-       ├─ wheel (hinge "axle", y)   tire: a torus, as a ring of 48 capsules
-       └─ rider (hinge "lean", y)   rigid body hinged at the ankles, ankle motor "ankle"
+  └─ shell (free joint)     scanned solids (packs, seat, handle, roller, shock, pedals), IMU site;
+       │                    origin at the axle at full extension
+       ├─ carriage (slide "suspension")   stator, axle clamps, slider blocks; spring, damper, end stops
+       │    └─ wheel (hinge "axle", y)    tire: a torus, as a ring of 48 capsules
+       └─ feet (hinge "lean", y)    hinged at the ankles, ankle motor "ankle"
+  └─ rider (free joint)     the rider's body, welded to the feet ("on_pedals") until it steps off
 ```
+
+Without `[body.suspension]` the carriage is left out and the wheel hinges straight in the shell.
 
 `Physics::mjcf()` returns the generated MJCF for inspection.
 
@@ -76,8 +82,27 @@ world ── floor (plane, or the scenario's terrain)
   Rolling resistance is MuJoCo's rolling friction, a length: `crr · r`, so the resisting torque is
   `crr · N · r`, the classic `crr · N` force at the contact. The contact time constant (`solref`) is
   the tire's softness.
-- **Wheel.** The spinning part of the hub motor (rotor, magnets, rim, tire). The stator belongs to the
-  shell. The spin inertia is set directly; the other two axes are half of it (a ring).
+- **Wheel.** The spinning part of the hub motor (rotor, magnets, rim, tire). The stator rides on the
+  suspension carriage (in the shell without a suspension). The spin inertia is set directly; the other
+  two axes are half of it (a ring).
+- **Suspension.** The Extreme's motor axle slides up into the frame on two vertical rods, held down
+  by a coil-over shock at the rear through a rocker linkage (per side: carriage, link, triangular
+  rocker, shock). In the model the carriage (stator, axle clamps, slider blocks: `unsprung_mass_kg`)
+  slides on a joint along `axis_forward_deg` from the shell's vertical, and the wheel spins on the
+  carriage, so the motor's reaction torque still reaches the shell. The joint counts compression
+  from full extension (the scanned state, where the shell's heights are measured). The linkage's
+  leverage `r(x)` (axle travel per shock travel) may change with the axle travel `x`: `ratio_curve`
+  gives it as points joined by straight lines, or `linkage_ratio` holds it constant. The shock
+  compresses `s(x) = ∫ dx / r` (exact on each straight piece), its whole stroke sets the axle
+  travel, and each step `Physics::step` pushes the carriage down with
+  `(k·(s(x) + preload) + c·ẋ / r(x)) / r(x)` (the coil never pulls). With a constant ratio that is
+  a wheel rate `k / r²` and damping `c / r²`. MuJoCo's joint limits are the end stops (top-out and
+  bottom-out, time constant 4 ms). The model starts at the static sag under the shell and the
+  rider (where that force carries their weight); on the stand the spring presses the tire into the
+  ground, so the sag shows once the stand lets go. Pedals, IMU and rider are on the frame (sprung).
+  The tire and the shell never touch each other (an explicit contact exclusion: the tire runs inside
+  the frame). Telemetry channels: `suspension_mm` (axle travel) and `shock_mm` (shock travel, for
+  drawing the shock).
 - **Shell.** Mass, centre of mass and inertia from the parameters. The shapes are the scan's collision
   solids (`geometry.toml` `[collision]`: battery packs with their slider channels, seat, handle and
   headlight, rear roller, shock, pedal brackets, and estimated pedal decks), for drawing and for the
@@ -101,9 +126,30 @@ hinged at the ankles. The ankles are a motor driven by the rider controller:
 3. **Tiltback eases the rider off.** When the firmware tips the pedals back (nose up) by more than
    2° while the rider wants to go forward, and the rider is not already slowing down, the rider
    aims 1.5 km/h below the present speed for every degree beyond 2°, braking at most 1 m/s² (it
-   stops pushing rather than brakes hard), down to a stop and never backwards, so a speed, battery or PWM tiltback (or a limp mode) slows the ride the way it slows
-   a real rider. A stopped rider waits for the pedals to come back within 2° before setting off
-   again. Set `[rider.control] tiltback_ease_kmh_per_deg = 0` to ride through tiltback.
+   stops pushing rather than brakes hard), down to a stop and never backwards, so a speed, battery
+   or PWM tiltback (or a limp mode) slows the ride the way it slows a real rider. A stopped rider
+   waits for the tiltback to fall back within 2° before setting off again. The tiltback the rider
+   feels is the firmware's own (the sum of its speed, battery and PWM offsets) when the simulator can
+   read it, as for the stock map and our builds; otherwise it is the pedals' pitch above the riding
+   pitch, the angle the rider is used to (a 3 s average that does not rise while a tiltback is felt).
+   Either way a tiltback counts in full even when the rider leans hard and the shell rides nose down.
+   A tiltback read from the firmware is felt at once, as the firmware commands it, a little before
+   the pedals have moved; a real rider feels the pedals.
+   Set `[rider.control] tiltback_ease_kmh_per_deg = 0` or `tiltback_feel_deg = 90` to ride through
+   tiltback.
+4. **Steering.** The rider keeps the line: feet and legs twist the wheel back with
+   `τ = −kp_steer·heading − kd_steer·yaw_rate` (2000 N·m/rad and 200 N·m·s/rad, at most 60 N·m; all
+   DEFAULT). A rigid rider cannot twist, so the torque acts on the shell about the vertical, like the
+   roll spring; it stops when the rider steps off. Without it, a wheel that slows on a steep grade
+   turns across the slope and falls. The line is world +x, the direction of every scenario so far; a
+   scenario that turns will need a path heading.
+5. **Letting go.** A rider leaves a wheel that goes down: once the firmware has cut the drive (the
+   session watches the cutoff flags) and the shell's pitch or roll passes 20°, or as soon as either
+   passes 45° (a fall, cut or not), the rider lets go of the pedals 0.1 s later. The feet weld
+   releases as in a step-off, but without the stepping foot's push, so the rider keeps their own
+   momentum; ankle torque, steering and the roll aid stop. The timeline records "rider off" with
+   the reason. `[rider.let_go]` sets `after_cut_deg`, `fall_deg` and `reaction_s` (DEFAULT 20°, 45°,
+   0.1 s), and `enabled = false` keeps the rider on the pedals whatever happens.
 
 Leaning works on a real wheel the same way: the firmware keeps the pedals near its set angle, so a
 rider who shifts the centre of mass forward makes it accelerate to stay under them. In a steady
@@ -111,7 +157,7 @@ acceleration `a = g·tan(lean)` the ankles need no torque at all, which is why t
 lean and does not push.
 
 What the rigid rider cannot do, and the M4 human rider will: bend knees and hips, absorb bumps,
-step on and off, steer, and balance sideways.
+shift sideways, and balance sideways.
 
 ## Aids (M2)
 
@@ -137,11 +183,23 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 | `tire.contact_time_s` | 0.02 s | DEFAULT: about 200 kN/m |
 | `wheel.mass_kg` | 16 kg | DEFAULT: rotor, rim and tire |
 | `wheel.spin_inertia_kgm2` | 0.487 kg·m² | DEFAULT: 0.6·m·r² |
-| `shell.mass_kg` | 26 kg | DEFAULT: 42 kg with the wheel |
-| `shell.com_above_axle_m` | 0.10 m | DEFAULT |
-| `shell.inertia_kgm2` | 0.85, 0.92, 0.46 kg·m² | DEFAULT: a 0.35 × 0.30 × 0.55 m box |
-| `shell.pedal_below_axle_m` | −0.010 m | ESTIMATE from the scan: the deck tops sit 10 mm above the axle (±15 mm) |
-| `shell.imu_above_axle_m` | 0.15 m | DEFAULT: research sim.py |
+| `shell.mass_kg` | 20 kg | DEFAULT: 42 kg with the wheel and the carriage |
+| `shell.com_above_axle_m` | 0.13 m | DEFAULT: 0.10 m for a 26 kg shell with the stator, the stator taken out |
+| `shell.inertia_kgm2` | 0.76, 0.82, 0.45 kg·m² | DEFAULT: a 0.35 × 0.30 × 0.55 m box (0.85, 0.92, 0.46 with the stator), less the stator's own and offset terms |
+| `shell.pedal_below_axle_m` | −0.012 m | MEASURED (approx.): deck tops 12 mm above the axle at full extension: the scanned pins at +7.5 mm plus half a 9 mm deck; the owner measured about 240 mm from the floor to the deck top (unloaded), 10.4 mm above the 229.6 mm free radius, within the ±5 mm of the deck estimate |
+| `shell.imu_above_axle_m` | 0.15 m | DEFAULT: research sim.py; on the frame (sprung) |
+| `suspension.unsprung_mass_kg` | 6 kg | ESTIMATE: stator, axle clamps, slider blocks (the wheel's 16 kg moves too) |
+| `suspension.axis_forward_deg` | −0.13° | MEASURED: the two 30 mm slider rods are vertical within 0.15°, top to the rear (scan) |
+| `suspension.spring_rate_n_per_mm` | 131.3 N/mm | MEASURED: "DNM - 750 LBS/IN" printed on the owner's spring |
+| `suspension.preload_mm` | 2 mm | ESTIMATE |
+| `suspension.stroke_mm` | 55 mm | ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm of stroke |
+| `suspension.eye_to_eye_mm` | 200 mm | MEASURED (owner; drawing only); the scan's older shock was 204 mm |
+| `suspension.linkage_ratio` | 1.2 | ESTIMATE: 66 mm of axle travel (the rods leave 108 mm free above the carriage); used while `ratio_curve` is empty |
+| `suspension.ratio_curve` | none yet | the rocker's leverage along the travel, from the scan and the owner's photos (model) |
+| `suspension.damping_n_s_per_m` | 2200 N·s/m | ESTIMATE: damping ratio about 0.25 for the sprung 100 kg |
+
+With these values an 80 kg rider sags the suspension 8 mm (13 % of the travel), and the sprung mass
+bounces at about 4.8 Hz with a damping ratio of about 0.25.
 
 Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the defaults):
 
@@ -159,6 +217,8 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.accel_max`, `brake_max` | 1.5, 2.5 m/s² | |
 | `control.lean_max_deg`, `lean_rate_deg_s` | 15°, 12°/s | |
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
+| `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
+| `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
 | `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | |
 
 ## Scenarios
@@ -192,3 +252,6 @@ bodies with their shapes, channel schema), the telemetry batches of `euc-telemet
 - IMU position and mounting signs: open the shell; check the signs with the wheel tilted.
 - Shell inertia: swing the wheel as a pendulum from the handle.
 - Rolling resistance: coast-down from 10 km/h with the motor off (free-wheel), log the speed.
+- Suspension: the shock's make, spring rate (stamped on the coil), stroke and preload; the axle
+  travel from top-out to bottom-out (zip tie on a rail); the sag with the rider on (pedal height
+  above the floor with and without the rider).

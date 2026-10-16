@@ -1,0 +1,81 @@
+# Overlean with the PWM tiltback off, on a 30 % battery (115 V at rest): the climb of
+# overlean-top-speed-30pct.toml (5 km/h per second towards 100 km/h, on the maintainer's settings),
+# but with the default rider, who eases off for tiltback, and with the PWM tiltback turned off by the
+# hidden "x" command at 4 s, at a standstill (any phone in range can send it; the setting is also off
+# until someone sends "e"). On this battery the motor runs out of voltage headroom at about 70 km/h,
+# right where the speed tiltback (69 km/h) begins, so the stock firmware gives almost no warning on the
+# pedals: the PWM alarm beeps, then the q-current loop saturates and the wheel nose-dives (quirk
+# PWM_TILTBACK_VQ_ONLY).
+#
+# The checks describe the stock firmware: it cuts and falls. They pass on stock and compat and fail on
+# the clean profile on purpose: clean tilts the pedals back whenever the voltage vector |Vd, Vq|
+# passes 75 %, with or without "e". Its tiltback starts at about 19.9 s, long before the voltage runs
+# out; this rider eases off for it, holds about 57 km/h and stays up, without saturating the PWM.
+# A rider who ignores tiltback is saved by it only in a narrow lean range (the lean sweep in
+# docs/models/scenarios.md). Near the limit the moment of the stock fall moves by about a second with a
+# few cycles of timing (29.5-30.8 s at three emulator quantum sizes), so the checks allow a wide window. The motor values are defaults until
+# measured (docs/models/electrical.md), and at twice the estimated inductance the 75 % margin is
+# smaller (docs/findings/stock-firmware.md).
+schema = 1
+name = "overlean-no-pwm-tiltback"
+description = "PWM tiltback off ('x') on a 30 % battery: the stock firmware gives no warning on the pedals before the cutout."
+wheel = "begode-extreme"
+seconds = 36.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [26, 100]]
+settings = "tarik-2026-10-15"
+# Rider: the default rider, who eases off for tiltback.
+
+[[timeline]]
+at_s = 0.0
+fault = "battery_soc"
+soc = 0.30
+
+[[inject]]
+at_s = 4.0
+bytes = "x"
+
+[[expect]]
+check = "record"
+var = "pwm_alarm"
+stat = "first_above"
+threshold = 1.0
+
+[[expect]]
+check = "record"
+var = "tiltback_pwm_deg"
+stat = "first_above"
+threshold = 0.5
+
+[[expect]]
+check = "record"
+var = "tiltback_pwm_deg"
+stat = "max"
+
+[[expect]]
+check = "record"
+var = "vq_active"
+scale = 0.0031746     # 1/315: PWM saturated, the q-current loop has no headroom left
+stat = "first_above"
+threshold = 100.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "max"
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_cutoff"
+
+[[expect]]
+check = "cutoff"
+from_s = 6.0
+within_s = 30.0
+flag = "balance_disabled"
+
+[[expect]]
+check = "pitch_reaches"
+deg = -30.0
+from_s = 6.0

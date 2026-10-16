@@ -24,7 +24,8 @@ pub enum Channel {
     SpeedKmh = 0,
     /// Wheel angular velocity relative to the shell.
     WheelRadS = 1,
-    /// Inverter duty cycle the firmware commands, 0..100 %.
+    /// The firmware's own PWM figure, as its app frame reports it (Begode frame 07): the
+    /// commanded q voltage in whole percent of full modulation, magnitude, 0..100 %.
     PwmPct = 2,
     /// Phase A current.
     PhaseAA = 3,
@@ -58,6 +59,13 @@ pub enum Channel {
     RiderLeanDeg = 17,
     /// Speed the rider (or scenario) is aiming for.
     TargetSpeedKmh = 18,
+    /// Suspension compression from full extension, axle travel (0 on a wheel without one).
+    SuspensionMm = 19,
+    /// The shock's compression from full extension (0 on a wheel without a suspension).
+    ShockMm = 20,
+    /// The voltage the inverter really applies, |Vd, Vq|, on the same scale as [`Channel::PwmPct`]
+    /// (100 % = the firmware's full modulation).
+    ModulationPct = 21,
 }
 
 /// What [`CHANNELS`] knows about a channel.
@@ -88,7 +96,7 @@ const fn spec(
 }
 
 /// Every channel, in id order.
-pub const CHANNELS: [ChannelSpec; 19] = [
+pub const CHANNELS: [ChannelSpec; 22] = [
     spec(Channel::SpeedKmh, "speed_kmh", "Speed", "km/h", RateClass::Fast),
     spec(Channel::WheelRadS, "wheel_rad_s", "Wheel speed", "rad/s", RateClass::Fast),
     spec(Channel::PwmPct, "pwm_pct", "PWM", "%", RateClass::Fast),
@@ -108,6 +116,9 @@ pub const CHANNELS: [ChannelSpec; 19] = [
     spec(Channel::IsrLoadPct, "isr_load_pct", "ISR load", "%", RateClass::Slow),
     spec(Channel::RiderLeanDeg, "rider_lean_deg", "Rider lean", "°", RateClass::Fast),
     spec(Channel::TargetSpeedKmh, "target_speed_kmh", "Target speed", "km/h", RateClass::Fast),
+    spec(Channel::SuspensionMm, "suspension_mm", "Suspension", "mm", RateClass::Fast),
+    spec(Channel::ShockMm, "shock_mm", "Shock", "mm", RateClass::Fast),
+    spec(Channel::ModulationPct, "modulation_pct", "Modulation", "%", RateClass::Fast),
 ];
 
 /// Number of channels.

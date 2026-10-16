@@ -9,8 +9,8 @@ step; `profiles/begode-extreme/geometry.toml` holds the measurements.
 
 Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined from his measurements:
 
-- **Rear shock.** DNM-type coil-over without reservoir, per owner photos 2026-10-16; spring rate
-  unknown. The eye positions come from the scan; its other sizes are ESTIMATES. No brand marks.
+- **Rear shock.** DNM coil-over without reservoir, 200 mm eye to eye and 750 lb/in (MEASURED by the
+  owner), 56 mm x 115 mm spring, on the scan's two cross shafts. Stroke ESTIMATE. No brand marks.
 - **Rear handle.** Orange CNC U-handle with a black grip bar. The lower part of each arm is in the
   scan; the part above the roller and the grip are ESTIMATES from the photos.
 - **Pedals.** The decks were not on the wheel for the scan; their shape and size are an ESTIMATE.
@@ -47,12 +47,16 @@ begode-extreme
    ├─ headlight
    ├─ headlight_lens     the four lenses to light
    ├─ display_window     smoked glass; TEXCOORD_0 spans the T16-007 LED panel
-   ├─ shock              coil-over (red knob: material "shock_knob"), link plates, shafts
+   ├─ shock              coil-over only (body, collar, spring, shaft, red knob, eyes); see below
+   ├─ shock_links        link plates and cross shafts (static until the linkage is resolved)
    ├─ pedal_mount_left, pedal_mount_right
    ├─ axle
    └─ pedal_left, pedal_right   origin on the hinge pin: fold about x
 ```
 
+- **Shock.** `shock` has its origin on the top eye; its local +Y axis points from the bottom eye
+  to the top eye, and the bottom eye is at local (0, -0.2035, 0). The linkage (rocker + link) is
+  not resolved yet, so `shock` and `shock_links` are static.
 - **Pedals.** `pedal_left` folds up with rotation.x = +90 degrees, `pedal_right` with -90 degrees.
   Their shape and size are an estimate (see above).
 - **Display.** On `display_window`, u and v run from 0 to 1 across the 82.6 x 55.2 mm LED panel of

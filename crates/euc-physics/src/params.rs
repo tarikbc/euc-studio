@@ -15,8 +15,13 @@ pub struct WheelBody {
     pub tire: Tire,
     /// What spins: hub-motor rotor, rim and tire.
     pub wheel: Wheel,
-    /// Everything that does not spin: shell, battery, controller, stator, pedals.
+    /// Everything that does not spin: shell, battery, controller, pedals, and the stator unless a
+    /// suspension carries it.
     pub shell: Shell,
+    /// The suspension between the axle and the shell, if the wheel has one; without it the axle
+    /// is fixed in the shell.
+    #[serde(default)]
+    pub suspension: Option<Suspension>,
     /// Measured collision shapes (the wheel's `geometry.toml` `[collision]`), if any; without them
     /// the tire is an ellipsoid and the shell a few generic boxes.
     #[serde(skip)]
@@ -125,6 +130,168 @@ pub struct Shell {
     pub imu_above_axle_m: f64,
 }
 
+/// `[body.suspension]`: the axle rides on a carriage that slides in the shell, held down by a
+/// coil-over shock through a linkage. The shell's heights are from the axle at full extension
+/// (topped out); the carriage moves up into the shell as the suspension compresses. The linkage's
+/// leverage (axle travel per shock travel) may change along the travel (`ratio_curve`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Suspension {
+    /// Mass that moves with the axle besides the spinning wheel (stator, axle clamps, slider
+    /// blocks), kilograms.
+    pub unsprung_mass_kg: f64,
+    /// Direction the axle moves as the suspension compresses, degrees from the shell's vertical,
+    /// positive when the axle moves forward as it rises.
+    pub axis_forward_deg: f64,
+    /// Spring rate of the shock's coil, N/mm.
+    pub spring_rate_n_per_mm: f64,
+    /// Spring preload, mm of coil compression at full extension.
+    pub preload_mm: f64,
+    /// Shock stroke, mm.
+    pub stroke_mm: f64,
+    /// Shock length between the eye centres at full extension, mm (for drawing).
+    pub eye_to_eye_mm: f64,
+    /// Axle travel per unit of shock travel (the linkage's leverage), along the whole travel when
+    /// `ratio_curve` is empty.
+    pub linkage_ratio: f64,
+    /// The leverage along the travel: points `[axle travel from full extension in mm, axle mm per
+    /// shock mm]` in rising travel, joined by straight lines and held at the end values beyond
+    /// them. Empty: `linkage_ratio` throughout.
+    #[serde(default)]
+    pub ratio_curve: Vec<[f64; 2]>,
+    /// Shock damping, N·s/m at the shock, compression and rebound alike.
+    pub damping_n_s_per_m: f64,
+}
+
+impl Suspension {
+    /// The leverage at axle travel `x` (metres from full extension): axle travel per shock travel.
+    pub fn ratio(&self, x: f64) -> f64 {
+        let curve = &self.ratio_curve;
+        let mm = 1000.0 * x;
+        if curve.is_empty() {
+            return self.linkage_ratio;
+        }
+        match curve.iter().position(|[travel, _]| *travel > mm) {
+            Some(0) => curve[0][1],
+            None => curve[curve.len() - 1][1],
+            Some(i) => {
+                let ([x0, r0], [x1, r1]) = (curve[i - 1], curve[i]);
+                r0 + (r1 - r0) * (mm - x0) / (x1 - x0)
+            }
+        }
+    }
+
+    /// Shock travel from full extension, metres, at axle travel `x`: the integral of 1 / ratio
+    /// along the axle travel (beyond full extension, at the first ratio).
+    pub fn shock_m(&self, x: f64) -> f64 {
+        if x <= 0.0 {
+            return x / self.ratio(0.0);
+        }
+        // The ratio is straight between the curve's points, so each piece integrates exactly:
+        // the integral of dx / r over a length l where r runs from r0 to r1 is l·ln(r1/r0)/(r1 − r0).
+        let piece = |from: f64, to: f64| {
+            let (r0, r1) = (self.ratio(from), self.ratio(to));
+            if (r1 - r0).abs() < 1e-12 { (to - from) / r0 } else { (to - from) * (r1 / r0).ln() / (r1 - r0) }
+        };
+        let (mut shock, mut at) = (0.0, 0.0);
+        for [travel_mm, _] in &self.ratio_curve {
+            let knot = travel_mm / 1000.0;
+            if knot <= at {
+                continue;
+            }
+            if knot >= x {
+                break;
+            }
+            shock += piece(at, knot);
+            at = knot;
+        }
+        shock + piece(at, x)
+    }
+
+    /// Axle travel from full extension to full compression (the shock's whole stroke), metres.
+    pub fn travel_m(&self) -> f64 {
+        let stroke = self.stroke_mm / 1000.0;
+        let most = self.ratio_curve.iter().map(|[_, r]| *r).fold(self.ratio(0.0), f64::max);
+        bisect(0.0, stroke * most, |x| self.shock_m(x) - stroke)
+    }
+
+    /// The force the shock pushes the axle down with (towards full extension), newtons, at axle
+    /// travel `x` (metres from full extension) and compression rate `rate` (m/s): the coil (never
+    /// pulling) and the damper, each through the leverage at `x`.
+    pub fn axle_force_n(&self, x: f64, rate: f64) -> f64 {
+        let ratio = self.ratio(x);
+        let coil = 1000.0 * self.spring_rate_n_per_mm * (self.shock_m(x) + self.preload_mm / 1000.0);
+        (coil.max(0.0) + self.damping_n_s_per_m * rate / ratio) / ratio
+    }
+
+    /// Unit vector of the compression direction in the shell frame (x forward, z up).
+    pub fn axis(&self) -> [f64; 3] {
+        let a = self.axis_forward_deg.to_radians();
+        [a.sin(), 0.0, a.cos()]
+    }
+
+    /// Compression at rest under `sprung_kg` (shell and rider) on level ground, metres from full
+    /// extension, within the travel.
+    pub fn sag_m(&self, sprung_kg: f64, gravity: f64) -> f64 {
+        let load = sprung_kg * gravity * self.axis_forward_deg.to_radians().cos();
+        let travel = self.travel_m();
+        if self.axle_force_n(0.0, 0.0) >= load {
+            0.0
+        } else if self.axle_force_n(travel, 0.0) <= load {
+            travel
+        } else {
+            bisect(0.0, travel, |x| self.axle_force_n(x, 0.0) - load)
+        }
+    }
+
+    fn validate(&self) -> Result<(), ParamError> {
+        let positive = [
+            ("spring_rate_n_per_mm", self.spring_rate_n_per_mm),
+            ("stroke_mm", self.stroke_mm),
+            ("eye_to_eye_mm", self.eye_to_eye_mm),
+            ("linkage_ratio", self.linkage_ratio),
+        ];
+        let not_negative = [
+            ("unsprung_mass_kg", self.unsprung_mass_kg),
+            ("preload_mm", self.preload_mm),
+            ("damping_n_s_per_m", self.damping_n_s_per_m),
+        ];
+        if let Some((name, _)) = positive.iter().find(|(_, v)| !(*v > 0.0 && v.is_finite())) {
+            return Err(ParamError(format!("body.suspension.{name} must be positive")));
+        }
+        if let Some((name, _)) = not_negative.iter().find(|(_, v)| !(*v >= 0.0 && v.is_finite())) {
+            return Err(ParamError(format!("body.suspension.{name} must not be negative")));
+        }
+        if self.stroke_mm >= self.eye_to_eye_mm {
+            return Err(ParamError("body.suspension.stroke_mm must be shorter than eye_to_eye_mm".into()));
+        }
+        if !self.axis_forward_deg.is_finite() || self.axis_forward_deg.abs() >= 45.0 {
+            return Err(ParamError("body.suspension.axis_forward_deg must be within ±45°".into()));
+        }
+        let points_ok = self.ratio_curve.iter().all(|[x, r]| *x >= 0.0 && x.is_finite() && *r > 0.0 && r.is_finite());
+        let rising = self.ratio_curve.windows(2).all(|w| w[1][0] > w[0][0]);
+        if !(points_ok && rising) {
+            return Err(ParamError(
+                "body.suspension.ratio_curve needs [travel mm >= 0, ratio > 0] points in rising travel".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The root of `f` between `low` and `high`, where `f` rises through zero, to well under a micron.
+fn bisect(mut low: f64, mut high: f64, f: impl Fn(f64) -> f64) -> f64 {
+    for _ in 0..64 {
+        let mid = f64::midpoint(low, high);
+        if f(mid) < 0.0 {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    f64::midpoint(low, high)
+}
+
 /// The rider: a rigid body standing on the pedals, hinged at the ankles.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -143,6 +310,30 @@ pub struct Rider {
     pub cda_m2: f64,
     /// How the rider controls the lean.
     pub control: RiderControl,
+    /// When the rider lets go of the pedals of a wheel that goes down.
+    pub let_go: LetGo,
+}
+
+/// When the rider lets go of the pedals on their own (`[rider.let_go]`): a real rider leaves a
+/// wheel that goes down instead of riding it into the ground.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LetGo {
+    /// The rider lets go at all (false: the rider stays on the pedals whatever happens).
+    pub enabled: bool,
+    /// Shell pitch or roll beyond which the rider lets go once the firmware has cut the drive,
+    /// degrees.
+    pub after_cut_deg: f64,
+    /// Shell pitch or roll beyond which the rider lets go in any case (a fall), degrees.
+    pub fall_deg: f64,
+    /// Time from the trigger to letting go, seconds: the rider's reaction.
+    pub reaction_s: f64,
+}
+
+impl Default for LetGo {
+    fn default() -> Self {
+        Self { enabled: true, after_cut_deg: 20.0, fall_deg: 45.0, reaction_s: 0.1 }
+    }
 }
 
 impl Default for Rider {
@@ -155,6 +346,7 @@ impl Default for Rider {
             height_m: 1.78,
             cda_m2: 0.6,
             control: RiderControl::default(),
+            let_go: LetGo::default(),
         }
     }
 }
@@ -181,8 +373,9 @@ pub struct RiderControl {
     pub lean_max_deg: f64,
     /// Fastest change of the lean, degrees per second.
     pub lean_rate_deg_s: f64,
-    /// Tiltback the rider tolerates before easing off: pedals tipped back (nose up) by more than
-    /// this, degrees, while riding forward.
+    /// Tiltback the rider tolerates before easing off, degrees, while riding forward: the
+    /// firmware's own tiltback when the simulator can read it, else the pedals' pitch above the
+    /// riding pitch (the angle the rider is used to). 90: the rider ignores tiltback.
     pub tiltback_feel_deg: f64,
     /// How much speed the rider gives up per degree of tiltback beyond `tiltback_feel_deg`, km/h
     /// (0: the rider ignores tiltback).
@@ -190,6 +383,12 @@ pub struct RiderControl {
     /// Strongest braking while easing off for tiltback, m/s²: the rider stops pushing and lets
     /// the wheel slow, without braking hard.
     pub tiltback_ease_brake: f64,
+    /// Steering: twist about the vertical per radian of heading away from the line, N·m.
+    pub steer_kp: f64,
+    /// Steering damping per rad/s of turn, N·m·s.
+    pub steer_kd: f64,
+    /// Strongest twist feet and legs give the wheel, N·m.
+    pub steer_max_nm: f64,
 }
 
 impl Default for RiderControl {
@@ -207,6 +406,9 @@ impl Default for RiderControl {
             tiltback_feel_deg: 2.0,
             tiltback_ease_kmh_per_deg: 1.5,
             tiltback_ease_brake: 1.0,
+            steer_kp: 2000.0,
+            steer_kd: 200.0,
+            steer_max_nm: 60.0,
         }
     }
 }
@@ -273,6 +475,8 @@ impl Setup {
             ("rider.com_above_pedals_m", r.com_above_pedals_m),
             ("rider.gyration_m", r.gyration_m),
             ("rider.height_m", r.height_m),
+            ("rider.let_go.after_cut_deg", r.let_go.after_cut_deg),
+            ("rider.let_go.fall_deg", r.let_go.fall_deg),
             ("gravity", self.gravity),
         ];
         if let Some((name, _)) = positive.iter().find(|(_, v)| !(*v > 0.0 && v.is_finite())) {
@@ -281,6 +485,7 @@ impl Setup {
         let not_negative = [
             ("body.tire.crr", w.tire.crr),
             ("rider.cda_m2", r.cda_m2),
+            ("rider.let_go.reaction_s", r.let_go.reaction_s),
             ("assist.roll_stiffness", self.assist.roll_stiffness),
             ("assist.roll_damping", self.assist.roll_damping),
             ("air_density", self.air_density),
@@ -303,6 +508,9 @@ impl Setup {
         if r.ankle_above_pedals_m >= r.com_above_pedals_m {
             return Err(ParamError("rider.ankle_above_pedals_m must be below the centre of mass".into()));
         }
+        if let Some(s) = &w.suspension {
+            s.validate()?;
+        }
         self.terrain.validate().map_err(ParamError)
     }
 }
@@ -311,3 +519,54 @@ impl Setup {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{0}")]
 pub struct ParamError(pub String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shock(ratio_curve: Vec<[f64; 2]>) -> Suspension {
+        Suspension {
+            unsprung_mass_kg: 6.0,
+            axis_forward_deg: 0.0,
+            spring_rate_n_per_mm: 131.3,
+            preload_mm: 2.0,
+            stroke_mm: 55.0,
+            eye_to_eye_mm: 200.0,
+            linkage_ratio: 1.2,
+            ratio_curve,
+            damping_n_s_per_m: 2200.0,
+        }
+    }
+
+    #[test]
+    fn a_constant_leverage_scales_the_shock() {
+        let s = shock(Vec::new());
+        assert!((s.shock_m(0.012) - 0.010).abs() < 1e-12);
+        assert!((s.travel_m() - 0.066).abs() < 1e-9);
+        // The coil's force through the leverage: k (x / r + preload) / r.
+        let expected = 131_300.0 * (0.012 / 1.2 + 0.002) / 1.2;
+        assert!((s.axle_force_n(0.012, 0.0) - expected).abs() < 1e-6);
+        let sag = s.sag_m(100.0, 9.81);
+        assert!((s.axle_force_n(sag, 0.0) - 981.0).abs() < 1e-6, "balances the load at {sag} m");
+        // A flat curve is the same as no curve.
+        let flat = shock(vec![[0.0, 1.2], [60.0, 1.2]]);
+        assert!((flat.shock_m(0.05) - s.shock_m(0.05)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_rising_leverage_integrates_exactly() {
+        let s = shock(vec![[0.0, 1.4], [30.0, 1.6], [60.0, 2.0]]);
+        assert!((s.ratio(0.015) - 1.5).abs() < 1e-12 && (s.ratio(0.1) - 2.0).abs() < 1e-12);
+        // Against a fine midpoint sum.
+        let n = 100_000;
+        let x = 0.05;
+        let numeric: f64 = (0..n).map(|i| x / f64::from(n) / s.ratio(x * (f64::from(i) + 0.5) / f64::from(n))).sum();
+        assert!((s.shock_m(x) - numeric).abs() < 1e-9, "{} vs {numeric}", s.shock_m(x));
+        assert!((s.shock_m(s.travel_m()) - 0.055).abs() < 1e-9);
+        // More leverage further in: less force per mm of axle travel.
+        let rate = |x: f64| (s.axle_force_n(x + 1e-4, 0.0) - s.axle_force_n(x, 0.0)) / 1e-4;
+        assert!(rate(0.05) < rate(0.005));
+        assert!(shock(vec![[10.0, 1.4], [5.0, 1.6]]).validate().is_err(), "travel must rise");
+        assert!(shock(vec![[0.0, 0.0]]).validate().is_err(), "ratio must be positive");
+    }
+}
