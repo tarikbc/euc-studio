@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "stm32f1/regs.h"
 #include "stm32f1/system.h"
 
 /* Symbols defined by the board linker script (boards/<board>/link_app.ld). */
@@ -195,12 +196,14 @@ void Reset_Handler(void)
 }
 
 /*
- * Any exception or interrupt without its own handler. It parks the core so a debugger can see where it came
- * from (IPSR holds the exception number). The safe-state fault handler for the motor arrives with the F5
- * port.
+ * Any exception or interrupt without its own handler, faults included. It turns the motor bridge off first
+ * (TIM8 main output enable), in both profiles: the stock handler leaves the last PWM running. Then it parks
+ * the core so a debugger can see where it came from (IPSR holds the exception number); the clean profile's
+ * watchdog resets it.
  */
 static void Default_Handler(void)
 {
+    TIM8->BDTR &= ~(TIM_BDTR_MOE | TIM_BDTR_AOE);
     for (;;) {
     }
 }

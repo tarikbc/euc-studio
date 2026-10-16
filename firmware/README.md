@@ -7,26 +7,30 @@ A clean C11 rewrite of the Begode Extreme controller firmware. One CMake tree bu
 - **host**: unit tests, and a software-in-the-loop (SIL) shared library that the simulator loads in place
   of the emulated image.
 
-Status: milestone M1, steps F1 to F4. Core has the BLE protocol (`core/protocol/`, described in
+Status: milestone M1, steps F1 to F5. Core has the BLE protocol (`core/protocol/`, described in
 [docs/protocol/begode.md](../docs/protocol/begode.md), tested against a real capture), the balance task:
 attitude estimation (`core/attitude/`), balance law, tiltbacks, cut-offs and recovery (`core/balance/`), with
 our own fdlibm-derived math (`core/math/`) so host and target compute the same bits, the motor drive
 (`core/motor/`): hall decoding, phase-current sensing and integer field-oriented control for both drive modes,
 and the services around them: settings and odometer with the flash journal and its backup-register mirror
 (`core/settings/`), beeper and alarms (`core/alarms/`), power latch and buttons (`core/power/`), the PB12 light
-(`core/lights/`) and the BMS link (`core/bms/`). The FOC lookup tables are computed from their formulas at
-build time (`tools/gen_motor_tables.py`). The image links core but does not call it yet, configures no
-peripheral and drives no pin. It is not meant for a wheel: nothing in this
-tree is flashed before the gates in the project plan (sim dry-run, stock-first flash, SWD backup) are in place.
+(`core/lights/`), the BMS link (`core/bms/`), the slow analog sensors (`core/sensors/`), the display content
+(`core/display/`) and the BLE service sequences (`core/service/`). The FOC lookup tables are computed from
+their formulas at build time (`tools/gen_motor_tables.py`). `ports/stm32f1/` drives the MCU at register level
+and `apps/begode-extreme/` wires everything into the stock execution contexts, so the image boots in the
+simulator: it sets the power latch, answers `V` and `N`, sends telemetry and handles `!@`, `cy` and `+-`
+(`euc sim run begode-extreme --firmware build/target-compat/euc-fw-begode-extreme.bin`). The LED strip driver
+runs, but the stock strip patterns are not reproduced yet: the strip stays dark. It is not meant for a wheel:
+nothing in this tree is flashed before the gates in the project plan (sim dry-run, stock-first flash, SWD
+backup) are in place.
 
 ## Layout and layer rules
 
 | Directory | Holds | Rule |
 |---|---|---|
 | `core/` | control logic: math, protocol, attitude, balance, FOC, settings | Pure C. No HAL calls, no mutable globals: each module takes an `in` struct and a `state` struct and fills an `out` struct. Builds unchanged for target and host. |
-| `hal/` | hardware interface headers (from F1) | Declarations only. Core never includes them; apps pass HAL results into core. |
-| `ports/stm32f1/` | reset path, vector table, system set-up, register-level drivers | Implements `hal/` for the real MCU. Own register definitions on CMSIS-Core; no ST SPL or ST motor-control library code. |
-| `ports/sim/` | SIL library: C ABI for the simulator engine | Implements `hal/` on top of simulated peripherals. Owns the run-time quirk mask. |
+| `ports/stm32f1/` | reset path, vector table, clock, register-level drivers (`include/stm32f1/port.h`) | Own register definitions (`regs.h`) on CMSIS-Core, written from RM0008; no ST SPL or ST motor-control library code. Core never includes it; the app passes driver results into core. |
+| `ports/sim/` | SIL library: C ABI for the simulator engine | Owns the run-time quirk mask; the simulator drives the core modules through it. |
 | `boards/<board>/` | `board.h` constants, `link_app.ld` memory map, stock tuning | Facts about one PCB. No code. |
 | `apps/<board>/` | `main`, init order, task table (TIM8 / ADC / RTC / main-loop contexts) | Composes core modules with a port and a board, and schedules them. |
 | `config/quirks.def` | compat / clean quirk list | See [Profiles and quirks](#profiles-and-quirks). |
@@ -120,6 +124,10 @@ covers the motor gates):
 - **Settings storage.** Clean records carry a CRC-16 in bits the stock firmware never uses, so a torn write
   is skipped, and either firmware can still read the other's journal. Clean never erases the journal page
   while the drive is enabled: a page erase stalls the CPU for tens of milliseconds.
+- **Faults and hangs.** Any exception without its own handler turns the bridge off (TIM8 main output enable)
+  before it parks the core, in both profiles; the stock handler leaves the last PWM running. Clean starts
+  the independent watchdog (250 ms) with the first RTC tick and feeds it only while the tick and the main loop
+  run (quirk `NO_WATCHDOG`).
 - **Clean motor drive.** A phase over-current trips the bridge (quirk `NO_OVERCURRENT_TRIP`; the level and
   sample count are `board.h` placeholders until the power stage is measured), out-of-range FOC values saturate
   instead of wrapping (`INT16_WRAP`), and the angle holds while the hall state is invalid

@@ -18,9 +18,9 @@
 #define CELLS_OFFSET         6U
 #define FAILURES_TO_FAULT    3U
 
-/* Current scale: raw x 90 / 32.769 / 100 = 0.1 A, in double precision, truncated, as the stock code does. */
+/* Current scale: raw x 90 / 32.768 / 100 = 0.1 A, in double precision, truncated, as the stock code does. */
 #define CURRENT_GAIN    90.0
-#define CURRENT_DIVISOR 32.769
+#define CURRENT_DIVISOR 32.768
 #define CURRENT_PERCENT 100.0
 
 const uint8_t euc_bms_request[EUC_BMS_REQUEST_BYTES] = {0x1CU, 0x03U, 0x40U, 0x31U, 0xFEU};

@@ -47,32 +47,38 @@ The bit is the quirk's position in the SIL mask.
 | 21 | `HALL_INVALID_ANGLE_RUN` | on | off | 0x0800539C hall_update | In hall state 0 or 7 the angle keeps adding its interpolation every call until the fault. |
 | 22 | `MODE0_DEAD_TIME` | on | off | 0x08007CD4 SVPWM_IcsInit | Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns. |
 
+## Sensors
+
+| Bit | ID | Compat | Clean | Stock reference | Summary |
+|---|---|---|---|---|---|
+| 23 | `NTC_REFERENCE_298_5` | on | off | 0x08005218 ntc_temperature_measure | The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high. |
+
 ## Alarms and user interface
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 23 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
-| 24 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
+| 24 | `VOLUME_ZERO_MAX` | on | off | 0x080058BC buzzer_set_volume | 'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest. |
+| 25 | `LOCK_LIGHT_STAYS_ON` | on | off | 0x080073AC RTC tick, 0x08005538 button_light_mode | In transport lock the telemetry shows the light off, but PB12 keeps its last duty. |
 
 ## BMS link (USART3)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 25 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
-| 26 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
+| 26 | `BMS_PARTIAL_REPLY` | on | off | 0x0800B318 usart3_rx_parse | A short or missing BMS reply is parsed after 1 s anyway: old data, no link-loss alarm. |
+| 27 | `BMS_MAX_TEMP_UNSIGNED` | on | off | 0x0800B318 usart3_rx_parse | The BMS maximum temperature starts from the first sensor read unsigned (wrong below 0 degC). |
 
 ## Settings storage (flash journal at 0x0800F000)
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 27 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
-| 28 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
-| 29 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
-| 30 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
+| 28 | `SAVE_ONLY_POWEROFF` | on | off | 0x08004F6C settings_save | Settings and odometer reach flash only in the firmware's own power-off paths. |
+| 29 | `SAVE_SLOT_REUSE` | on | off | 0x08004F6C settings_save | The journal slot is fixed at boot, so each extra save in a power cycle erases the page again. |
+| 30 | `NO_RECORD_CRC` | on | off | 0x08004D48 settings_load | Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid. |
+| 31 | `ODO_CARRY_EARLY` | on | off | 0x080064A0 hall_step_count | The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap. |
 
 ## Platform
 
 | Bit | ID | Compat | Clean | Stock reference | Summary |
 |---|---|---|---|---|---|
-| 31 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
-| 32 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 32 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
+| 33 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |

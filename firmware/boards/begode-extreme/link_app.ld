@@ -92,6 +92,12 @@ SECTIONS
     }
 }
 
+/* Storage pages the application reads and writes (2 KB each; see the map at the top). */
+ld_settings_page = 0x0800F000;
+ld_calibrated_page = 0x0800F800;
+ld_imu_offsets_page = 0x08010000;
+ld_update_request_page = 0x08010800;
+
 /* The checks the OTA image gate repeats (docs/spec/euc-info.md), made at link time. */
 ASSERT(ORIGIN(FLASH) % 512 == 0, "VTOR needs the 76-entry vector table on a 512-byte boundary")
 ASSERT(SIZEOF(.isr_vector) == 0x130, "vector table must have 76 entries (0x130 bytes)")

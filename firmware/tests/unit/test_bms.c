@@ -68,7 +68,7 @@ static void test_parse_fields(void)
     TEST_ASSERT_EQUAL_UINT16(4063U, state.cell_mv[63]);
     TEST_ASSERT_EQUAL_HEX16(0x7D01U, state.blocks[3].status_word);
     TEST_ASSERT_EQUAL_UINT16(651U, state.blocks[2].word42_raw);
-    /* 1000 x 90 / 32.769 / 100 = 27.46 -> 27 (truncated); -1000 -> -27. */
+    /* 1000 x 90 / 32.768 / 100 = 27.47 -> 27 (truncated); -1000 -> -27. */
     TEST_ASSERT_EQUAL_INT16(27, state.blocks[0].current_da);
     TEST_ASSERT_EQUAL_INT16(-27, state.blocks[1].current_da);
     TEST_ASSERT_EQUAL_INT16(20, state.temperature_min_c);

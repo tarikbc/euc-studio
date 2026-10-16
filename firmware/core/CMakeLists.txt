@@ -30,6 +30,7 @@ add_library(euc_core STATIC
     balance/law.c
     balance/tiltback.c
     bms/bms.c
+    display/display.c
     lights/lights.c
     math/libm.c
     motor/current.c
@@ -40,6 +41,8 @@ add_library(euc_core STATIC
     power/power.c
     protocol/commands.c
     protocol/telemetry.c
+    sensors/sensors.c
+    service/service.c
     settings/settings.c
     settings/storage.c
     "${EUC_MOTOR_TABLES_C}")

@@ -75,6 +75,10 @@ EUC_QUIRK_DEF(HALL_INVALID_ANGLE_RUN, 1, 0, "0x0800539C hall_update",
 EUC_QUIRK_DEF(MODE0_DEAD_TIME, 1, 0, "0x08007CD4 SVPWM_IcsInit",
               "Voltage mode (drive mode 0) sets a 1-count (13.9 ns) dead time; current mode uses 403 ns.")
 
+/* Sensors */
+EUC_QUIRK_DEF(NTC_REFERENCE_298_5, 1, 0, "0x08005218 ntc_temperature_measure",
+              "The NTC conversion uses 298.5 K for 25 degC, so the board temperature reads 0.35 degC high.")
+
 /* Alarms and user interface */
 EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",
               "'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest.")

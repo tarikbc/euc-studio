@@ -90,3 +90,11 @@ euc_add_unit_test(test_power
 euc_add_unit_test(test_bms
     SOURCES unit/test_bms.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_sensors
+    SOURCES unit/test_sensors.c
+    LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_display
+    SOURCES unit/test_display.c
+    LIBRARIES euc_port_sim)

@@ -7,7 +7,7 @@
  *   offset  0-5    3 temperatures, s16, degC
  *           6-37   16 cell voltages, u16, mV
  *           38-39  status word (0x7D01 = healthy)
- *           40-41  current, s16 raw; x 90 / 32.769 / 100 = 0.1 A
+ *           40-41  current, s16 raw; x 90 / 32.768 / 100 = 0.1 A
  *           42-43  unknown word
  *
  * The reply is parsed once, when all 176 bytes are in or 500 ticks after the request. Stock parses whatever

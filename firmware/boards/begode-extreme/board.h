@@ -19,7 +19,23 @@
 /* HSE crystal and PLL settings: added with the clock driver (F5). */
 
 /* Pins ------------------------------------------------------------------------------------------------- */
-/* Motor PWM, halls, current sense, IMU SPI, UARTs, buttons and outputs: added with each driver (F1 to F5). */
+/* Fixed peripheral pins (TIM8, ADC, USART1/3, SPI3, TM1640, WS2812, buzzer) are set by their port drivers. */
+
+/* GPIOB: power latch (high = stay on), power / light button (low = pressed; input with pull-down), light. */
+#define BOARD_PIN_LATCH        14U
+#define BOARD_PIN_POWER_BUTTON 15U
+#define BOARD_PIN_LIGHT        12U
+/* GPIOB: halls; the hall state is A | B << 1 | C << 2. */
+#define BOARD_PIN_HALL_A 7U
+#define BOARD_PIN_HALL_B 6U
+#define BOARD_PIN_HALL_C 8U
+/* GPIOA: handle button (low = pressed; floating input). */
+#define BOARD_PIN_HANDLE 12U
+
+/* Identity replies --------------------------------------------------------------------------------------- */
+/* 'V' and 'N' answers. Apps identify the wheel by them, so they stay the stock strings. */
+#define BOARD_FIRMWARE_BANNER "GW1825020"
+#define BOARD_MODEL_REPLY     "NAME:EXTREME\r\n"
 
 /* Analog scaling --------------------------------------------------------------------------------------- */
 /* Battery divider, current-sense gain, NTC: added with the ADC path. The core works on the stock current

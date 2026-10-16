@@ -65,18 +65,31 @@ misra-c2012-8.7:*/core/balance/*
 misra-c2012-2.5:*/core/include/euc/motor/*
 misra-c2012-8.7:*/core/motor/*
 
-# Settings, alarms, power, lights, BMS: the same two reasons. 2.5: alert bits and limits defined for the app
+# Settings, alarms, power, lights, BMS, sensors, display, service: the same two reasons. 2.5: alert bits and limits defined for the app
 # and telemetry. 8.7: entry points called by the app (F5 wires them), the SIL port and tests.
 misra-c2012-2.5:*/core/include/euc/alarms/*
 misra-c2012-2.5:*/core/include/euc/bms/*
 misra-c2012-2.5:*/core/include/euc/lights/*
 misra-c2012-2.5:*/core/include/euc/power/*
 misra-c2012-2.5:*/core/include/euc/settings/*
+misra-c2012-2.5:*/core/include/euc/display/*
+misra-c2012-2.5:*/core/include/euc/sensors/*
+misra-c2012-2.5:*/core/include/euc/service/*
+misra-c2012-8.7:*/core/display/*
+misra-c2012-8.7:*/core/sensors/*
+misra-c2012-8.7:*/core/service/*
 misra-c2012-8.7:*/core/alarms/*
 misra-c2012-8.7:*/core/bms/*
 misra-c2012-8.7:*/core/lights/*
 misra-c2012-8.7:*/core/power/*
 misra-c2012-8.7:*/core/settings/*
+
+# --- apps -------------------------------------------------------------------------------------------------
+
+# 11.4 (pointer to integer): the storage page addresses come from linker symbols and go to the flash driver as
+# numbers. 8.11 (extern array without a size): linker symbols have no C size.
+misra-c2012-11.4:*/apps/begode-extreme/*
+misra-c2012-8.11:*/apps/begode-extreme/app.h
 
 # --- boards -------------------------------------------------------------------------------------------------
 
@@ -95,6 +108,16 @@ misra-c2012-20.10:*/ports/sim/sil.c
 misra-c2012-8.7:*/ports/sim/sil.c
 
 # --- ports/stm32f1 ------------------------------------------------------------------------------------------
+
+# Register-level drivers. 11.4 (pointer from an integer): peripherals sit at fixed addresses (RM0008 memory
+# map), and the DMA, flash and backup registers take memory addresses as numbers. 8.7 (advisory, external
+# linkage used in one unit): the driver API is called by the app, one translation unit per board. 2.5
+# (advisory, unused macro): regs.h lists the register bits of each block, not only the ones a driver uses.
+# 17.3: the CMSIS NVIC and interrupt intrinsics, as for system.c.
+misra-c2012-11.4:*/ports/stm32f1/*
+misra-c2012-8.7:*/ports/stm32f1/*
+misra-c2012-2.5:*/ports/stm32f1/include/stm32f1/regs.h
+misra-c2012-17.3:*/ports/stm32f1/clock.c
 
 # device.h is a CMSIS device header; CMSIS fixes its shape and names:
 #   21.1 (#define of a reserved identifier): __CM3_REV, __NVIC_PRIO_BITS and friends are CMSIS names.

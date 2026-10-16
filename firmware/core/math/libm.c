@@ -1,9 +1,9 @@
 /*
  * sqrt, asin, atan and atan2 for the firmware (see euc/math/libm.h).
  *
- * euc_asin, euc_atan and euc_atan2 are derived from fdlibm 5.3 (e_asin.c, s_atan.c, e_atan2.c). They keep the
- * fdlibm algorithms, constants and order of operations, because the stock firmware's Keil library does the
- * same and the ports must round alike. fdlibm carries this notice:
+ * euc_asin, euc_atan, euc_atan2 and euc_log are derived from fdlibm 5.3 (e_asin.c, s_atan.c, e_atan2.c,
+ * e_log.c). They keep the fdlibm algorithms, constants and order of operations, because the stock firmware's
+ * Keil library does the same and the ports must round alike. fdlibm carries this notice:
  *
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -365,4 +365,92 @@ double euc_atan2(double y, double x)
     default:
         return (z - pi_lo) - pi; /* atan(-, -) */
     }
+}
+
+/* log (fdlibm e_log.c) --------------------------------------------------------------------------------- */
+
+static const double ln2_hi = 6.93147180369123816490e-01;
+static const double ln2_lo = 1.90821492927058770002e-10;
+static const double two54 = 1.80143985094819840000e+16;
+/* Polynomial approximation of log(1 + f), f = (1 + s) / (1 - s) */
+static const double Lg1 = 6.666666666666735130e-01;
+static const double Lg2 = 3.999999999940941908e-01;
+static const double Lg3 = 2.857142874366239149e-01;
+static const double Lg4 = 2.222219843214978396e-01;
+static const double Lg5 = 1.818357216161805012e-01;
+static const double Lg6 = 1.531383769920937332e-01;
+static const double Lg7 = 1.479819860511658591e-01;
+
+static double with_high_word(double value, int32_t high)
+{
+    return f64_from_bits(((uint64_t)(uint32_t)high << 32U) | (uint64_t)low_word(value));
+}
+
+/* |f| < 2^-20: log(1 + f) from a short series. */
+static double log_near_one(double f, int32_t k)
+{
+    if (f == 0.0) {
+        if (k == 0) {
+            return 0.0;
+        }
+        const double dk = (double)k;
+        return (dk * ln2_hi) + (dk * ln2_lo);
+    }
+    const double r = (f * f) * (0.5 - (0.33333333333333333 * f));
+    if (k == 0) {
+        return f - r;
+    }
+    const double dk = (double)k;
+    return (dk * ln2_hi) - ((r - (dk * ln2_lo)) - f);
+}
+
+double euc_log(double x_in)
+{
+    double x = x_in; /* fdlibm normalises the argument in place */
+    int32_t hx = high_word(x);
+    const uint32_t lx = low_word(x);
+    int32_t k = 0;
+
+    if (hx < 0x00100000) { /* x < 2^-1022 */
+        if (((uint32_t)(hx & 0x7FFFFFFF) | lx) == 0U) {
+            return f64_from_bits(0xFFF0000000000000U); /* log(+-0) = -inf */
+        }
+        if (hx < 0) {
+            return f64_quiet_nan(); /* log(negative) */
+        }
+        k -= 54; /* subnormal: scale up */
+        x *= two54;
+        hx = high_word(x);
+    }
+    if (hx >= 0x7FF00000) {
+        return x + x; /* inf or NaN */
+    }
+    k += (hx >> 20) - F64_EXPONENT_BIAS;
+    hx &= 0x000FFFFF;
+    const int32_t i = (hx + 0x95F64) & 0x100000;
+    x = with_high_word(x, hx | (i ^ 0x3FF00000)); /* x or x / 2, in [sqrt(2)/2, sqrt(2)) */
+    k += i >> 20;
+    const double f = x - 1.0;
+    if ((0x000FFFFF & (2 + hx)) < 3) {
+        return log_near_one(f, k);
+    }
+    const double s = f / (2.0 + f);
+    const double dk = (double)k;
+    const double z = s * s;
+    const double w = z * z;
+    const double t1 = w * (Lg2 + (w * (Lg4 + (w * Lg6))));
+    const double t2 = z * (Lg1 + (w * (Lg3 + (w * (Lg5 + (w * Lg7))))));
+    const int32_t j = (hx - 0x6147A) | (0x6B851 - hx);
+    const double r = t2 + t1;
+    if (j > 0) {
+        const double hfsq = (0.5 * f) * f;
+        if (k == 0) {
+            return f - (hfsq - (s * (hfsq + r)));
+        }
+        return (dk * ln2_hi) - ((hfsq - ((s * (hfsq + r)) + (dk * ln2_lo))) - f);
+    }
+    if (k == 0) {
+        return f - (s * (f - r));
+    }
+    return (dk * ln2_hi) - (((s * (f - r)) - (dk * ln2_lo)) - f);
 }
