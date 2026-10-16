@@ -50,8 +50,8 @@ have mapped how every part of it behaves; the engine in this repository is the p
 | Milestone | Goal | State |
 |---|---|---|
 | M0 Foundation | Repo, CI, vendor guard, engine core traits, firmware fetch, firmware skeleton, app shell | ✅ done |
-| M1 Stock boots | Stock firmware boots in the Rust engine | next |
-| M2 Stock rides in 3D | Motor, battery and body physics, 3D viewport | |
+| M1 Stock boots | Stock firmware boots in the Rust engine | ✅ done: 2.3× real time, byte-identical to the reference emulator |
+| M2 Stock rides in 3D | Motor, battery and body physics, 3D viewport | next |
 | M3 Own CPU core | ARMv7-M interpreter verified against a reference emulator | |
 | M4 Human rider | Full rider, recordings, Python, scenarios | |
 | M5 Our firmware | Complete C firmware, compat and clean profiles | |
@@ -77,6 +77,9 @@ git config core.hooksPath tools/hooks             # once per clone: the vendor g
 cargo run -p euc-cli -- fetch begode-extreme       # download and verify the official Begode Extreme build
 cargo run -p euc-cli -- firmware list
 cargo run -p euc-cli -- image validate <file>      # the image gate the flasher will use
+
+# run the stock firmware in the simulator (development backend, needs CMake to build Unicorn)
+cargo run --release -p euc-cli --features unicorn -- sim run begode-extreme --seconds 10 --inject V@2.6
 
 (cd firmware && cmake --workflow --preset target-clean)  # our firmware image (Arm GNU Toolchain)
 (cd app && pnpm install && pnpm tauri dev)                # the EUC Studio app (Node, pnpm, Tauri)
