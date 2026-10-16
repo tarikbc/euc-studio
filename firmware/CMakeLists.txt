@@ -27,8 +27,6 @@ include(cmake/compile_options.cmake)
 include(cmake/dependencies.cmake)
 include(cmake/analysis.cmake)
 
-add_subdirectory(core)
-
 if(CMAKE_CROSSCOMPILING)
     if(NOT EUC_PROFILE MATCHES "^(compat|clean)$")
         message(FATAL_ERROR "EUC_PROFILE must be compat or clean, not '${EUC_PROFILE}'")
@@ -36,7 +34,11 @@ if(CMAKE_CROSSCOMPILING)
     string(TOUPPER "${EUC_PROFILE}" profile_upper)
     add_library(euc_profile INTERFACE)
     target_compile_definitions(euc_profile INTERFACE EUC_PROFILE_${profile_upper}=1)
+endif()
 
+add_subdirectory(core)
+
+if(CMAKE_CROSSCOMPILING)
     include(cmake/build_info.cmake)
     include(cmake/image.cmake)
 

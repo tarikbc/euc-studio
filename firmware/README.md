@@ -7,9 +7,11 @@ A clean C11 rewrite of the Begode Extreme controller firmware. One CMake tree bu
 - **host**: unit tests, and a software-in-the-loop (SIL) shared library that the simulator loads in place
   of the emulated image.
 
-Status: milestone M0. The image proves the toolchain, the memory layout and the `.euc_info` block. It
-configures no peripheral and drives no pin. It is not meant for a wheel: nothing in this tree is flashed
-before the gates in the project plan (sim dry-run, stock-first flash, SWD backup) are in place.
+Status: milestone M1, step F1. Core has the BLE protocol: telemetry frames and the command parser
+(`core/protocol/`, described in [docs/protocol/begode.md](../docs/protocol/begode.md)), tested against a real
+capture. The image links core but does not call it yet, configures no peripheral and drives no pin. It is not
+meant for a wheel: nothing in this tree is flashed before the gates in the project plan (sim dry-run,
+stock-first flash, SWD backup) are in place.
 
 ## Layout and layer rules
 
@@ -22,7 +24,7 @@ before the gates in the project plan (sim dry-run, stock-first flash, SWD backup
 | `boards/<board>/` | `board.h` constants, `link_app.ld` memory map, stock tuning | Facts about one PCB. No code. |
 | `apps/<board>/` | `main`, init order, task table (TIM8 / ADC / RTC / main-loop contexts) | Composes core modules with a port and a board, and schedules them. |
 | `config/quirks.def` | compat / clean quirk list | See [Profiles and quirks](#profiles-and-quirks). |
-| `tests/unit/` | Unity tests, host only | One executable per area, run by CTest. |
+| `tests/unit/` | Unity tests, host only | One executable per area, run by CTest. Shared captures live in `../tests/data/`. |
 | `tools/` | size report, quirk doc generator, cppcheck deviation record | Python standard library only. |
 
 Code style: fixed-width types, units in names (`_bytes`, `_ms`, `_q15`), no heap, no recursion, no dead code,

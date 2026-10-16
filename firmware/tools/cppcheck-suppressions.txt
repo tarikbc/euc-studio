@@ -19,6 +19,15 @@ misra-c2012-20.1:*/core/include/euc/quirks.h
 misra-c2012-20.5:*/core/include/euc/quirks.h
 misra-c2012-20.10:*/core/include/euc/quirks.h
 misra-c2012-2.5:*/core/include/euc/quirks.h
+# 2.4 (advisory, unused tag): enum euc_quirk_id is named only in the run-time profile.
+misra-c2012-2.4:*/core/include/euc/quirks.h
+
+# 2.5 (advisory, unused macro): protocol headers define constants for every user (frame flags, sizes); one
+# translation unit uses only some of them.
+misra-c2012-2.5:*/core/include/euc/protocol/*
+# 8.7 (advisory, external linkage used in one unit): module entry points are called by apps, the SIL port and
+# tests. The MISRA run leaves tests out, and no app calls the protocol modules yet (F5 wires them).
+misra-c2012-8.7:*/core/protocol/*
 
 # 10.1 (shift of a signed operand) and cppcheck shiftNegativeLHS: fixed-point helpers drop fraction bits with
 # an arithmetic right shift, the rounding the stock code uses. C11 makes it implementation-defined; fixed.h
