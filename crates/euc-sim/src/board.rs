@@ -9,10 +9,7 @@ mod port {
     pub(super) const BLE_RX: u8 = 0;
     pub(super) const BLE_TX: u8 = 1;
     pub(super) const LATCH: u8 = 2;
-    pub(super) const HALL_A: u8 = 3;
-    pub(super) const HALL_B: u8 = 4;
-    pub(super) const HALL_C: u8 = 5;
-    pub(super) const BUTTON: u8 = 6;
+    pub(super) const BUTTON: u8 = 3;
 }
 
 /// Something the board does at a set time.
@@ -28,10 +25,10 @@ pub enum Action {
 
 /// Everything around the controller that the firmware talks to through pins and the BLE UART:
 /// the phone (capturing what the controller sends, injecting commands), the power button and
-/// latch, and the hall sensors' static levels. Timed actions run in `(cycle, order)` order, like
-/// the reference harness's timeline, which is why this component is the last one on the board.
+/// latch. Timed actions run in `(cycle, order)` order, like the reference harness's timeline,
+/// which is why this component is the last one on the board. (The hall lines come from the
+/// plant.)
 pub struct BoardLogic {
-    hall: u8,
     button_active_low: bool,
     release_after: u64,
     button_pressed: bool,
@@ -41,14 +38,13 @@ pub struct BoardLogic {
     pub ble_tx: Vec<(u64, u8)>,
 }
 
-const TIMELINE: u32 = 0;
+pub(crate) const TIMELINE: u32 = 0;
 
 impl BoardLogic {
-    /// Board logic with static hall code `hall`; the rider lets go of the button
-    /// `release_after` cycles after the firmware sets the power latch.
-    pub fn new(hall: u8, button_active_low: bool, release_after: u64) -> Self {
+    /// Board logic whose rider lets go of the button `release_after` cycles after the firmware
+    /// sets the power latch.
+    pub fn new(button_active_low: bool, release_after: u64) -> Self {
         Self {
-            hall,
             button_active_low,
             release_after,
             button_pressed: true,
@@ -70,11 +66,8 @@ impl BoardLogic {
         }
     }
 
-    /// Drives the hall and button pins from the plant.
+    /// Drives the button pin.
     fn apply_inputs(&self, ctx: &mut Ctx<'_>) {
-        for (bit, out) in [(0, port::HALL_A), (1, port::HALL_B), (2, port::HALL_C)] {
-            ctx.emit(out, Signal::Level(self.hall >> bit & 1 == 1));
-        }
         ctx.emit(port::BUTTON, Signal::Level(self.button_pressed != self.button_active_low));
     }
 }
@@ -132,9 +125,6 @@ impl Peripheral for BoardLogic {
             "ble_rx" => port::BLE_RX,
             "ble_tx" => port::BLE_TX,
             "latch" => port::LATCH,
-            "hall_a" => port::HALL_A,
-            "hall_b" => port::HALL_B,
-            "hall_c" => port::HALL_C,
             "button" => port::BUTTON,
             _ => return None,
         })
@@ -186,27 +176,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn power_on_drives_the_plant_pins() {
+    fn power_on_holds_the_button() {
         let mut host = TestHost::new(72_000_000);
-        let mut board = BoardLogic::new(5, true, 7_200_000);
+        let mut board = BoardLogic::new(true, 7_200_000);
         board.reset(ResetKind::Power, &mut host.ctx());
-        let levels: Vec<_> = host.emitted.iter().map(|&(port, signal)| (port, signal)).collect();
-        assert_eq!(
-            levels,
-            [
-                (port::HALL_A, Signal::Level(true)),
-                (port::HALL_B, Signal::Level(false)),
-                (port::HALL_C, Signal::Level(true)),
-                (port::BUTTON, Signal::Level(false)),
-            ],
-            "hall code 5, button held (active low)"
-        );
+        assert_eq!(host.emitted, [(port::BUTTON, Signal::Level(false))], "held, active low");
     }
 
     #[test]
     fn latch_schedules_the_button_release() {
         let mut host = TestHost::new(72_000_000);
-        let mut board = BoardLogic::new(5, true, 7_200_000);
+        let mut board = BoardLogic::new(true, 7_200_000);
         board.reset(ResetKind::Power, &mut host.ctx());
         host.now = 1_000;
         board.input(port::LATCH, Signal::Level(true), &mut host.ctx());
@@ -221,7 +201,7 @@ mod tests {
     #[test]
     fn injections_go_out_on_ble_tx_and_tx_is_captured() {
         let mut host = TestHost::new(72_000_000);
-        let mut board = BoardLogic::new(5, true, 7_200_000);
+        let mut board = BoardLogic::new(true, 7_200_000);
         board.at(500, Action::Inject(b"VN".to_vec()));
         board.reset(ResetKind::Power, &mut host.ctx());
         host.emitted.clear();

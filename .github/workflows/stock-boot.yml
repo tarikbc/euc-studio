@@ -11,6 +11,9 @@ on:
     paths:
       - "crates/**"
       - "profiles/**"
+      - "scenarios/**"
+      - "tools/fetch-mujoco/**"
+      - ".cargo/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -35,6 +38,12 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The MuJoCo library euc-physics links: the official release, checked against its pinned sha256.
+      - name: Fetch MuJoCo
+        run: python tools/fetch-mujoco/fetch.py --github
       - name: Keep the image in the runner's temp folder
         run: echo "EUC_CACHE_DIR=$RUNNER_TEMP/euc-firmware" >> "$GITHUB_ENV"
       - name: Fetch the stock image (verified against its pin)
@@ -45,6 +54,10 @@ jobs:
         run: >
           cargo run --release --locked -p euc-cli --features unicorn --
           sim run begode-extreme --seconds 30 --inject V@2.6 --inject N@3.6 --inject b@4.6
+      - name: "Scenario: rider stands for 60 s"
+        run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/balance-60s.toml
+      - name: "Scenario: ride to 20 km/h and stop"
+        run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/ride-20kmh-stop.toml
       - name: Remove the image
         if: always()
         run: rm -rf "$EUC_CACHE_DIR"

@@ -222,7 +222,13 @@ pub struct RamVar {
     pub kind: String,
     /// What it is.
     pub note: Option<String>,
+    /// What the simulator uses it for: `cutoff` (non-zero while the firmware has the motor cut
+    /// or its balance output disabled).
+    pub role: Option<String>,
 }
+
+/// Role of a RAM variable that is non-zero while the firmware cuts the motor.
+pub const ROLE_CUTOFF: &str = "cutoff";
 
 #[cfg(test)]
 mod tests {

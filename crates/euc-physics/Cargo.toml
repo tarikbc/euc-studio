@@ -1,0 +1,21 @@
+[package]
+name = "euc-physics"
+description = "The mechanical world of a wheel and its rider in MuJoCo: tire, shell, rigid rider, IMU"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-telemetry.workspace = true
+mujoco-rs.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+
+[lints]
+workspace = true

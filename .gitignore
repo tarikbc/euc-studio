@@ -5,6 +5,9 @@
 # Rust
 /target/
 
+# Native libraries downloaded by tools/fetch-mujoco
+/.cache/
+
 # Node
 node_modules/
 

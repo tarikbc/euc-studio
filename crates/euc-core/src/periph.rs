@@ -74,6 +74,24 @@ pub trait PlantView {
 
     /// Battery pack voltage in volts (smart BMS models report it per cell).
     fn battery_v(&self) -> f64;
+
+    /// What the smart BMS boards of pack `index` (0-based) measure, or `None` when the plant
+    /// does not model packs (BMS models then derive their readings from [`PlantView::battery_v`]).
+    fn pack(&self, index: usize) -> Option<PackReading> {
+        let _ = index;
+        None
+    }
+}
+
+/// One battery pack as its smart BMS boards measure it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PackReading {
+    /// Cell group voltages, millivolts, in series order.
+    pub cells_mv: Vec<u16>,
+    /// Temperature sensors, °C.
+    pub temps_c: Vec<f64>,
+    /// Pack current, amperes, discharge positive.
+    pub current_a: f64,
 }
 
 /// One IMU sample in the sensor frame.
@@ -85,6 +103,11 @@ pub struct ImuSample {
     pub gyro_dps: [f64; 3],
     /// Die temperature in °C.
     pub temp_c: f64,
+}
+
+impl ImuSample {
+    /// Level and still at 25 °C.
+    pub const LEVEL: Self = Self { accel_g: [0.0, 0.0, 1.0], gyro_dps: [0.0; 3], temp_c: 25.0 };
 }
 
 /// A board component: a memory-mapped peripheral, an off-chip device, or both.
@@ -171,7 +194,7 @@ pub trait Host {
     /// See [`Ctx::peer`].
     fn peer(&mut self, id: DeviceId) -> Option<&mut dyn Peripheral>;
     /// See [`Ctx::plant`].
-    fn plant(&self) -> &dyn PlantView;
+    fn plant(&mut self) -> &dyn PlantView;
     /// See [`Ctx::log`].
     fn log(&mut self, dev: DeviceId, text: String);
     /// See [`Ctx::blocker`].
@@ -264,8 +287,9 @@ impl<'a> Ctx<'a> {
         peer.downcast_mut()
     }
 
-    /// The plant, as sensors see it now.
-    pub fn plant(&self) -> &dyn PlantView {
+    /// The plant, as sensors see it now: the engine brings a time-stepped plant up to
+    /// [`Ctx::now`] first, so call this at the instant the sensor samples.
+    pub fn plant(&mut self) -> &dyn PlantView {
         self.host.plant()
     }
 

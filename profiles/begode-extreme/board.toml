@@ -372,8 +372,9 @@ channel = "DMA2.3"
 request = "UART4.tx"
 channel = "DMA2.5"
 
-# Wires between components. `board` is the simulator's own board logic: the BLE host, the
-# power latch and the plant-driven inputs.
+# Wires between components. `board` is the simulator's own board logic (the BLE host, the
+# power button and latch); `plant` is the motor, battery and body (inverter legs in, hall lines
+# out).
 [[wire]]
 from = "ADC1.dual_inj"
 to = "ADC2.dual_inj"
@@ -427,16 +428,29 @@ from = "GPIOB.14"
 to = "board.latch"
 
 [[wire]]
-from = "board.hall_a"
+from = "plant.hall_a"
 to = "GPIOB.7"
 
 [[wire]]
-from = "board.hall_b"
+from = "plant.hall_b"
 to = "GPIOB.6"
 
 [[wire]]
-from = "board.hall_c"
+from = "plant.hall_c"
 to = "GPIOB.8"
+
+# The inverter: phase A on TIM8 CH1, B on CH3, C on CH2 (docs/models/electrical.md).
+[[wire]]
+from = "TIM8.oc1"
+to = "plant.leg_a"
+
+[[wire]]
+from = "TIM8.oc3"
+to = "plant.leg_b"
+
+[[wire]]
+from = "TIM8.oc2"
+to = "plant.leg_c"
 
 [[wire]]
 from = "board.button"

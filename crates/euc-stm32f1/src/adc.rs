@@ -223,7 +223,7 @@ impl Adc {
         Rate::new(ctx.hclk(), 2 * self.adcclk(ctx)).cycles(half_cycles).max(1)
     }
 
-    fn sample(&self, channel: u32, ctx: &Ctx<'_>) -> u32 {
+    fn sample(&self, channel: u32, ctx: &mut Ctx<'_>) -> u32 {
         u32::from(ctx.plant().adc_raw(self.index, channel as u8) & 0xFFF)
     }
 

@@ -3,6 +3,8 @@
 use euc_core::{Build, ConfigError, Ctx, ImuSample, Peripheral, ResetKind, Signal};
 
 use crate::NoParams;
+use crate::fault::{DeviceFault, Schedule};
+use crate::rng::Rng;
 
 /// Register addresses the model gives meaning to (MPU-6500 register map, rev 2.1).
 pub mod reg {
@@ -62,6 +64,7 @@ pub struct Mpu6500 {
     sample: [u8; 14],
     writes: u64,
     sample_reads: u64,
+    faults: Schedule,
 }
 
 impl Default for Mpu6500 {
@@ -80,6 +83,7 @@ impl Mpu6500 {
             sample: [0; 14],
             writes: 0,
             sample_reads: 0,
+            faults: Schedule::default(),
         };
         imu.reset_registers();
         imu
@@ -93,6 +97,39 @@ impl Mpu6500 {
     /// The current sensor input.
     pub const fn sensor(&self) -> &ImuSample {
         &self.input
+    }
+
+    /// Adds an IMU fault (`imu_noise`, `imu_bias`, `imu_stuck`) for the cycles `from..until`
+    /// (`None`: to the end of the run). As a board component the device applies it to every
+    /// sample it takes from the plant inside the window.
+    pub fn add_fault(&mut self, from: u64, until: Option<u64>, fault: DeviceFault) -> Result<(), String> {
+        self.faults.add("mpu6500", from, until, fault)
+    }
+
+    /// What the sensor measures at `now`, given the plant's `truth` and the active faults; `None`
+    /// while a stuck fault freezes the sample.
+    fn measure(&self, truth: ImuSample, now: u64) -> Option<ImuSample> {
+        let mut sample = truth;
+        let mut rng = Rng::new(now ^ 0x494D_5530);
+        for fault in self.faults.active(now) {
+            match fault {
+                DeviceFault::ImuStuck => return None,
+                DeviceFault::ImuBias { accel_g, gyro_dps } => {
+                    for axis in 0..3 {
+                        sample.accel_g[axis] += accel_g[axis];
+                        sample.gyro_dps[axis] += gyro_dps[axis];
+                    }
+                }
+                DeviceFault::ImuNoise { accel_g, gyro_dps } => {
+                    for axis in 0..3 {
+                        sample.accel_g[axis] += rng.gaussian(accel_g);
+                        sample.gyro_dps[axis] += rng.gaussian(gyro_dps);
+                    }
+                }
+                DeviceFault::BmsSilent | DeviceFault::BmsGarbled { .. } => {}
+            }
+        }
+        Some(sample)
     }
 
     /// Drives the chip-select line (`true` = high = deselected). A falling edge starts a transaction.
@@ -217,9 +254,10 @@ impl Mpu6500 {
 /// `"spi"`. The sensor input is the plant's IMU sample at the start of each transaction.
 impl Peripheral for Mpu6500 {
     fn reset(&mut self, kind: ResetKind, _ctx: &mut Ctx<'_>) {
-        // The IMU is powered by the board: only a power cycle resets it.
+        // The IMU is powered by the board: only a power cycle resets it. Its faults stay.
         if kind == ResetKind::Power {
-            *self = Self::new();
+            let faults = std::mem::take(&mut self.faults);
+            *self = Self { faults, ..Self::new() };
         }
     }
 
@@ -227,7 +265,10 @@ impl Peripheral for Mpu6500 {
         match (port, signal) {
             (PORT_CS, Signal::Level(high)) => {
                 if !high {
-                    self.input = ctx.plant().imu();
+                    let truth = ctx.plant().imu();
+                    if let Some(sample) = self.measure(truth, ctx.now()) {
+                        self.input = sample;
+                    }
                 }
                 self.chip_select(high);
             }
@@ -328,6 +369,47 @@ mod tests {
         let sample = &miso[1..];
         assert_eq!((read16(sample, 0), read16(sample, 1)), (i16::MAX, i16::MIN));
         assert_eq!(read16(sample, 4), i16::MAX);
+    }
+
+    #[test]
+    fn faults_bias_add_noise_and_freeze_samples() {
+        use euc_core::testing::TestHost;
+
+        let mut host = TestHost::new(72_000_000);
+        let mut imu = Mpu6500::new();
+        let cs = imu.port("cs").unwrap();
+        let bias = DeviceFault::ImuBias { accel_g: [0.1, 0.0, 0.0], gyro_dps: [0.0, 0.0, -2.0] };
+        imu.add_fault(100, Some(200), bias).unwrap();
+        imu.add_fault(300, None, DeviceFault::ImuStuck).unwrap();
+        imu.add_fault(500, None, DeviceFault::ImuNoise { accel_g: 0.0, gyro_dps: 1.0 }).unwrap();
+        assert!(imu.add_fault(0, None, DeviceFault::BmsSilent).is_err());
+        // One chip-select cycle at `now` with the plant's accelerometer x at `accel_x`.
+        let sample_at = |imu: &mut Mpu6500, host: &mut TestHost, now: u64, accel_x: f64| {
+            host.now = now;
+            host.plant.imu = ImuSample { accel_g: [accel_x, 0.0, 1.0], ..LEVEL };
+            imu.input(cs, Signal::Level(false), &mut host.ctx());
+            imu.input(cs, Signal::Level(true), &mut host.ctx());
+            *imu.sensor()
+        };
+        assert_eq!(sample_at(&mut imu, &mut host, 50, 0.0).accel_g[0], 0.0);
+        let biased = sample_at(&mut imu, &mut host, 150, 0.2);
+        assert!((biased.accel_g[0] - 0.3).abs() < 1e-12);
+        assert_eq!(biased.gyro_dps, [0.0, 0.0, -2.0]);
+        assert_eq!(sample_at(&mut imu, &mut host, 250, 0.4).accel_g[0], 0.4, "the bias window is over");
+        assert_eq!(sample_at(&mut imu, &mut host, 350, 0.9).accel_g[0], 0.4, "stuck: the last sample stays");
+        imu.reset(ResetKind::Power, &mut host.ctx());
+        let after_reset = sample_at(&mut imu, &mut host, 360, 0.9);
+        assert_eq!(after_reset.accel_g[0], LEVEL.accel_g[0], "still stuck after a power cycle");
+    }
+
+    #[test]
+    fn noise_is_deterministic() {
+        let mut imu = Mpu6500::new();
+        imu.add_fault(0, None, DeviceFault::ImuNoise { accel_g: 0.01, gyro_dps: 0.5 }).unwrap();
+        let a = imu.measure(LEVEL, 1234).unwrap();
+        assert_eq!(a, imu.measure(LEVEL, 1234).unwrap());
+        assert_ne!(a, imu.measure(LEVEL, 1235).unwrap());
+        assert!(a.gyro_dps.iter().all(|g| g.abs() < 5.0) && a.gyro_dps.iter().any(|g| *g != 0.0));
     }
 
     #[test]

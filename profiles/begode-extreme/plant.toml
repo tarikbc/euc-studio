@@ -1,0 +1,81 @@
+# Begode Extreme: electrical plant (motor, inverter, halls, analog front end, battery, heat).
+# Read by crates/euc-plant. docs/models/electrical.md explains every value. Values marked
+# DEFAULT are reasoned estimates, not measurements of a real wheel: replace them when measured.
+# Values marked FIRMWARE follow from the stock firmware's own constants and conventions.
+
+schema = 1
+grid_us = 5.0                 # integration step
+seed = 1                      # sensor and hall noise
+
+[motor]
+pole_pairs = 26               # DEFAULT: firmware 0.0505 m per electrical turn; 16x3 tire, 1.313 m rolling circumference
+resistance_ohm = 0.080        # DEFAULT: phase resistance of a 134 V hub motor
+ld_h = 0.000200               # DEFAULT: surface magnets, Ld = Lq
+lq_h = 0.000200               # DEFAULT
+flux_wb = 0.0205              # DEFAULT: 109 km/h no-load at 134.4 V (published), SVPWM limit Vbus/sqrt(3)
+direction = -1                # FIRMWARE: rolling forward lowers the electrical angle (negative hall count)
+angle_offset_deg = 0.0
+
+[inverter]
+dead_time_s = 0.0000005       # DEFAULT: gate driver; the timer adds only 14 ns (10 kHz) or 403 ns (12 kHz)
+switch_resistance_ohm = 0.002 # DEFAULT: parallel MOSFETs per switch position
+diode_drop_v = 0.7            # DEFAULT: body diode
+switching_time_s = 0.0000001  # DEFAULT: rise + fall
+
+[halls]
+offset_deg = -90.0            # FIRMWARE: the firmware's angle is the rotor flux angle minus 90 deg el.,
+                              # so a positive firmware Iq makes forward torque
+noise_deg = 0.0
+
+[sensors]
+# FIRMWARE scales: Q15 32768 = 437.5 A, 16 counts per ADC LSB -> 0.2136 A per count.
+phase_current = [
+    { phase = "a", adc = 1, channel = 4, amps_per_count = -0.213623046875 },  # PA4, inverted
+    { phase = "b", adc = 2, channel = 5, amps_per_count = 0.213623046875 },   # PA5
+]
+bus_current = { adc = 2, channel = 10, amps_per_count = 0.213623046875 }    # PC0, + = discharge (sign DEFAULT)
+bus_voltage = { adc = 1, channel = 0, volts_per_count = 0.042022705078125 } # PA0, FIRMWARE 1377/32768 V per count
+board_ntc = { adc = 1, channel = 11, r25_ohm = 47000.0, beta_k = 4150.0, pullup_ohm = 10000.0 }  # PC1
+noise_counts = 0.0
+
+[battery]
+packs = 2                     # two packs in parallel, each read by two 16-cell BMS boards
+series = 32
+capacity_ah = 10.0            # DEFAULT: 32S2P of 5 Ah cells per pack, 2 x 1.2 kWh = the published 2400 Wh
+r0_ohm = 0.007                # DEFAULT: per 2P cell group (about 14 mOhm per cell)
+r1_ohm = 0.003                # DEFAULT
+tau_s = 30.0                  # DEFAULT
+soc = 0.883                   # 129.7 V at rest, as in the 2026-10-15 capture of the maintainer's wheel
+temp_sensors = 6              # 3 per BMS board
+heat_capacity_j_per_k = 6000.0  # DEFAULT
+cooling_w_per_k = 3.0         # DEFAULT
+ocv = [                       # DEFAULT: typical high-power NMC 21700 cell
+    [0.00, 3.00], [0.05, 3.30], [0.10, 3.42], [0.20, 3.52], [0.30, 3.60], [0.40, 3.66],
+    [0.50, 3.72], [0.60, 3.80], [0.70, 3.88], [0.80, 3.97], [0.90, 4.07], [1.00, 4.20],
+]
+
+[thermal]
+ambient_c = 25.0
+stage = { heat_capacity_j_per_k = 400.0, resistance_k_per_w = 0.5 }    # DEFAULT
+motor = { heat_capacity_j_per_k = 3000.0, resistance_k_per_w = 0.3 }   # DEFAULT
+
+# Mechanics: tire, spinning wheel and shell. Read by crates/euc-physics (through euc-sim);
+# docs/models/body.md explains every value. DEFAULT values are estimates, not measurements.
+# Heights are from the axle, positive up.
+[body.tire]
+radius_m = 0.209              # rolling circumference 1.313 m, the same as [motor] assumes: firmware speed = true speed
+half_width_m = 0.038          # 3 in tread
+friction = 0.9                # DEFAULT: rubber on dry asphalt
+crr = 0.012                   # DEFAULT: rolling resistance coefficient
+contact_time_s = 0.02         # DEFAULT: tire softness, about 200 kN/m under the loaded wheel
+
+[body.wheel]
+mass_kg = 16.0                # DEFAULT: rotor, magnets, rim and tire (the stator is part of the shell)
+spin_inertia_kgm2 = 0.42      # DEFAULT: 0.6 m r^2, most of the mass near the rim
+
+[body.shell]
+mass_kg = 26.0                # DEFAULT: 42 kg with the wheel
+com_above_axle_m = 0.10       # DEFAULT: battery packs reach above the axle
+inertia_kgm2 = [0.85, 0.92, 0.46]  # DEFAULT: roll, pitch, yaw of a 0.35 x 0.30 x 0.55 m box
+pedal_below_axle_m = 0.03     # DEFAULT
+imu_above_axle_m = 0.15       # DEFAULT: controller board above the axle

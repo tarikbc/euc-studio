@@ -11,10 +11,14 @@ publish.workspace = true
 [dependencies]
 euc-core.workspace = true
 euc-devices.workspace = true
+euc-physics.workspace = true
+euc-plant.workspace = true
 euc-profile.workspace = true
 euc-proto-begode.workspace = true
 euc-stm32f1.workspace = true
+euc-telemetry.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 

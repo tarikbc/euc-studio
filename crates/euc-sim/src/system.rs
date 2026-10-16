@@ -111,7 +111,8 @@ pub struct System {
     wires: HashMap<(DeviceId, u8), Vec<(DeviceId, u8)>>,
     dma_routes: HashMap<(DeviceId, u8), (DeviceId, u8)>,
     queue: VecDeque<Pending>,
-    pub(crate) plant: Plant,
+    /// The plant component, which sensors sample through [`Host::plant`].
+    pub(crate) plant: Option<DeviceId>,
     poll: PollDetector,
     stuck: Option<Vec<(u32, u32)>>,
     stuck_skip: u64,
@@ -132,7 +133,7 @@ impl System {
         map: MemoryMap,
         slots: Vec<Slot>,
         exc: ExceptionUnit,
-        plant: Plant,
+        plant: Option<DeviceId>,
         irq_names: Vec<String>,
         marker_names: HashMap<u32, String>,
     ) -> Self {
@@ -669,8 +670,15 @@ impl Host for System {
         self.slots.get_mut(usize::from(id))?.device.as_deref_mut()
     }
 
-    fn plant(&self) -> &dyn PlantView {
-        &self.plant
+    fn plant(&mut self) -> &dyn PlantView {
+        let now = self.now();
+        let Some(id) = self.plant else { return &Unwired };
+        let Some(plant) = self.plant_mut() else { return &Unwired };
+        let lines = plant.sync(now);
+        for (port, signal) in lines {
+            self.queue.push_back(Pending::Signal { from: id, port, signal });
+        }
+        self.plant_ref().map_or(&Unwired, |plant| plant)
     }
 
     fn log(&mut self, _dev: DeviceId, text: String) {
@@ -684,6 +692,37 @@ impl Host for System {
 
     fn request_reset(&mut self, _dev: DeviceId, kind: ResetKind, why: String) {
         System::request_reset(self, kind, why);
+    }
+}
+
+impl System {
+    /// The plant component, unless it is busy in a call of its own.
+    pub(crate) fn plant_ref(&self) -> Option<&Plant> {
+        let device = self.slots.get(usize::from(self.plant?))?.device.as_deref()?;
+        (device as &dyn std::any::Any).downcast_ref()
+    }
+
+    /// The plant component, unless it is busy in a call of its own.
+    pub(crate) fn plant_mut(&mut self) -> Option<&mut Plant> {
+        let device = self.slots.get_mut(usize::from(self.plant?))?.device.as_deref_mut()?;
+        (device as &mut dyn std::any::Any).downcast_mut()
+    }
+}
+
+/// What sensors read when the board has no plant: mid-scale, level, no battery.
+struct Unwired;
+
+impl PlantView for Unwired {
+    fn adc_raw(&self, _adc: u8, _channel: u8) -> u16 {
+        2048
+    }
+
+    fn imu(&self) -> euc_core::ImuSample {
+        euc_core::ImuSample::LEVEL
+    }
+
+    fn battery_v(&self) -> f64 {
+        0.0
     }
 }
 

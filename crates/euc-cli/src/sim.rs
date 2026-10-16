@@ -7,8 +7,10 @@ use std::time::Instant;
 use anyhow::{Context as _, bail};
 use euc_fwsource::{FetchOptions, UreqClient};
 use euc_profile::{Channel, FirmwareSource, Sha256, WheelProfile};
-use euc_sim::config::{BoardFile, StockMap};
-use euc_sim::{CpuFactory, Machine, MachineConfig, PlantState, Report};
+use euc_sim::recording::{Header, Recorder};
+use euc_sim::scenario::{self, Outcome, Scenario};
+use euc_sim::{CpuFactory, Machine, MachineConfig, PlantState, Report, Session, WheelFiles};
+use euc_telemetry::{Event, EventKind};
 use serde::Serialize;
 
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
@@ -22,12 +24,22 @@ pub(crate) enum Command {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Wheel profile id, e.g. begode-extreme.
-    wheel: String,
+    /// Wheel profile id, e.g. begode-extreme (optional with --scenario, which names its wheel).
+    wheel: Option<String>,
+    /// Ride a scenario file (scenarios/*.toml) with the motor, battery, body and rider simulated,
+    /// and check its expectations.
+    #[arg(long, value_name = "FILE")]
+    scenario: Option<PathBuf>,
+    /// With --scenario: write a recording (header, telemetry batches, events) for the studio.
+    #[arg(long, value_name = "FILE", requires = "scenario")]
+    record: Option<PathBuf>,
+    /// With --scenario: samples per simulated second in the recording and the checks.
+    #[arg(long, default_value_t = 100.0, requires = "scenario")]
+    sample_hz: f64,
     /// `stock` (the current official build, fetched if it is not cached) or a firmware file.
     #[arg(long, default_value = "stock")]
     firmware: String,
-    /// Simulated seconds to run.
+    /// Simulated seconds to run (a scenario sets its own).
     #[arg(long, default_value_t = 6.0)]
     seconds: f64,
     /// BLE bytes to send: `V`, `V@2.6`, `hex:5759@4` (without a time: 3.0 s, 4.5 s, ...).
@@ -97,21 +109,34 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
              run `cargo run -p euc-cli --features unicorn -- sim run ...`"
         );
     };
+    let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
+    let wheel_id = match (&args.wheel, &scenario) {
+        (Some(wheel), Some(scenario)) if *wheel != scenario.wheel => {
+            bail!("the scenario is for {}, not {wheel}", scenario.wheel)
+        }
+        (Some(wheel), _) => wheel.clone(),
+        (None, Some(scenario)) => scenario.wheel.clone(),
+        (None, None) => bail!("name a wheel profile, or give a --scenario"),
+    };
     let source = ctx.profiles();
-    let wheel = source.load(&args.wheel)?;
-    let board: BoardFile = toml::from_str(&source.read(&wheel.id, "board.toml")?).context("board.toml")?;
-    let stockmap: StockMap = toml::from_str(&source.read(&wheel.id, "stockmap.toml")?).context("stockmap.toml")?;
-    let (image, label) = firmware(ctx, &wheel, &args.firmware)?;
+    let files = WheelFiles::load(&source, &wheel_id)?;
+    let wheel = &files.profile;
+    let (image, label) = firmware(ctx, wheel, &args.firmware)?;
     let sha256 = Sha256::digest(&image);
     // Stock-map addresses only mean something in the build they were taken from.
-    let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == stockmap.build);
-    let injections =
+    let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
+    let mut injections =
         args.injections.iter().enumerate().map(|(i, spec)| injection(spec, i)).collect::<anyhow::Result<Vec<_>>>()?;
+    if let Some(scenario) = &scenario {
+        for inject in &scenario.inject {
+            injections.push(injection(&format!("{}@{}", inject.bytes, inject.at_s), 0)?);
+        }
+    }
 
-    let hclk = u64::from(wheel.board.hclk_hz);
+    let hclk = files.hclk();
     let config = MachineConfig {
-        board: &board,
-        stockmap: stock.then_some(&stockmap),
+        board: &files.board,
+        stockmap: stock.then_some(&files.stockmap),
         image: &image,
         load_addr: wheel.board.app.base,
         hclk,
@@ -127,6 +152,13 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         max_quantum: args.max_quantum,
         marker_window_s: 4.0,
     };
+    let firmware_out = FirmwareOut { label, sha256, bytes: image.len() };
+    if let Some(scenario) = scenario {
+        let live = files.live(scenario.rider, scenario.assist)?;
+        let machine = Machine::new_live(&config, &euc_sim::registry(), backend(args.exact_quanta), live)?;
+        let session = Session::new(machine, stock.then_some(&files.stockmap), args.sample_hz);
+        return ride(ctx, &args, &files, &scenario, session, firmware_out);
+    }
     let mut machine = Machine::new(&config, &euc_sim::registry(), backend(args.exact_quanta))?;
 
     let total = (args.seconds * hclk as f64) as u64;
@@ -142,7 +174,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let report = Report::new(&machine, &injections);
     let output = RunOutput {
         wheel: &wheel.id,
-        firmware: FirmwareOut { label, sha256, bytes: image.len() },
+        firmware: firmware_out,
         wall_seconds: round(wall),
         realtime_factor: round(report.sim_seconds / wall),
         steady_state: Steady {
@@ -158,9 +190,141 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     if ctx.json {
         ui::json_with_profiles(&wheel.origin, &output)?;
     } else {
-        print(&wheel, &output);
+        print(wheel, &output);
     }
     Ok(if report.halted.is_some() { Verdict::Refused } else { Verdict::Ok })
+}
+
+/// The JSON a scenario run prints.
+#[derive(Serialize)]
+struct RideOutput<'a> {
+    wheel: &'a str,
+    firmware: FirmwareOut,
+    scenario: &'a str,
+    sim_seconds: f64,
+    wall_seconds: f64,
+    realtime_factor: f64,
+    passed: bool,
+    #[serde(flatten)]
+    outcome: &'a Outcome,
+    events: &'a [Event],
+    halted: Option<String>,
+}
+
+fn load_scenario(path: &Path) -> anyhow::Result<Scenario> {
+    let text = fs::read_to_string(path).with_context(|| format!("cannot read {}", ui::path(path)))?;
+    Scenario::from_toml(&text).with_context(|| format!("scenario {}", ui::path(path)))
+}
+
+/// Rides `scenario` and reports its checks.
+fn ride(
+    ctx: &Context,
+    args: &Args,
+    files: &WheelFiles,
+    scenario: &Scenario,
+    mut session: Session,
+    firmware: FirmwareOut,
+) -> anyhow::Result<Verdict> {
+    let wheel = &files.profile;
+    let mut recorder = match &args.record {
+        Some(path) => {
+            let header = Header {
+                wheel: &wheel.id,
+                firmware: &firmware.label,
+                scenario: Some(&scenario.name),
+                sample_hz: args.sample_hz,
+                bodies: session.bodies(),
+                channels: &[],
+            };
+            Some(Recorder::create(path, &header).with_context(|| format!("cannot write {}", ui::path(path)))?)
+        }
+        None => None,
+    };
+    let mut events = Vec::new();
+    let mut write_error = None;
+    let started = Instant::now();
+    let outcome = scenario::run(scenario, &mut session, |snapshot, session| {
+        events.extend(session.take_events());
+        if let Some(recorder) = recorder.as_mut()
+            && let Err(error) = recorder.push(snapshot)
+        {
+            write_error.get_or_insert(error);
+        }
+    })
+    .with_context(|| format!("scenario {}", scenario.name))?;
+    let wall = started.elapsed().as_secs_f64();
+    events.extend(session.take_events());
+    if let Some(error) = write_error {
+        bail!("recording: {error}");
+    }
+    if let (Some(recorder), Some(path)) = (recorder, &args.record) {
+        recorder.finish(&events).with_context(|| format!("cannot write {}", ui::path(path)))?;
+    }
+    let sim_seconds = session.time_s();
+    let halted = session.machine().halted().map(str::to_owned);
+    let passed = outcome.passed() && halted.is_none();
+    let output = RideOutput {
+        wheel: &wheel.id,
+        firmware,
+        scenario: &scenario.name,
+        sim_seconds: round(sim_seconds),
+        wall_seconds: round(wall),
+        realtime_factor: round(sim_seconds / wall),
+        passed,
+        outcome: &outcome,
+        events: &events,
+        halted,
+    };
+    if ctx.json {
+        ui::json_with_profiles(&wheel.origin, &output)?;
+    } else {
+        print_ride(wheel, scenario, args, &output);
+    }
+    Ok(if passed { Verdict::Ok } else { Verdict::Refused })
+}
+
+fn print_ride(wheel: &WheelProfile, scenario: &Scenario, args: &Args, output: &RideOutput<'_>) {
+    ui::row(STRONG, "wheel", format!("{} ({}), from {}", wheel.name, wheel.id, wheel.origin));
+    ui::row(STRONG, "firmware", format!("{}  {}", output.firmware.label, output.firmware.sha256.short()));
+    ui::row(STRONG, "scenario", format!("{}: {}", ui::safe(&scenario.name), ui::safe(&scenario.description)));
+    ui::row(
+        STRONG,
+        "ran",
+        format!(
+            "{:.1} s simulated in {:.1} s: {:.2}x real time",
+            output.sim_seconds, output.wall_seconds, output.realtime_factor
+        ),
+    );
+    let o = output.outcome;
+    ui::row(
+        STRONG,
+        "ride",
+        format!(
+            "top {:.1} km/h, {:.1} m, |pitch| up to {:.1}° after the release",
+            o.top_speed_kmh, o.distance_m, o.max_abs_pitch_deg
+        ),
+    );
+    for event in output.events.iter().filter(|e| e.kind != EventKind::Scenario).take(20) {
+        let style = if matches!(event.kind, EventKind::Cutoff | EventKind::Fault) { WARN } else { DIM };
+        ui::row(style, "event", format!("{:.2} s {}", event.t_s, ui::safe(&event.text)));
+    }
+    if let Some(path) = &args.record {
+        ui::row(STRONG, "recording", ui::path(path));
+    }
+    for check in &o.checks {
+        let (style, word) = if check.passed { (GOOD, "PASS") } else { (BAD, "FAIL") };
+        ui::row(style, word, format!("{}: {}", check.what, check.measured));
+    }
+    if let Some(why) = &output.halted {
+        ui::row(BAD, "HALTED", ui::safe(why));
+    }
+    let passed = o.checks.iter().filter(|c| c.passed).count();
+    let summary = format!("{passed} of {} checks", o.checks.len());
+    if output.passed {
+        ui::row(GOOD, "RESULT", format!("pass, {summary}"));
+    } else {
+        ui::row(BAD, "RESULT", format!("fail, {summary}"));
+    }
 }
 
 /// The CPU backend this build has: Unicorn with the `unicorn` feature, none otherwise (our own

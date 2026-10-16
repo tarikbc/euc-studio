@@ -1,2 +1,2 @@
-# Cortex-M exception names read better as plain words in docs than as code.
-doc-valid-idents = ["..", "BusFault", "HardFault", "MemManage", "UsageFault", "SysTick", "PendSV", "SVCall", "DebugMon"]
+# Cortex-M exception names, and product names, read better as plain words in docs than as code.
+doc-valid-idents = ["..", "BusFault", "HardFault", "MemManage", "UsageFault", "SysTick", "PendSV", "SVCall", "DebugMon", "MuJoCo"]

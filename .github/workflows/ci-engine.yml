@@ -7,6 +7,8 @@ on:
     paths:
       - "crates/**"
       - "profiles/**"
+      - "tools/fetch-mujoco/**"
+      - ".cargo/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -34,6 +36,13 @@ jobs:
       # Installs the toolchain pinned in rust-toolchain.toml, with rustfmt and clippy.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The MuJoCo library euc-physics links: the official release, checked against its pinned sha256.
+      - name: Fetch MuJoCo
+        run: python tools/fetch-mujoco/fetch.py --github
+      - run: python -m unittest discover -s tools/fetch-mujoco -p 'test_*.py'
       - run: cargo fmt --all --check
       # All features: the Unicorn backend (GPL-2.0, dev only) is linted too.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -49,6 +58,12 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The MuJoCo library euc-physics links: the official release, checked against its pinned sha256.
+      - name: Fetch MuJoCo
+        run: python tools/fetch-mujoco/fetch.py --github
       # euc-unicorn builds QEMU and boots the stock image; stock-boot.yml runs it.
       - run: cargo test --workspace --exclude euc-unicorn --locked
 

@@ -3,8 +3,11 @@
 
 use std::time::Duration;
 
-use euc_core::{Build, ConfigError, Ctx, Peripheral, ResetKind, Signal};
+use euc_core::{Build, ConfigError, Ctx, PackReading, Peripheral, ResetKind, Signal};
 use serde::Deserialize;
+
+use crate::fault::{DeviceFault, Schedule};
+use crate::rng::Rng;
 
 /// The controller's poll, sent on USART3 (9600 8N1) about every 3 s. Its meaning is UNKNOWN; the
 /// BMS answers any occurrence of it.
@@ -24,6 +27,9 @@ pub const STATUS_OK: u16 = 0x7D01;
 
 /// Cells in series per pack (two packs in parallel).
 const SERIES: f64 = 32.0;
+
+/// Packs: blocks `2k` and `2k + 1` are pack `k`.
+const PACKS: usize = BLOCKS / 2;
 
 const PORT_RX: u8 = 0;
 const PORT_TX: u8 = 1;
@@ -107,7 +113,8 @@ const fn default_connected() -> bool {
 /// Blocks 0 and 1 are pack A, blocks 2 and 3 pack B.
 ///
 /// As a board component (kind `smart-bms`): bytes arrive on `"rx"` and the reply leaves on
-/// `"tx"`, every cell set from the plant's battery voltage at the moment of the request. Parameters
+/// `"tx"`, with the plant's packs at the moment of the request ([`set_packs`](Self::set_packs)), or
+/// every cell at the plant's battery voltage when the plant does not model packs. Parameters
 /// `delay_s` (0.005), `temps` (`[23, 22, 23]`, the maintainer's wheel) and `connected` (true).
 #[derive(Debug, Clone)]
 pub struct SmartBms {
@@ -119,6 +126,7 @@ pub struct SmartBms {
     pub connected: bool,
     window: [u8; 5],
     requests: u64,
+    faults: Schedule,
 }
 
 impl SmartBms {
@@ -131,6 +139,7 @@ impl SmartBms {
             connected: true,
             window: [0; 5],
             requests: 0,
+            faults: Schedule::default(),
         };
         bms.set_pack_voltage(pack_v);
         bms
@@ -153,6 +162,25 @@ impl SmartBms {
         let cell_mv = (pack_v / SERIES * 1000.0).round_ties_even().clamp(0.0, f64::from(u16::MAX)) as u16;
         for block in &mut self.blocks {
             block.cells_mv = [cell_mv; 16];
+        }
+    }
+
+    /// Sets the blocks from what each pack's boards measure: blocks `2k` and `2k + 1` are pack `k`,
+    /// with its cells 0-15 and 16-31 and its temperature sensors 0-2 and 3-5; both report the pack
+    /// current (discharge positive: the sign the real boards use is UNKNOWN). Packs, cells and
+    /// sensors that `packs` lacks keep their values.
+    pub fn set_packs(&mut self, packs: &[PackReading]) {
+        for (k, pack) in packs.iter().enumerate().take(PACKS) {
+            for half in 0..2 {
+                let block = &mut self.blocks[2 * k + half];
+                for (slot, &mv) in block.cells_mv.iter_mut().zip(pack.cells_mv.iter().skip(16 * half)) {
+                    *slot = mv;
+                }
+                for (slot, &t) in block.temps_c.iter_mut().zip(pack.temps_c.iter().skip(3 * half)) {
+                    *slot = t.round_ties_even().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16;
+                }
+                *block = block.with_current(pack.current_a);
+            }
         }
     }
 
@@ -181,6 +209,34 @@ impl SmartBms {
     pub const fn requests(&self) -> u64 {
         self.requests
     }
+
+    /// Adds a BMS fault (`bms_silent`, `bms_garbled`) for the cycles `from..until` (`None`: to
+    /// the end of the run). As a board component the BMS applies it to every poll it answers
+    /// inside the window (the cycle of the poll's last byte).
+    pub fn add_fault(&mut self, from: u64, until: Option<u64>, fault: DeviceFault) -> Result<(), String> {
+        self.faults.add("smart-bms", from, until, fault)
+    }
+
+    /// The reply to a poll at `now` with the active faults: `None` if the BMS stays silent.
+    fn reply_at(&self, now: u64) -> Option<Vec<u8>> {
+        let mut reply = self.reply();
+        let mut rng = Rng::new(now ^ 0x424D_5300);
+        for fault in self.faults.active(now) {
+            match fault {
+                DeviceFault::BmsSilent => return None,
+                DeviceFault::BmsGarbled { byte_error_rate, missing_bytes } => {
+                    for byte in &mut reply {
+                        if rng.unit() <= byte_error_rate {
+                            *byte = rng.next_u64() as u8;
+                        }
+                    }
+                    reply.truncate(reply.len().saturating_sub(usize::from(missing_bytes)));
+                }
+                DeviceFault::ImuNoise { .. } | DeviceFault::ImuBias { .. } | DeviceFault::ImuStuck => {}
+            }
+        }
+        Some(reply)
+    }
 }
 
 impl Peripheral for SmartBms {
@@ -197,9 +253,12 @@ impl Peripheral for SmartBms {
             return;
         }
         self.set_pack_voltage(ctx.plant().battery_v());
+        let packs: Vec<PackReading> = (0..PACKS).map_while(|k| ctx.plant().pack(k)).collect();
+        self.set_packs(&packs);
+        let Some(reply) = self.reply_at(at) else { return };
         let delay = self.reply_delay.as_nanos() * u128::from(ctx.hclk()) / 1_000_000_000;
         let start = at + u64::try_from(delay).unwrap_or(u64::MAX);
-        for byte in self.reply() {
+        for byte in reply {
             ctx.emit(PORT_TX, Signal::Byte { value: u16::from(byte), at: start });
         }
     }
@@ -254,6 +313,36 @@ mod tests {
         let answered = REQUEST.iter().chain(&REQUEST).filter(|&&b| bms.receive(b)).count();
         assert_eq!(answered, 0);
         assert_eq!(bms.requests(), 2);
+    }
+
+    #[test]
+    fn packs_fill_their_two_blocks() {
+        let mut bms = SmartBms::new(130.0, [23; 3]);
+        let mut cells: Vec<u16> = (0..32).map(|c| 4000 + c).collect();
+        cells[30] = 3500;
+        let pack = PackReading { cells_mv: cells, temps_c: vec![24.4, 24.6, 25.0, 31.5, 30.0, 29.0], current_a: 12.5 };
+        bms.set_packs(&[pack]);
+        let [a0, a1, b0, _] = bms.blocks;
+        assert_eq!((a0.cells_mv[0], a0.cells_mv[15], a1.cells_mv[0], a1.cells_mv[14]), (4000, 4015, 4016, 3500));
+        assert_eq!((a0.temps_c, a1.temps_c), ([24, 25, 25], [32, 30, 29]), "rounded half to even");
+        assert_eq!(a0.current, a1.current, "both boards of a pack see its current");
+        assert!((f64::from(a1.current) * 90.0 / 32.769 / 1000.0 - 12.5).abs() < 0.003);
+        assert_eq!(b0, Block::uniform(4062, [23; 3]), "pack B not given: unchanged");
+    }
+
+    #[test]
+    fn faults_silence_or_garble_the_reply() {
+        let mut bms = SmartBms::new(130.0, [23; 3]);
+        bms.add_fault(100, Some(200), DeviceFault::BmsSilent).unwrap();
+        bms.add_fault(300, None, DeviceFault::BmsGarbled { byte_error_rate: 0.2, missing_bytes: 6 }).unwrap();
+        assert!(bms.add_fault(0, None, DeviceFault::ImuStuck).is_err());
+        assert_eq!(bms.reply_at(50), Some(bms.reply()));
+        assert_eq!(bms.reply_at(150), None, "silent");
+        let garbled = bms.reply_at(300).unwrap();
+        assert_eq!(garbled.len(), REPLY_LEN - 6);
+        let wrong = garbled.iter().zip(bms.reply()).filter(|(a, b)| **a != *b).count();
+        assert!((15..60).contains(&wrong), "about 20 % of 170 bytes: {wrong}");
+        assert_eq!(garbled, bms.reply_at(300).unwrap(), "deterministic");
     }
 
     #[test]

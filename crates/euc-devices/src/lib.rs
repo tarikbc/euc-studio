@@ -5,7 +5,8 @@
 //! [`euc_core::Peripheral`] implementation so a wheel's `board.toml` can place it and wire its
 //! ports to the MCU's pins, UARTs, SPI ports and timer outputs ([`register`] adds the kinds).
 //! Sensor and battery values come from the plant. The LED strip has no component: the board
-//! decodes the RAM buffer behind its DMA channel with [`ws2812::decode`].
+//! decodes the RAM buffer behind its DMA channel with [`ws2812::decode`]. A scenario can inject
+//! IMU and BMS faults ([`fault`]) for a time window.
 //!
 //! | Kind | Model | Ports | Begode Extreme wiring |
 //! |---|---|---|---|
@@ -20,12 +21,15 @@ use serde::Deserialize;
 
 pub mod bms;
 pub mod buzzer;
+pub mod fault;
 pub mod mpu6500;
+mod rng;
 pub mod tm1640;
 pub mod ws2812;
 
 pub use bms::SmartBms;
 pub use buzzer::{Buzzer, BuzzerEvent, Pwm};
+pub use fault::DeviceFault;
 pub use mpu6500::Mpu6500;
 pub use tm1640::Tm1640;
 pub use ws2812::Rgb;

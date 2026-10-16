@@ -17,11 +17,13 @@ use thiserror::Error;
 use crate::board::{Action, BoardLogic};
 use crate::config::{BoardFile, Span, StockMap};
 use crate::memory::{Memory, MemoryBus};
-use crate::plant::{Plant, PlantState};
+use crate::plant::{Live, Plant, PlantState};
 use crate::system::{Slot, System};
 
 /// Name of the simulator's board-logic component in wiring.
 pub const BOARD: &str = "board";
+/// Name of the plant component in wiring (inverter legs in, hall lines out).
+pub const PLANT: &str = "plant";
 
 /// xPSR bits holding the IT state; an interrupt is never taken inside an IT block.
 const XPSR_IT: u32 = 0x0600_FC00;
@@ -38,7 +40,7 @@ pub struct MachineConfig<'a> {
     pub load_addr: u32,
     /// Core clock in Hz.
     pub hclk: u64,
-    /// Sensor values.
+    /// Sensor values of a static plant; for a live plant, the values it does not model.
     pub plant: PlantState,
     /// BLE bytes to send, with the simulated second to send them at.
     pub injections: Vec<(f64, Vec<u8>)>,
@@ -95,9 +97,29 @@ pub struct Machine {
 }
 
 impl Machine {
-    /// Builds the machine and powers it on. `registry` must know every kind in the board file
-    /// except the simulator's own `board` logic, which is added last.
+    /// Builds the machine with a static plant and powers it on. `registry` must know every kind
+    /// in the board file except the simulator's own `plant` and `board` logic, which are added
+    /// last.
     pub fn new(config: &MachineConfig<'_>, registry: &Registry, cpu: Box<CpuFactory<'_>>) -> Result<Self, BuildError> {
+        Self::build(config, registry, cpu, None)
+    }
+
+    /// Builds the machine with a live plant (electrical plant and body physics) and powers it on.
+    pub fn new_live(
+        config: &MachineConfig<'_>,
+        registry: &Registry,
+        cpu: Box<CpuFactory<'_>>,
+        live: Live,
+    ) -> Result<Self, BuildError> {
+        Self::build(config, registry, cpu, Some(live))
+    }
+
+    fn build(
+        config: &MachineConfig<'_>,
+        registry: &Registry,
+        cpu: Box<CpuFactory<'_>>,
+        live: Option<Live>,
+    ) -> Result<Self, BuildError> {
         let file = config.board;
         let map = &file.memory;
         let mem = Memory::new(map, config.image, config.load_addr).map_err(BuildError::Board)?;
@@ -109,6 +131,7 @@ impl Machine {
         let default_handler = default_handler(&mem, config.load_addr);
 
         let mut names: Vec<String> = file.instances.iter().map(|i| i.name.clone()).collect();
+        names.push(PLANT.to_owned());
         names.push(BOARD.to_owned());
         let ids = |name: &str| names.iter().position(|n| n == name).map(|i| i as DeviceId);
         let mut slots = Vec::new();
@@ -123,21 +146,8 @@ impl Machine {
                 timers: Vec::new(),
             });
         }
-        let release_after = (file.board.release_after_latch_s * config.hclk as f64) as u64;
-        let mut board = BoardLogic::new(config.plant.hall, file.board.button_active_low, release_after);
-        for (at, bytes) in &config.injections {
-            board.at(seconds(*at, config.hclk), Action::Inject(bytes.clone()));
-        }
-        for at in &config.power_cycles {
-            board.at(seconds(*at, config.hclk), Action::PowerCycle);
-        }
-        slots.push(Slot {
-            name: BOARD.to_owned(),
-            base: None,
-            size: 0,
-            device: Some(Box::new(board)),
-            timers: Vec::new(),
-        });
+        let plant_id = slots.len() as DeviceId;
+        slots.extend(own_slots(config, live));
 
         let mcu = &file.mcu;
         let exc = ExceptionUnit::new(mcu.irqs, mcu.priority_bits);
@@ -145,14 +155,13 @@ impl Machine {
             .stockmap
             .map(|map| map.entries.iter().filter(|e| e.marker).map(|e| (e.addr, e.name.clone())).collect())
             .unwrap_or_default();
-        let plant = Plant::new(config.plant.clone(), file.analog.clone());
         let mut sys = System::new(
             config.hclk,
             mem,
             map.clone(),
             slots,
             exc,
-            plant,
+            Some(plant_id),
             mcu.irq_names.clone(),
             markers.iter().cloned().collect::<HashMap<_, _>>(),
         );
@@ -318,6 +327,29 @@ impl Machine {
         (device as &dyn std::any::Any).downcast_ref().expect("the board slot holds BoardLogic")
     }
 
+    /// Why the run stopped for good, if it did (a fatal blocker).
+    pub fn halted(&self) -> Option<&str> {
+        self.sys.diag.halted.as_deref()
+    }
+
+    /// The plant (static values, or the electrical plant and body physics).
+    ///
+    /// # Panics
+    ///
+    /// Never: the plant component exists from construction on and is idle between runs.
+    pub fn plant(&self) -> &Plant {
+        self.sys.plant_ref().expect("the plant is idle between runs")
+    }
+
+    /// The plant, to steer the rider or the stand between runs.
+    ///
+    /// # Panics
+    ///
+    /// Never, as for [`Machine::plant`].
+    pub fn plant_mut(&mut self) -> &mut Plant {
+        self.sys.plant_mut().expect("the plant is idle between runs")
+    }
+
     /// The CPU backend.
     pub fn cpu(&self) -> &dyn Cpu {
         self.cpu.as_ref()
@@ -332,6 +364,72 @@ impl Machine {
     pub fn exceptions_taken(&self) -> &[u64] {
         &self.sys.exc.taken
     }
+
+    /// The component named `name` in the board file (`"display"`, `"buzzer"`, `"dma1"`), if it
+    /// is a `T`. For viewers that mirror device state (display digits, LEDs, buzzer tone).
+    pub fn component<T: euc_core::Peripheral>(&self, name: &str) -> Option<&T> {
+        let slot = self.sys.slots.iter().find(|s| s.name == name)?;
+        let device: &dyn std::any::Any = slot.device.as_deref()?;
+        device.downcast_ref()
+    }
+
+    /// The component named `name`, if it is a `T`, to change it between runs (fault injection).
+    pub fn component_mut<T: euc_core::Peripheral>(&mut self, name: &str) -> Option<&mut T> {
+        let slot = self.sys.slots.iter_mut().find(|s| s.name == name)?;
+        let device: &mut dyn std::any::Any = slot.device.as_deref_mut()?;
+        device.downcast_mut()
+    }
+
+    /// The names of every component that is a `T`, in board order.
+    pub fn component_names<T: euc_core::Peripheral>(&self) -> Vec<String> {
+        self.sys
+            .slots
+            .iter()
+            .filter(|slot| slot.device.as_deref().is_some_and(|d| (d as &dyn std::any::Any).is::<T>()))
+            .map(|slot| slot.name.clone())
+            .collect()
+    }
+
+    /// Sends `bytes` to the controller's BLE input now, as a phone would, while the machine runs
+    /// (the configured injections are only for times known before the run).
+    pub fn inject_ble(&mut self, bytes: &[u8]) {
+        let now = self.cycles;
+        let board = usize::from(self.board);
+        let slot = &mut self.sys.slots[board];
+        let Some(device) = slot.device.as_deref_mut() else { return };
+        let Some(logic) = (device as &mut dyn std::any::Any).downcast_mut::<BoardLogic>() else { return };
+        logic.at(now, Action::Inject(bytes.to_vec()));
+        // Fire the board's timeline at the next quantum boundary.
+        match slot.timers.iter_mut().find(|(tag, _)| *tag == crate::board::TIMELINE) {
+            Some(timer) => timer.1 = timer.1.min(now),
+            None => slot.timers.push((crate::board::TIMELINE, now)),
+        }
+    }
+}
+
+/// The simulator's own components, after the board file's: the plant, then the board logic.
+fn own_slots(config: &MachineConfig<'_>, live: Option<Live>) -> [Slot; 2] {
+    let file = config.board;
+    let plant = match live {
+        Some(live) => Plant::live(config.plant.clone(), file.analog.clone(), live),
+        None => Plant::new(config.plant.clone(), file.analog.clone()),
+    };
+    let release_after = (file.board.release_after_latch_s * config.hclk as f64) as u64;
+    let mut board = BoardLogic::new(file.board.button_active_low, release_after);
+    for (at, bytes) in &config.injections {
+        board.at(seconds(*at, config.hclk), Action::Inject(bytes.clone()));
+    }
+    for at in &config.power_cycles {
+        board.at(seconds(*at, config.hclk), Action::PowerCycle);
+    }
+    let slot = |name: &str, device: Box<dyn euc_core::Peripheral>| Slot {
+        name: name.to_owned(),
+        base: None,
+        size: 0,
+        device: Some(device),
+        timers: Vec::new(),
+    };
+    [slot(PLANT, Box::new(plant)), slot(BOARD, Box::new(board))]
 }
 
 /// Exception name for reports and messages.

@@ -68,11 +68,12 @@ it against the sha256 pins built into the tool. Nothing from the vendor image is
 
 ## Try it
 
-You need Rust (the version is pinned in `rust-toolchain.toml`), and for the other parts the tools listed in each
-area's README.
+You need Rust (the version is pinned in `rust-toolchain.toml`), Python 3.11+, and for the other parts the tools
+listed in each area's README.
 
 ```sh
 git config core.hooksPath tools/hooks             # once per clone: the vendor guard runs before each commit
+python3 tools/fetch-mujoco/fetch.py                # once per clone: the pinned MuJoCo library the physics links
 
 cargo run -p euc-cli -- fetch begode-extreme       # download and verify the official Begode Extreme build
 cargo run -p euc-cli -- firmware list
@@ -80,6 +81,8 @@ cargo run -p euc-cli -- image validate <file>      # the image gate the flasher 
 
 # run the stock firmware in the simulator (development backend, needs CMake to build Unicorn)
 cargo run --release -p euc-cli --features unicorn -- sim run begode-extreme --seconds 10 --inject V@2.6
+# ride it: motor, battery, body and rider simulated, expectations checked (scenarios/)
+cargo run --release -p euc-cli --features unicorn -- sim run --scenario scenarios/ride-20kmh-stop.toml
 
 (cd firmware && cmake --workflow --preset target-clean)  # our firmware image (Arm GNU Toolchain)
 (cd app && pnpm install && pnpm tauri dev)                # the EUC Studio app (Node, pnpm, Tauri)

@@ -8,6 +8,8 @@ default-members = [
     "crates/euc-devices",
     "crates/euc-fwsource",
     "crates/euc-image",
+    "crates/euc-physics",
+    "crates/euc-plant",
     "crates/euc-profile",
     "crates/euc-proto-begode",
     "crates/euc-sim",
@@ -30,10 +32,13 @@ euc-core = { path = "crates/euc-core" }
 euc-devices = { path = "crates/euc-devices" }
 euc-fwsource = { path = "crates/euc-fwsource" }
 euc-image = { path = "crates/euc-image" }
+euc-physics = { path = "crates/euc-physics" }
+euc-plant = { path = "crates/euc-plant" }
 euc-profile = { path = "crates/euc-profile" }
 euc-proto-begode = { path = "crates/euc-proto-begode" }
 euc-sim = { path = "crates/euc-sim" }
 euc-stm32f1 = { path = "crates/euc-stm32f1" }
+euc-telemetry = { path = "crates/euc-telemetry" }
 euc-unicorn = { path = "crates/euc-unicorn" }
 
 anstream = "1.0"
@@ -44,6 +49,9 @@ crc32fast = "1.5"
 directories = "6.0"
 encoding_rs = "0.8"
 hex = "0.4"
+# MuJoCo 3.9.0 (Apache-2.0), linked dynamically from the official release that tools/fetch-mujoco
+# downloads; the `+mj-` suffix must match its VERSION.
+mujoco-rs = { version = "=5.0.0", default-features = false }
 object = { version = "0.40", default-features = false, features = ["read_core", "elf", "std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -10,6 +10,8 @@ registries or pinned releases and keep their own licenses:
 - Rust crates of the engine and CLI: see crates/THIRD_PARTY.md. All are permissive. deny.toml denies GPL
   everywhere except the optional development backend crates/euc-unicorn (Unicorn Engine, GPL-2.0), which is used
   only as a test oracle during development and is never part of a release build.
+- MuJoCo 3.9.0 (Apache-2.0, Copyright DeepMind Technologies Limited), the physics engine, linked
+  dynamically from the official release that tools/fetch-mujoco downloads and checks.
 - Firmware: CMSIS 6 Core headers (Apache-2.0) and Unity (MIT), downloaded at configure time with pinned
   versions and sha256 checks; see firmware/README.md.
 - EUC Studio app: npm packages and fonts, see app/THIRD_PARTY.md.

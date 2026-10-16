@@ -1,0 +1,352 @@
+# Begode Extreme: the front display board (T16-007) and what the stock firmware lights on it.
+# Read by crates/euc-display. docs/hardware/display.md explains the values and the wheel states.
+#
+# Coordinates are millimetres on the board, origin at the top-left corner of the board outline's
+# bounding box, x to the right, y down, seen from the front. They were measured on a shop photo
+# of a bare board at 6.17 px/mm (the 79 mm board height and the 2.0 mm pitch of the pin headers
+# agree on that scale); positions are good to about 0.2 mm inside the display window and 1 mm
+# for the board outline.
+#
+# Evidence tags (`mapping` per element: the link between the driver bits and the value):
+#   OBSERVED = the stock firmware wrote these bits in the simulator (euc sim, GW1825007) for the
+#              stated value, and the code agrees.
+#   INFERRED = from the firmware code only, or a physical placement the code cannot show.
+# `photo` per element: what the owner's photos of his lit display show (a parked photo and a
+# riding photo, taken at different times). Those photos are private and stay out of the repo.
+
+schema = 1
+
+[board]
+name = "T16-007"
+date = "2023-06-06"
+silkscreen_mm = [119.5, 79.0]  # printed on the board; the full outline with both side tabs
+                               # measures 127.2 x 79.2 in the photo, so 119.5 leaves out one tab
+outline = [                    # approximate, clockwise from the top-left tab
+    [8.8, 0.0], [118.0, 0.0], [118.0, 11.3], [127.2, 11.3], [127.2, 69.5], [117.5, 69.5],
+    [117.5, 79.2], [10.5, 79.2], [0.0, 68.1], [0.0, 52.7], [19.3, 44.9], [19.3, 13.9], [8.8, 13.9],
+]
+
+# The black LED panel; every element lies inside it.
+[window]
+x = 22.45
+y = 1.38
+w = 82.57
+h = 55.18
+
+[driver]
+chip = "TM1640"   # INFERRED from the bus protocol; 2 wires, PC5 = CLK, PC4 = DIN, LSB first
+grids = 16        # grid index i = TM1640 address 0xC0 + i = the i-th data byte of a refresh
+refresh_hz = 4.96 # every 100 ticks of the 496 Hz RTC tick (OBSERVED)
+brightness = 7    # control command 0x8F on every refresh: display on, pulse width 14/16 (OBSERVED)
+# Bit of a grid byte that drives each segment line (OBSERVED: the firmware's digit patterns
+# 0-9 are FC 60 DA F2 66 B6 BE E0 FE F6).
+segment_bits = { a = 7, b = 6, c = 5, d = 4, e = 3, f = 2, g = 1, dp = 0 }
+# Bits the firmware never sets and that light nothing visible in the photo.
+unused = [[12, 0], [14, 0], [15, 0]]
+
+[appearance]
+# From the owner's parked photo (phone camera at night, so the white balance is approximate):
+# cool white segments; unlit segments stay faintly visible as grey ghosts behind the smoked
+# window; the panel is near black.
+lit = "#E2E8FC"
+unlit = "#3B3F57"
+panel = "#0A0B1A"
+
+# How the board sits in the wheel, for the 3D shell. The panel is on top of the shell, facing up,
+# beside the handle. A rider facing forward reads it upright, with the top of the speed digits
+# toward the front and the battery bars on the rider's left (the owner confirmed it). His riding
+# photo shows the panel rotated 180 degrees only because he rode the wheel backwards for it.
+[mount]
+surface = "top of the shell, facing up, behind a smoked window"
+board_up = "front"
+board_right = "right"
+rider_view_deg = 0.0
+evidence = "OBSERVED"
+note = "owner: upright from the rider's position when riding forward"
+
+# 7-segment styles. Upright (no skew), segments meet at 45-degree miters, the middle ends are
+# pointed. Lengths in mm; `miter` is how far each segment end is set back from the joint's
+# diagonal, measured along the axis (so the visible gap is miter * sqrt(2)); `corner` cuts the
+# outer acute corners flat at that distance from the digit box. euc-display builds the polygons.
+[style.big]
+width = 20.10
+height = 39.87
+stroke = 4.62
+miter = 0.77
+corner = 1.46
+skew_deg = 0.0
+
+[style.small]
+width = 3.73
+height = 7.94
+stroke = 0.85
+miter = 0.58
+corner = 0.65
+skew_deg = 0.0
+
+# ---- Speed: three big digits, each driven by two grids that always carry the same byte -------
+# Value: |speed| in km/h (mph in miles mode) from the firmware's own speed estimate, truncated,
+# clamped to 199, leading zeros shown. Digit roles OBSERVED at speed in the simulator
+# (ride-20kmh-stop: 001 to 021 and back to 000, the same byte on both grids of a digit) and in the
+# owner's photos (000 parked, 021 riding); the truncation and the clamp are from the code.
+
+[[element]]
+id = "speed.hundreds"
+kind = "digit7"
+style = "big"
+x = 23.99
+y = 4.10
+grids = [11, 10]
+meaning = "speed, hundreds digit"
+unit = "km/h (mph in miles mode)"
+mapping = "OBSERVED"
+photo = "000 parked; 021 riding at about 21 km/h"
+
+[[element]]
+id = "speed.tens"
+kind = "digit7"
+style = "big"
+x = 53.81
+y = 4.10
+grids = [8, 9]
+meaning = "speed, tens digit"
+unit = "km/h (mph in miles mode)"
+mapping = "OBSERVED"
+photo = "000 parked; 021 riding at about 21 km/h"
+
+[[element]]
+id = "speed.ones"
+kind = "digit7"
+style = "big"
+x = 83.63
+y = 4.10
+grids = [7, 6]
+meaning = "speed, ones digit"
+unit = "km/h (mph in miles mode)"
+mapping = "OBSERVED"
+photo = "000 parked; 021 riding at about 21 km/h"
+
+# ---- Battery: five bars, each lit by the dp bit of two grids ---------------------------------
+# Level from the controller's own pack voltage: < 100.1 V none (bar 1 blinks, ~1 Hz),
+# 100.1 V 1, 109.1 V 2, 114.0 V 3, 121.0 V 4, 127.0 V 5 bars. Which grids make up each level
+# is OBSERVED in the simulator; the owner's photos show the bars filling from the left (3 left
+# bars lit parked, 4 riding), so level 1 is the leftmost bar.
+
+[[element]]
+id = "battery.1"
+kind = "bar"
+x = 23.99
+y = 47.33
+w = 2.20
+h = 7.62
+sources = [[10, 0], [11, 0]]
+meaning = "battery bar 1 (first lit, last out); blinks when the pack is below 100.1 V"
+blink = "firmware: 500-tick period (1.0 s), dark when tick % 500 > 250, sampled at each refresh"
+mapping = "OBSERVED"
+photo = "lit parked (3 bars) and riding (4 bars)"
+
+[[element]]
+id = "battery.2"
+kind = "bar"
+x = 28.48
+y = 47.33
+w = 2.20
+h = 7.62
+sources = [[8, 0], [9, 0]]
+meaning = "battery bar 2, lit from 109.1 V"
+mapping = "OBSERVED"
+photo = "lit parked (3 bars) and riding (4 bars)"
+
+[[element]]
+id = "battery.3"
+kind = "bar"
+x = 32.98
+y = 47.33
+w = 2.20
+h = 7.62
+sources = [[6, 0], [7, 0]]
+meaning = "battery bar 3, lit from 114.0 V"
+mapping = "OBSERVED"
+photo = "lit parked (3 bars) and riding (4 bars)"
+
+[[element]]
+id = "battery.4"
+kind = "bar"
+x = 37.48
+y = 47.33
+w = 2.20
+h = 7.62
+sources = [[4, 0], [5, 0]]
+meaning = "battery bar 4, lit from 121.0 V"
+mapping = "OBSERVED"
+photo = "dark parked (3 bars), lit riding (4 bars)"
+
+[[element]]
+id = "battery.5"
+kind = "bar"
+x = 41.98
+y = 47.33
+w = 2.20
+h = 7.62
+sources = [[0, 0], [1, 0]]
+meaning = "battery bar 5, lit from 127.0 V"
+mapping = "OBSERVED"
+photo = "dark in both photos"
+
+# ---- Pedal mode: one small digit ------------------------------------------------------------
+# The firmware writes pedal mode + 1 here and nothing else (display_refresh, the same code in all
+# three official builds since 2024-11). Pedal mode is the pedal firmness the app sets with `s`,
+# `f`, `h` and the settings record keeps across power cycles; it is not a live value.
+
+[[element]]
+id = "pedal.mode"
+kind = "digit7"
+style = "small"
+x = 46.52
+y = 47.00
+grids = [5]
+meaning = "PEDAL MODE (firmness) + 1: 1 soft ('s'), 2 medium ('f', default), 3 hard ('h')"
+mapping = "OBSERVED"
+photo = "2 (medium) in both photos"
+
+# ---- Board temperature: "88.8" and the degree-Celsius sign ------------------------------------
+# Value: controller board NTC, filtered; truncated to 0.1, clamped to 99.9, below 0 shows 00.0,
+# leading zero shown. Both the point and the sign are always on.
+
+[[element]]
+id = "temp.tens"
+kind = "digit7"
+style = "small"
+x = 53.16
+y = 47.00
+grids = [4]
+meaning = "board temperature, tens digit"
+unit = "°C"
+mapping = "OBSERVED"
+photo = "24.9 parked"
+
+[[element]]
+id = "temp.ones"
+kind = "digit7"
+style = "small"
+x = 57.86
+y = 47.00
+grids = [3]
+meaning = "board temperature, ones digit"
+unit = "°C"
+mapping = "OBSERVED"
+
+[[element]]
+id = "temp.point"
+kind = "dot"
+cx = 62.97
+cy = 54.54
+d = 0.81
+sources = [[3, 0]]
+meaning = "temperature decimal point (always on)"
+mapping = "OBSERVED"
+photo = "lit"
+
+[[element]]
+id = "temp.tenths"
+kind = "digit7"
+style = "small"
+x = 64.26
+y = 47.00
+grids = [2]
+meaning = "board temperature, tenths digit"
+unit = "°C"
+mapping = "OBSERVED"
+
+[[element]]
+id = "temp.unit"
+kind = "symbol"
+glyph = "°C"
+ring = { cx = 69.61, cy = 51.94, rx = 0.40, ry = 0.73 }
+path = [[71.15, 52.43], [70.26, 52.43], [70.26, 54.70], [71.15, 54.70]]
+stroke = 0.30
+sources = [[2, 0]]
+meaning = "degree Celsius sign (always on); the firmware sets this bit, the LED it drives is INFERRED"
+mapping = "INFERRED"
+photo = "lit: a small ring and a C"
+
+# ---- Odometer: "88888.8", total distance (not the trip) ---------------------------------------
+# Value: total odometer / 100 in 0.1 km (0.1 mi in miles mode), leading zeros shown, clamped
+# to 99999.9. The point is always on. The owner confirms it is the total (life) distance.
+
+[[element]]
+id = "odometer.ten_thousands"
+kind = "digit7"
+style = "small"
+x = 74.72
+y = 47.00
+grids = [1]
+meaning = "odometer, 10000s digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"
+photo = "00558.3 parked (total distance)"
+
+[[element]]
+id = "odometer.thousands"
+kind = "digit7"
+style = "small"
+x = 79.42
+y = 47.00
+grids = [0]
+meaning = "odometer, 1000s digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"
+
+[[element]]
+id = "odometer.hundreds"
+kind = "digit7"
+style = "small"
+x = 84.04
+y = 47.00
+grids = [15]
+meaning = "odometer, 100s digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"
+
+[[element]]
+id = "odometer.tens"
+kind = "digit7"
+style = "small"
+x = 88.70
+y = 47.00
+grids = [14]
+meaning = "odometer, 10s digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"
+
+[[element]]
+id = "odometer.ones"
+kind = "digit7"
+style = "small"
+x = 93.35
+y = 47.00
+grids = [13]
+meaning = "odometer, ones digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"
+
+[[element]]
+id = "odometer.point"
+kind = "dot"
+cx = 98.46
+cy = 54.54
+d = 0.81
+sources = [[13, 0]]
+meaning = "odometer decimal point (always on)"
+mapping = "OBSERVED"
+
+[[element]]
+id = "odometer.tenths"
+kind = "digit7"
+style = "small"
+x = 99.84
+y = 47.00
+grids = [12]
+meaning = "odometer, tenths digit"
+unit = "km (mi in miles mode)"
+mapping = "OBSERVED"

@@ -137,7 +137,7 @@ impl Host for TestHost {
         self.peers.get_mut(&id).map(|peer| peer.as_mut() as &mut dyn Peripheral)
     }
 
-    fn plant(&self) -> &dyn PlantView {
+    fn plant(&mut self) -> &dyn PlantView {
         &self.plant
     }
 

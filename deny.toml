@@ -13,7 +13,11 @@ targets = [
 all-features = true
 
 [advisories]
-ignore = []
+ignore = [
+    # `paste` is unmaintained, not vulnerable: a compile-time macro helper of mujoco-rs 5.0 with no
+    # replacement release yet. Drop this when mujoco-rs moves off it.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained compile-time macro of mujoco-rs, no fix available" },
+]
 
 [licenses]
 # Anything not listed is refused. That covers every GPL and LGPL variant: no copyleft code may

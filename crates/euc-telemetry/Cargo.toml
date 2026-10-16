@@ -1,0 +1,18 @@
+[package]
+name = "euc-telemetry"
+description = "What the simulator streams: channel schema, snapshots, events and the binary batch format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

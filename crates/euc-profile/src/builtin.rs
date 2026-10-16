@@ -12,6 +12,8 @@ use crate::{Origin, ProfileError, WHEEL_FILE, WheelProfile};
 /// here (the tests below fail until it is).
 const FILES: &[(&str, &str, &str)] = &[
     ("begode-extreme", "board.toml", include_str!("../../../profiles/begode-extreme/board.toml")),
+    ("begode-extreme", "display.toml", include_str!("../../../profiles/begode-extreme/display.toml")),
+    ("begode-extreme", "plant.toml", include_str!("../../../profiles/begode-extreme/plant.toml")),
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
 ];
@@ -84,7 +86,7 @@ mod tests {
     fn unknown_wheel_or_file_names_the_built_in_set() {
         let message = load("nope").unwrap_err().to_string();
         assert_eq!(message, "no wheel profile \"nope\" in the built-in profiles (available: begode-extreme)");
-        let message = read("begode-extreme", "plant.toml").unwrap_err().to_string();
-        assert_eq!(message, "no file plant.toml for wheel \"begode-extreme\" in the built-in profiles");
+        let message = read("begode-extreme", "nope.toml").unwrap_err().to_string();
+        assert_eq!(message, "no file nope.toml for wheel \"begode-extreme\" in the built-in profiles");
     }
 }

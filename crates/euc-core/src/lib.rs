@@ -36,7 +36,7 @@ pub use bus::{Access, Bus, BusFault, BusFaultKind, Lane, Size};
 pub use clock::Clock;
 pub use cpu::{Cpu, Exit, Fault, Region, RegionKind};
 pub use nvic::{Entry, ExceptionUnit, IRQ0, PENDSV, SCS_BASE, SYSTICK, ScsWrite, SysTick};
-pub use periph::{Ctx, DeviceId, Host, ImuSample, Peripheral, PlantView, ResetKind, Signal};
+pub use periph::{Ctx, DeviceId, Host, ImuSample, PackReading, Peripheral, PlantView, ResetKind, Signal};
 pub use poll::PollDetector;
 pub use registry::{Build, ConfigError, Constructor, InstanceSpec, Registry};
 pub use regs::CoreRegs;

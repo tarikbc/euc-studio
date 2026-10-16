@@ -13,12 +13,13 @@ license policy in `deny.toml` for the whole dependency tree; this list is the hu
 | directories | 6.0 | MIT OR Apache-2.0 | euc-fwsource | per-user cache folder |
 | encoding_rs | 0.8 | (Apache-2.0 OR MIT) AND BSD-3-Clause | euc-proto-begode | GBK text the firmware sends |
 | hex | 0.4 | MIT OR Apache-2.0 | euc-profile | sha256 text form |
+| mujoco-rs | =5.0.0 | MIT OR Apache-2.0 | euc-physics | Rust bindings of MuJoCo 3.9.0 (the native library, Apache-2.0, comes from `tools/fetch-mujoco`) |
 | object | 0.40 | Apache-2.0 OR MIT | euc-image | reading firmware ELF files |
 | serde | 1.0 | MIT OR Apache-2.0 | most crates | (de)serialization, `board.toml` instance parameters |
-| serde_json | 1.0 | MIT OR Apache-2.0 | euc-fwsource, euc-cli | vendor API replies, `--json` output |
+| serde_json | 1.0 | MIT OR Apache-2.0 | euc-fwsource, euc-sim, euc-cli | vendor API replies, recording headers, `--json` output |
 | sha2 | 0.11 | MIT OR Apache-2.0 | euc-profile | sha256 pins |
 | thiserror | 2.0 | MIT OR Apache-2.0 | library crates | typed errors |
-| toml | 1.1 | MIT OR Apache-2.0 | euc-core, euc-profile, euc-sim, euc-cli | wheel and board profiles |
+| toml | 1.1 | MIT OR Apache-2.0 | euc-core, euc-plant, euc-profile, euc-sim, euc-cli | wheel, board and plant profiles |
 | ureq | 3.4 | MIT OR Apache-2.0 | euc-fwsource | HTTPS downloads (rustls) |
 | tempfile | 3.27 | MIT OR Apache-2.0 | tests only | scratch folders |
 | unicorn-engine | =2.1.5 | **GPL-2.0** | euc-unicorn only | CPU backend for development and CI; never in a shipped build (see below) |

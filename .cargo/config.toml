@@ -1,0 +1,4 @@
+[env]
+# The MuJoCo library that crates/euc-physics links through mujoco-rs. tools/fetch-mujoco/fetch.py downloads the
+# pinned release there. A MUJOCO_DYNAMIC_LINK_DIR set in the environment wins over this default.
+MUJOCO_DYNAMIC_LINK_DIR = { value = ".cache/mujoco/mujoco-3.9.0/lib", relative = true }

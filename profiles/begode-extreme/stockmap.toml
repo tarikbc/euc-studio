@@ -93,3 +93,28 @@ addr = 0x2000_005A
 size = 1
 kind = "u8"
 note = "frame 04 byte 14; bit 2 = IMU fault, bit 6 = hall error"
+
+# Cutoff flags (balance findings §5.3 and §6): scenarios fail if one is set after the stand lets go.
+[[ram]]
+name = "balance_disabled"
+addr = 0x2000_00DA
+size = 1
+kind = "u8"
+note = "1 while the balance output is disabled (fall detectors, handle cut, lock); the output ramps to 0"
+role = "cutoff"
+
+[[ram]]
+name = "drive_fault"
+addr = 0x2000_03D0
+size = 1
+kind = "u8"
+note = "hard fault: TIM8 main output off, the motor free-wheels until a power cycle"
+role = "cutoff"
+
+[[ram]]
+name = "hall_fault"
+addr = 0x2000_0398
+size = 1
+kind = "u8"
+note = "hall fault latched: TIM8 main output off until a power cycle"
+role = "cutoff"
