@@ -157,6 +157,11 @@ impl Session {
         Some(bytes.iter().rev().fold(0, |value, &b| value << 8 | u64::from(b)))
     }
 
+    /// Names of the firmware's numeric RAM variables (not text), as its map gives them.
+    pub fn firmware_var_names(&self) -> Vec<String> {
+        self.ram.iter().filter(|v| v.kind != "ascii").map(|v| v.name.clone()).collect()
+    }
+
     /// The stock-map RAM variable `name` now as a number, read as its `kind` says: `s8`, `s16`,
     /// `s32` signed, `f32` floating point, anything else unsigned.
     pub fn firmware_value(&self, name: &str) -> Option<f64> {
@@ -201,6 +206,7 @@ impl Session {
             board_temp_c: plant.stage_c as f32,
             motor_temp_c: plant.winding_c as f32,
             distance_m: body.distance_m as f32,
+            rider_lean_deg: body.rider_lean_rad.to_degrees() as f32,
             ..Signals::default()
         };
         Snapshot { t_s: self.time_s(), signals, bodies: live.physics().poses() }

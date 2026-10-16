@@ -19,9 +19,12 @@
 //! # Ok::<(), euc_display::ParseError>(())
 //! ```
 //!
+//! The [`lights`] module does the same for the tail light's LED strip (`lights.toml`).
+//!
 //! Pure data and geometry: no I/O and no engine dependencies.
 
 mod geometry;
+pub mod lights;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 

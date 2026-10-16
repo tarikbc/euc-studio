@@ -1,5 +1,7 @@
 //! Passive buzzer driven by one PWM channel.
 
+use std::collections::VecDeque;
+
 use euc_core::{Build, ConfigError, Ctx, Peripheral, ResetKind, Signal};
 
 use crate::NoParams;
@@ -57,7 +59,13 @@ pub struct BuzzerEvent {
 pub struct Buzzer {
     tone: Option<Pwm>,
     beeps: u64,
+    /// The last [`HISTORY`] changes, oldest first, for viewers that play the buzzer.
+    history: VecDeque<BuzzerEvent>,
+    changes: u64,
 }
+
+/// Changes the buzzer keeps for [`Buzzer::changes_since`].
+const HISTORY: usize = 256;
 
 impl Buzzer {
     /// A silent buzzer.
@@ -75,7 +83,13 @@ impl Buzzer {
             self.beeps += 1;
         }
         self.tone = tone;
-        Some(BuzzerEvent { at, tone })
+        let event = BuzzerEvent { at, tone };
+        if self.history.len() == HISTORY {
+            self.history.pop_front();
+        }
+        self.history.push_back(event);
+        self.changes += 1;
+        Some(event)
     }
 
     /// The tone sounding now, if any.
@@ -86,6 +100,18 @@ impl Buzzer {
     /// Times the buzzer started sounding.
     pub const fn beeps(&self) -> u64 {
         self.beeps
+    }
+
+    /// Changes so far (starts, stops and tone changes).
+    pub const fn changes(&self) -> u64 {
+        self.changes
+    }
+
+    /// The changes after the first `seen`, oldest first. A reader that falls more than
+    /// [`HISTORY`] changes behind misses the oldest ones.
+    pub fn changes_since(&self, seen: u64) -> impl Iterator<Item = &BuzzerEvent> {
+        let first = self.changes - self.history.len() as u64;
+        self.history.iter().skip(usize::try_from(seen.saturating_sub(first)).unwrap_or(usize::MAX))
     }
 }
 
@@ -134,6 +160,23 @@ impl std::fmt::Display for BuzzerEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_viewer_reads_the_changes_it_has_not_seen() {
+        let mut buzzer = Buzzer::new();
+        let tone = Pwm { tick_hz: 1_800_000, period: 667, high: 270 };
+        buzzer.drive(100, Some(tone));
+        buzzer.drive(200, Some(tone)); // no change
+        buzzer.drive(300, None);
+        assert_eq!(buzzer.changes(), 2);
+        let all: Vec<u64> = buzzer.changes_since(0).map(|e| e.at).collect();
+        assert_eq!(all, [100, 300]);
+        assert_eq!(buzzer.changes_since(1).map(|e| e.at).collect::<Vec<_>>(), [300]);
+        for i in 0..HISTORY as u64 * 2 {
+            buzzer.drive(400 + i, if i % 2 == 0 { Some(tone) } else { None });
+        }
+        assert_eq!(buzzer.changes_since(0).count(), HISTORY, "the oldest are gone");
+    }
 
     /// The Extreme's buzzer: TIM4 PSC 39 (1.8 MHz ticks), ARR 666.
     fn tim4(ccr: u32) -> Pwm {

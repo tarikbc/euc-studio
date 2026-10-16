@@ -1,0 +1,186 @@
+# Begode Extreme: the RGB tail light and what the stock firmware shows on it.
+# Read by crates/euc-display (lights module). docs/hardware/lights.md explains every value.
+#
+# Wheel frame as in geometry.toml: x forward, y left, z up, metres, origin on the axle centre.
+# Ring angles are described as seen by someone looking along the ring's normal from outside:
+# "clockwise" and "12 o'clock" in that view.
+#
+# Evidence tags: OBSERVED = the stock firmware (GW1825007) produced it in the simulator and the
+# code agrees, or (where it says so) the owner's video of his lit tail light; MEASURED = on the 3D
+# scan (geometry.toml method, +-1 mm); INFERRED = from the code, the scan or photos only;
+# ESTIMATE = read off the video by eye; UNKNOWN = not settled.
+
+schema = 1
+
+[strip]
+chip = "WS2812"            # INFERRED from the 800 kHz single-wire protocol and the GRB order
+data = "PA6, TIM3 CH1 PWM fed by DMA1 channel 2 (circular)"
+slots = 32                 # LED frames the firmware sends
+byte_order = "GRB"         # most significant bit first; values are PWM duty 0-255 (linear light)
+frame_ms = 2.21            # 1768 bit slots of 1.25 us, resent continuously
+dark = [25, 26, 27, 28, 29, 30, 31, 32]  # never written: always off (OBSERVED)
+
+# The tail light is the roller across the rear end of the seat, above and behind the shock's top
+# mount (MEASURED on the scan; OBSERVED lit in the owner's video). The box includes the mounting
+# arms.
+[bar]
+min_m = [-0.2143, -0.0592, 0.4216]
+max_m = [-0.1593, 0.0585, 0.4766]
+evidence = "MEASURED (scan); OBSERVED as the tail light (owner video)"
+
+# The roller itself is the lamp: a clear outer sleeve over an orange-red translucent diffuser,
+# with an opaque black band round the middle and dark end caps (the speakers, below). The two halves either side of the
+# band glow; each is brightest next to the band, where its ring of LEDs sits, and fades towards
+# the end cap. The halves look orange-red even when the LEDs are dark (room light through the
+# tinted diffuser), so a green or blue LED colour shows only faintly through them.
+[roller]
+centre_m = [-0.1868, 0.0, 0.4491]   # MEASURED (scan axis)
+axis = [0.0, 1.0, 0.0]
+radius_m = 0.0261                   # MEASURED
+band_half_width_m = 0.0078          # ESTIMATE: band about 15.6 mm wide (video, scaled to the sleeve)
+glow_half_length_m = 0.0375         # MEASURED: the 26.1 mm sleeve ends here; a dark collar (r 27.5-28 mm)
+                                    # runs to 0.046 and the speaker grille face to 0.0505
+sleeve = "clear outer sleeve over an orange-red translucent diffuser; black centre band and end caps"
+diffuser_tint = [1.0, 0.41, 0.18]   # ESTIMATE: colour of the unlit halves under room light
+unlit = "#D05625"                   # the halves with the LEDs at their dimmest (video)
+band = "#1A1A1C"
+evidence = "OBSERVED (owner video): halves, band, hot spots, breathing; MEASURED (scan): cylinder"
+
+# A small blue light at the top of the centre band, on its right edge, seen as one or two dots
+# inside the clear sleeve: the status LED of the controller's Bluetooth (BLE) data module, which
+# sits inside the tube (owner). It is not on the WS2812 strip, and the firmware does not drive it:
+# the module's own state does. Typical for these HM-10-class modules: blinking while advertising
+# with no phone connected, steady while a phone is connected (INFERRED). In the owner's video it was
+# steady for the 2.3 s it was in view, which fits a connected phone.
+[[indicator]]
+id = "ble"
+colour = "#3050FF"
+position_m = [-0.1868, -0.008, 0.472]   # ESTIMATE (video)
+source = "the BLE module's own status output (owner); not the controller firmware, not the strip"
+behaviour = "blinks while advertising, steady while a phone is connected (INFERRED, typical HM-10 behaviour); steady in the owner's video"
+evidence = "OBSERVED (owner video: position, colour, steady); INFERRED (blink pattern)"
+
+# The two ends of the tube are speakers of a separate Bluetooth audio device, not driven by the
+# controller (owner). They do not light; they are here so a renderer draws them. Each is a dark
+# round cap, 55 mm across, whose recessed outer face has a grille of radial windows between r 12
+# and r 22 mm (MEASURED on the scan, which first took them for light caps).
+[[speaker]]
+id = "right"
+side = "right"
+centre_m = [-0.1868, -0.0505, 0.4491]
+normal = [0.0, -1.0, 0.0]
+radius_m = 0.0275
+grille_inner_m = 0.012
+grille_outer_m = 0.022
+source = "separate Bluetooth audio device (owner); not the controller"
+evidence = "MEASURED (scan); speaker OBSERVED (owner)"
+
+[[speaker]]
+id = "left"
+side = "left"
+centre_m = [-0.1868, 0.0505, 0.4491]
+normal = [0.0, 1.0, 0.0]
+radius_m = 0.0275
+grille_inner_m = 0.012
+grille_outer_m = 0.022
+source = "separate Bluetooth audio device (owner); not the controller"
+evidence = "MEASURED (scan); speaker OBSERVED (owner)"
+
+# Two groups of 12 LEDs that the firmware animates as closed rings (OBSERVED in the code). In the
+# owner's video each ring sits INSIDE the roller, around its axis, one in each half just beside
+# the centre band (4-8 mm from it), its LEDs shining radially out through the diffuser: from
+# above, 4 or 5 hot spots of each ring show in a line round the curve, about 30 deg apart. The
+# data goes through ring A first. The firmware's shared animation position p = 1..12 lights LED
+# first + (position_offset + position_direction * (p - 1)) mod 12 on each ring (OBSERVED).
+# Ring A blinks for roll > +4 deg, ring B for roll < -4 deg (LED mode 0); +roll is a lean to the
+# right in the simulator's frame, so A is taken to be the right half (INFERRED). Where the first
+# LED sits round the axis and which way the index grows are UNKNOWN: the values below are a
+# neutral default (first LED at the top, clockwise seen along the normal from outside).
+# diameter_m is where the hot spots show (2 mm inside the sleeve); the LEDs sit further in.
+
+[[ring]]
+id = "A"
+first = 1
+count = 12
+side = "right"
+side_evidence = "INFERRED"
+centre_m = [-0.1868, -0.014, 0.4491]
+normal = [0.0, -1.0, 0.0]
+facing = "radial"
+up = [0.0, 0.0, 1.0]
+geometry_evidence = "OBSERVED (owner video): ring beside the band, radial; ESTIMATE: 14 mm from the middle"
+diameter_m = 0.048
+first_angle_deg = 0.0
+clockwise = true
+layout_evidence = "INFERRED"
+position_offset = 7
+position_direction = 1
+
+[[ring]]
+id = "B"
+first = 13
+count = 12
+side = "left"
+side_evidence = "INFERRED"
+centre_m = [-0.1868, 0.014, 0.4491]
+normal = [0.0, 1.0, 0.0]
+facing = "radial"
+up = [0.0, 0.0, 1.0]
+geometry_evidence = "OBSERVED (owner video): ring beside the band, radial; ESTIMATE: 14 mm from the middle"
+diameter_m = 0.048
+first_angle_deg = 0.0
+clockwise = true
+layout_evidence = "INFERRED"
+position_offset = 11
+position_direction = -1
+
+# What the stock firmware shows, highest priority first. Speeds are the displayed whole km/h
+# (mph in miles mode); "ticks" are the 496 Hz RTC tick (2.016 ms).
+
+[[state]]
+id = "braking"
+trigger = "any LED mode: the displayed speed is 3 or more below the sample taken at the start of the current 150-tick window (about 2.8 m/s2 or harder); held until 0.75 s after the last detection"
+pattern = "LEDs 1-24 flash red 100: 25 ticks on, 25 ticks off (9.9 Hz)"
+evidence = "OBSERVED"
+
+[[state]]
+id = "lean_mode0"
+trigger = "LED mode 0, speed 2 or more, roll above +4 deg (ring A) or below -4 deg (ring B)"
+pattern = "that ring blinks amber (red 100, green 78) every 150 ticks: +roll on 100 ticks, off 50; -roll on 75, off 75; the other ring keeps the comets"
+evidence = "OBSERVED"
+
+[[state]]
+id = "moving_mode0"
+trigger = "LED mode 0, speed 2 or more"
+pattern = "two red comets per ring, head to tail red 130, 40, 16, 4, 2, 1; one position every (100 - 3 x speed) ticks below 31, every 10 ticks from 31; reverse direction when riding backwards"
+evidence = "OBSERVED"
+
+[[state]]
+id = "standing_mode0"
+trigger = "LED mode 0, speed below 2"
+pattern = "LEDs 1-24 red, breathing 0 to about 130 and back; starts 0.83 s after stopping; period depends on the main-loop speed: about 2.1 s on the owner's wheel (video), 0.49 s in the simulator"
+evidence = "OBSERVED"   # simulator; the period from the owner's video
+
+[[state]]
+id = "moving_mode1"
+trigger = "LED mode 1, speed 2 or more"
+pattern = "rainbow: 12 consecutive steps of a 72-step colour wheel on each ring, the same colours on both in position order, brightness 100; the window slides with the animation position"
+evidence = "OBSERVED"
+
+[[state]]
+id = "standing_mode1"
+trigger = "LED mode 1, speed below 2"
+pattern = "the colour window frozen, at the breathing brightness"
+evidence = "OBSERVED"
+
+[[state]]
+id = "lean_mode1"
+trigger = "LED mode 1, speed 2 or more, |roll| above 4 deg"
+pattern = "only an amber flicker of about one tick every 150 ticks, on the opposite ring to mode 0 (the rainbow rewrites it at once)"
+evidence = "OBSERVED"
+
+[[state]]
+id = "off"
+trigger = "before the 496 Hz tick starts (about 1.7 s after power-on), calibration mode, power-off"
+pattern = "dark; the standing pattern first lights about 2.5 s after power-on (no start-up animation)"
+evidence = "OBSERVED"

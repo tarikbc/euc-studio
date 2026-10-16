@@ -5,12 +5,14 @@ use euc_proto_begode::{
     AlarmMode, Assembler, DriveMode, Frame, LightMode, Pack, PedalMode, RollCutoff, Segment, Telemetry, Units,
 };
 
-/// One BLE notification per line: `<seconds> <hex bytes>`.
+/// One BLE notification per line: `<seconds> <hex bytes>`; empty lines and `#` lines (a
+/// recorder's header) are skipped.
 fn notifications() -> Vec<Vec<u8>> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/begode-extreme/idle-2026-10-15.hex");
     let text = std::fs::read_to_string(path).expect("capture file");
     text.lines()
-        .filter(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(|line| line.split_whitespace().skip(1).map(|h| u8::from_str_radix(h, 16).expect("hex byte")).collect())
         .collect()
 }

@@ -202,6 +202,7 @@ void stm32f1_display_send(const uint8_t grids[16])
 #define LED_TIMER_PSC    2U             /* 72 MHz / 3 = 24 MHz */
 #define LED_TIMER_ARR    29U            /* 24 MHz / 30 = 800 kHz */
 #define LED_DMA          (&DMA1->CH[1]) /* channel 2: TIM3 CC3 request */
+#define LED_SETTLE_MS    10U            /* stock waits this long between the timer and the DMA setup */
 
 static uint8_t led_slots[LED_SLOTS];
 
@@ -222,6 +223,7 @@ void stm32f1_led_strip_init(void)
     TIM3->CCR3 = 1U; /* CH3 compare: one DMA request per bit, early in the bit */
     TIM3->CCER = TIM_CCER_CC1E;
     TIM3->DIER = TIM_DIER_CC3DE;
+    stm32f1_delay_ms(LED_SETTLE_MS);
 
     LED_DMA->CCR = 0U;
     LED_DMA->CPAR = (uint32_t)(uintptr_t)&TIM3->CCR1;

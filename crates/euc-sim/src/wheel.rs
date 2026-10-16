@@ -1,12 +1,13 @@
 //! A wheel's files, loaded and checked: profile, board, stock map and plant.
 
-use euc_physics::{Assist, Physics, PhysicsError, Rider, Setup, WheelBody};
+use euc_physics::{Assist, Physics, PhysicsError, Rider, Setup, Shapes, Solid, Terrain, Torus, WheelBody};
 use euc_plant::{ElectricalPlant, PlantError, PlantParams};
 use euc_profile::{ProfileError, ProfileSource, WheelProfile};
 use thiserror::Error;
 
 use crate::config::{BoardFile, StockMap};
 use crate::plant::Live;
+use crate::probes::ProbesFile;
 use crate::settings::SettingsFile;
 
 /// Everything the simulator reads from `profiles/<wheel>/`.
@@ -24,6 +25,8 @@ pub struct WheelFiles {
     pub body: WheelBody,
     /// `settings.toml`, if the wheel has settings presets.
     pub settings: Option<SettingsFile>,
+    /// `probes.toml`, if the wheel names places in our firmware.
+    pub probes: Option<ProbesFile>,
 }
 
 /// A wheel's files could not be used.
@@ -62,8 +65,13 @@ impl WheelFiles {
             .map_err(|e: toml::de::Error| LoadError::File { file: "board.toml", why: e.to_string() })?;
         let stockmap = toml::from_str(&parse("stockmap.toml")?)
             .map_err(|e: toml::de::Error| LoadError::File { file: "stockmap.toml", why: e.to_string() })?;
-        let (electrical, body) =
+        let (electrical, mut body) =
             split_plant(&parse("plant.toml")?).map_err(|why| LoadError::File { file: "plant.toml", why })?;
+        body.shapes = match source.read(&profile.id, "geometry.toml") {
+            Ok(text) => collision_shapes(&text).map_err(|why| LoadError::File { file: "geometry.toml", why })?,
+            Err(ProfileError::UnknownFile { .. }) => None,
+            Err(error) => return Err(error.into()),
+        };
         let settings = match source.read(&profile.id, "settings.toml") {
             Ok(text) => {
                 Some(SettingsFile::from_toml(&text).map_err(|why| LoadError::File { file: "settings.toml", why })?)
@@ -71,7 +79,12 @@ impl WheelFiles {
             Err(ProfileError::UnknownFile { .. }) => None,
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { profile, board, stockmap, electrical, body, settings })
+        let probes = match source.read(&profile.id, "probes.toml") {
+            Ok(text) => Some(ProbesFile::from_toml(&text).map_err(|why| LoadError::File { file: "probes.toml", why })?),
+            Err(ProfileError::UnknownFile { .. }) => None,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self { profile, board, stockmap, electrical, body, settings, probes })
     }
 
     /// The board with settings preset `name` seeded into the settings journal (power-on state).
@@ -89,12 +102,64 @@ impl WheelFiles {
         u64::from(self.profile.board.hclk_hz)
     }
 
-    /// A live plant for this wheel at cycle 0, with `rider` and `assist`, on its stand.
+    /// A live plant for this wheel at cycle 0, with `rider` and `assist`, on its stand on flat
+    /// ground.
     pub fn live(&self, rider: Rider, assist: Assist) -> Result<Live, LiveError> {
+        self.live_on(rider, assist, Terrain::flat())
+    }
+
+    /// [`WheelFiles::live`] on `terrain` (a scenario's `[terrain]`).
+    pub fn live_on(&self, rider: Rider, assist: Assist, terrain: Terrain) -> Result<Live, LiveError> {
         let electrical = ElectricalPlant::new(self.electrical.clone(), self.hclk())?;
-        let physics = Physics::new(Setup { rider, assist, ..Setup::new(self.body.clone()) })?;
+        let physics = Physics::new(Setup { rider, assist, terrain, ..Setup::new(self.body.clone()) })?;
         Ok(Live::new(electrical, physics, self.hclk()))
     }
+}
+
+/// The measured collision shapes of `geometry.toml` (`[collision]`), if it has them: `tire_torus`
+/// (`major_m`, `minor_m`), boxes (`centre`, `half`) and capsules (`from`, `to`, `radius`). Other
+/// `tire_*` entries are alternatives for people and are skipped.
+pub fn collision_shapes(text: &str) -> Result<Option<Shapes>, String> {
+    let table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
+    let Some(collision) = table.get("collision") else { return Ok(None) };
+    let collision = collision.as_table().ok_or("[collision] is not a table")?;
+    let vector = |value: Option<&toml::Value>, what: &str| -> Result<[f64; 3], String> {
+        let items = value.and_then(toml::Value::as_array).ok_or(format!("{what} must be [x, y, z]"))?;
+        let numbers: Vec<f64> =
+            items.iter().filter_map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64))).collect();
+        <[f64; 3]>::try_from(numbers).map_err(|_| format!("{what} must be [x, y, z]"))
+    };
+    let number = |value: Option<&toml::Value>, what: &str| -> Result<f64, String> {
+        value
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .ok_or(format!("{what} must be a number"))
+    };
+    let mut shapes = Shapes::default();
+    for (name, value) in collision {
+        let entry = value.as_table().ok_or(format!("[collision] {name} is not a table"))?;
+        let at = |key: &str| format!("[collision] {name}.{key}");
+        if name == "tire_torus" {
+            shapes.tire = Some(Torus {
+                major_m: number(entry.get("major_m"), &at("major_m"))?,
+                minor_m: number(entry.get("minor_m"), &at("minor_m"))?,
+            });
+        } else if name.starts_with("tire_") {
+            // An alternative tire shape.
+        } else if entry.contains_key("half") {
+            let (centre, half) = (vector(entry.get("centre"), &at("centre"))?, vector(entry.get("half"), &at("half"))?);
+            shapes.solids.push(Solid::Box { name: name.clone(), centre, half });
+        } else if entry.contains_key("radius") {
+            shapes.solids.push(Solid::Capsule {
+                name: name.clone(),
+                from: vector(entry.get("from"), &at("from"))?,
+                to: vector(entry.get("to"), &at("to"))?,
+                radius: number(entry.get("radius"), &at("radius"))?,
+            });
+        } else {
+            return Err(format!("[collision] {name}: neither a box (centre, half) nor a capsule (from, to, radius)"));
+        }
+    }
+    Ok(Some(shapes))
 }
 
 /// Splits `plant.toml` into the electrical plant and the `[body]` mechanics.
@@ -114,11 +179,27 @@ mod tests {
     #[test]
     fn the_begode_extreme_loads_and_builds_a_live_plant() {
         let files = WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
-        assert!((files.body.tire.radius_m * std::f64::consts::TAU - 1.313).abs() < 0.001, "{:?}", files.body.tire);
+        // The rolling radius keeps the firmware's 0.0505 m per electrical turn.
+        let pole_pairs = f64::from(files.electrical.motor.pole_pairs);
+        assert!((files.body.tire.radius_m * std::f64::consts::TAU / pole_pairs - 0.0505).abs() < 0.0001);
+        let shapes = files.body.shapes.as_ref().expect("geometry.toml [collision]");
+        assert!(shapes.tire.is_some() && shapes.solids.iter().any(|s| s.name() == "pedal_left"));
         let live = files.live(Rider::default(), Assist::default()).unwrap();
         assert!(live.physics().held());
         assert!(files.board_with_settings("neutral").is_ok());
         assert!(files.board_with_settings("nope").unwrap_err().to_string().contains("no settings preset"));
+    }
+
+    #[test]
+    fn collision_shapes_parse_and_refuse_strangers() {
+        let text = "[collision]\ntire_torus = { major_m = 0.17, minor_m = 0.05 }\ntire_alt = { major_m = 1, minor_m = 1 }\n\
+                    pack = { centre = [0, 0.07, 0.16], half = [0.12, 0.03, 0.2] }\n\
+                    roller = { from = [0, -0.07, 0.45], to = [0, 0.07, 0.45], radius = 0.026 }\n";
+        let shapes = collision_shapes(text).unwrap().unwrap();
+        assert_eq!(shapes.tire, Some(Torus { major_m: 0.17, minor_m: 0.05 }));
+        assert_eq!(shapes.solids.len(), 2);
+        assert!(collision_shapes("[collision]\nblob = { size = 1 }").unwrap_err().contains("blob"));
+        assert_eq!(collision_shapes("schema = 1").unwrap(), None);
     }
 
     #[test]

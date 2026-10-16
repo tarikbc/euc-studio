@@ -35,7 +35,7 @@ backup) are in place.
 | `apps/<board>/` | `main`, init order, task table (TIM8 / ADC / RTC / main-loop contexts) | Composes core modules with a port and a board, and schedules them. |
 | `config/quirks.def` | compat / clean quirk list | See [Profiles and quirks](#profiles-and-quirks). |
 | `tests/unit/` | Unity tests, host only | One executable per area, run by CTest. Shared captures live in `../tests/data/`. |
-| `tools/` | size report, quirk doc generator, FOC table generator, cppcheck deviation record | Python standard library only. |
+| `tools/` | size report, quirk doc generator, FOC table generator, simulator probe generator, cppcheck deviation record | Python standard library only. |
 
 Code style: fixed-width types, units in names (`_bytes`, `_ms`, `_q15`), no heap, no recursion, no dead code,
 comments that say why.
@@ -146,6 +146,14 @@ covers the motor gates):
 After each target link, `tools/size_report.py` reads the map file, charges every input section to its
 module, writes `size-report.json` next to the image and checks `size-budget.toml`: a warning above 44 KiB of
 flash, a failed build above 48 KiB of flash or 16 KiB of static RAM (`.data` + `.bss`).
+
+## Simulator probes
+
+`profiles/begode-extreme/probes.toml` tells the simulator where our firmware keeps the quantities that the stock
+map names (`speed_cms`, `alerts`, the cut-off flags, ...), so scenario checks and `euc sim compare` read both
+firmwares the same way. `tools/gen_probes.py` writes it from `offsetof()` compiled by the target compiler; the
+image build fails when the file no longer matches `struct app`. After a change, run
+`cmake --build --preset target-clean --target probes`.
 
 ## Style and static analysis
 

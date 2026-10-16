@@ -23,3 +23,6 @@ __pycache__/
 .DS_Store
 *.swp
 .idea/
+
+# Playwright MCP browser logs and screenshots
+/.playwright-mcp/

@@ -3,6 +3,7 @@
 #   format-check  fail if any firmware source is not clang-format clean
 #   cppcheck      cppcheck over the sources this build compiles, with the MISRA C:2012 addon on firmware code
 #   quirks-doc    regenerate docs/quirks.md from config/quirks.def (CI runs the --check form)
+#   probes        target presets: regenerate profiles/begode-extreme/probes.toml (the image build checks it)
 
 file(GLOB_RECURSE EUC_FORMAT_SOURCES CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/apps/*.[ch]"
@@ -71,3 +72,9 @@ endif()
 add_custom_target(quirks-doc
     COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gen_quirks_doc.py"
     VERBATIM)
+
+if(CMAKE_CROSSCOMPILING)
+    add_custom_target(probes
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gen_probes.py" --cc "${CMAKE_C_COMPILER}"
+        VERBATIM)
+endif()

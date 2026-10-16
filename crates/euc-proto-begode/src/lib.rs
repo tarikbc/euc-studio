@@ -32,6 +32,9 @@
 //! assert_eq!(format!("{:.2} V", live.voltage_v()), "129.70 V");
 //! ```
 
+#[cfg(feature = "ble")]
+pub mod ble;
+
 mod assembler;
 mod command;
 mod frame;

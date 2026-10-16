@@ -12,10 +12,13 @@
 
 mod board;
 pub mod bridge;
+pub mod compare;
 pub mod config;
+pub mod cpu;
 mod machine;
 mod memory;
 pub mod plant;
+pub mod probes;
 pub mod recording;
 mod report;
 pub mod scenario;

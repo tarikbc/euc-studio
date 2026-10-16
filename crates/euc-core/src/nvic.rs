@@ -24,12 +24,19 @@ pub const IRQ0: u16 = 16;
 const RETURN_TO_HANDLER: u32 = 0xFFFF_FFF1;
 /// `EXC_RETURN` that returns to thread mode on the main stack.
 const RETURN_TO_THREAD: u32 = 0xFFFF_FFF9;
+/// `EXC_RETURN` that returns to thread mode on the process stack.
+const RETURN_TO_THREAD_PSP: u32 = 0xFFFF_FFFD;
+/// `xPSR` bits of the IT state (`EPSR.ICI/IT`).
+const XPSR_IT: u32 = 0x0600_FC00;
 /// Stacked `xPSR` bit 9: the frame was realigned to 8 bytes.
 const XPSR_ALIGNED: u32 = 1 << 9;
 /// `xPSR` bits that are saved in the frame: flags, Q and the IT state.
 const XPSR_STACKED: u32 = 0xFE00_FC00;
-/// `xPSR` bits a return restores (N, Z, C, V, Q).
-const XPSR_APSR: u32 = 0xF800_0000;
+/// `xPSR` bits a return restores from the frame: flags, Q, Thumb bit, IT state and IPSR.
+const XPSR_RESTORED: u32 = 0xF800_0000 | CoreRegs::XPSR_T | XPSR_IT | CoreRegs::XPSR_IPSR;
+/// `CCR` offset in the SCS, and its reset value (`STKALIGN`).
+const CCR: u32 = 0xD14;
+const CCR_RESET: u32 = 0x200;
 
 /// SysTick at `SCS + 0x10`. With `CLKSOURCE` clear it counts HCLK/8, as on STM32.
 #[derive(Debug, Clone, Default)]
@@ -123,6 +130,8 @@ pub struct ScsWrite {
     pub enabled: u128,
     /// `AIRCR.SYSRESETREQ` was written with the right key.
     pub reset_request: bool,
+    /// `CCR` was written: its new value (the CPU backend honours `UNALIGN_TRP` and `DIV_0_TRP`).
+    pub ccr: Option<u32>,
 }
 
 /// Where an exception entry went.
@@ -288,8 +297,12 @@ impl ExceptionUnit {
         bus.read(self.vtor + 4 * u32::from(exception), Size::Word)
     }
 
-    /// Takes `exception`: pushes the 8-word frame (realigned to 8 bytes), marks it active and
-    /// points the core at its handler. `PC` gets the handler with bit 0 cleared.
+    /// Takes `exception`, as `ExceptionTaken` (ARM ARM B1.5.6): pushes the 8-word frame
+    /// (realigned to 8 bytes) on the stack in use, marks the exception active, enters handler
+    /// mode (`IPSR` = the exception, IT state clear, `CONTROL.SPSEL` = 0, so the main stack) and
+    /// points the core at its handler. `PC` gets the handler with bit 0 cleared; `LR` the
+    /// `EXC_RETURN` for handler mode, thread mode on the main stack, or thread mode on the
+    /// process stack.
     pub fn enter(&mut self, exception: u16, regs: &mut CoreRegs, bus: &mut dyn Bus) -> Result<Entry, BusFault> {
         let sp = regs.sp();
         let nested = !self.active.is_empty();
@@ -303,25 +316,37 @@ impl ExceptionUnit {
         }
         let vector = self.vector(exception, bus)?;
         self.acknowledge(exception);
+        // The frame went on the stack in use; set it before the mode changes which one R13 is.
+        let process_stack = regs.uses_psp();
         regs.set_sp(frame);
-        regs.lr = if nested { RETURN_TO_HANDLER } else { RETURN_TO_THREAD };
+        regs.lr = match (nested, process_stack) {
+            (true, _) => RETURN_TO_HANDLER,
+            (false, true) => RETURN_TO_THREAD_PSP,
+            (false, false) => RETURN_TO_THREAD,
+        };
+        regs.xpsr = (regs.xpsr & !(XPSR_IT | CoreRegs::XPSR_IPSR)) | u32::from(exception);
+        regs.control &= !CoreRegs::CONTROL_SPSEL;
         regs.pc = vector & !1;
         Ok(Entry { exception, vector, frame })
     }
 
     /// A handler loaded `exc_return` into PC. Tail-chains into the next pending exception (the
-    /// frame stays on the stack) or unstacks the frame and resumes the interrupted code.
-    /// Returns the tail-chained entry, if any.
+    /// frame stays on the stack, `IPSR` becomes the new exception) or, as `ExceptionReturn`
+    /// (ARM ARM B1.5.8), unstacks the frame from the stack `exc_return` names and resumes the
+    /// interrupted code with its flags, IT state and `IPSR`. Returning to thread mode on the
+    /// process stack sets `CONTROL.SPSEL`. Returns the tail-chained entry, if any.
     pub fn exit(&mut self, exc_return: u32, regs: &mut CoreRegs, bus: &mut dyn Bus) -> Result<Option<Entry>, BusFault> {
         self.active.pop();
+        let process_stack = exc_return & 0xF == RETURN_TO_THREAD_PSP & 0xF;
+        let sp = if process_stack { regs.psp } else { regs.msp };
         if let Some(next) = self.best_pending(regs.primask) {
             let vector = self.vector(next, bus)?;
             self.acknowledge(next);
             regs.lr = exc_return;
+            regs.xpsr = (regs.xpsr & !CoreRegs::XPSR_IPSR) | u32::from(next);
             regs.pc = vector & !1;
-            return Ok(Some(Entry { exception: next, vector, frame: regs.sp() }));
+            return Ok(Some(Entry { exception: next, vector, frame: sp }));
         }
-        let sp = regs.sp();
         let mut words = [0_u32; 8];
         for (i, word) in words.iter_mut().enumerate() {
             *word = bus.read(sp + 4 * i as u32, Size::Word)?;
@@ -330,10 +355,22 @@ impl ExceptionUnit {
         regs.r[..4].copy_from_slice(&[r0, r1, r2, r3]);
         regs.r[12] = r12;
         regs.lr = lr;
-        regs.set_sp(sp + 0x20 + if xpsr & XPSR_ALIGNED != 0 { 4 } else { 0 });
-        regs.xpsr = (regs.xpsr & !XPSR_APSR) | (xpsr & XPSR_APSR);
+        let popped = sp + 0x20 + if xpsr & XPSR_ALIGNED != 0 { 4 } else { 0 };
+        if process_stack {
+            regs.psp = popped;
+            regs.control |= CoreRegs::CONTROL_SPSEL;
+        } else {
+            regs.msp = popped;
+            regs.control &= !CoreRegs::CONTROL_SPSEL;
+        }
+        regs.xpsr = (regs.xpsr & !XPSR_RESTORED) | (xpsr & XPSR_RESTORED);
         regs.pc = pc & !1;
         Ok(None)
+    }
+
+    /// The `CCR` value.
+    pub fn ccr(&self) -> u32 {
+        self.stored(CCR).unwrap_or(CCR_RESET)
     }
 
     /// Reads the SCS register at `off` (from `0xE000_E000`). A SysTick wrap that the read
@@ -377,7 +414,7 @@ impl ExceptionUnit {
                 let i = (off - 0xD18 + 4) as usize;
                 u32::from_le_bytes([self.shpr[i], self.shpr[i + 1], self.shpr[i + 2], self.shpr[i + 3]])
             }
-            0xD14 => self.stored(off).unwrap_or(0x200),
+            CCR => self.ccr(),
             _ => self.stored(off).unwrap_or(0),
         }
     }
@@ -445,11 +482,14 @@ impl ExceptionUnit {
             }
             0xF00 => self.pend_irq((v & 0x1FF) as u16),
             _ => {
-                let old = self.stored(off).unwrap_or(if off == 0xD14 { 0x200 } else { 0 });
+                let old = self.stored(off).unwrap_or(if off == CCR { CCR_RESET } else { 0 });
                 let new = (old & !mask) | v;
                 match self.other.iter_mut().find(|(o, _)| *o == off) {
                     Some(slot) => slot.1 = new,
                     None => self.other.push((off, new)),
+                }
+                if off == CCR {
+                    out.ccr = Some(new);
                 }
             }
         }
@@ -613,6 +653,48 @@ mod tests {
         assert_eq!(chained.exception, 15);
         assert_eq!((regs.sp(), regs.lr, regs.pc), (frame, 0xFFFF_FFF9, 0x100 + 60));
         assert_eq!(unit.read(0xD04, 0) & 0x1FF, 15);
+    }
+
+    #[test]
+    fn entry_and_return_track_ipsr() {
+        let mut unit = unit();
+        let mut bus = Mem::new();
+        let mut regs = CoreRegs::at_reset(0x2000_1000, 1);
+        unit.set_level(3, true);
+        unit.enter(19, &mut regs, &mut bus).unwrap();
+        assert_eq!(regs.ipsr(), 19);
+        unit.set_level(3, false);
+        unit.pend(SYSTICK);
+        unit.exit(0xFFFF_FFF9, &mut regs, &mut bus).unwrap();
+        assert_eq!(regs.ipsr(), 15, "a tail-chain switches IPSR to the next handler");
+        unit.exit(0xFFFF_FFF9, &mut regs, &mut bus).unwrap();
+        assert_eq!(regs.ipsr(), 0, "back in thread mode");
+    }
+
+    #[test]
+    fn thread_mode_on_the_process_stack_returns_to_it() {
+        let mut unit = unit();
+        let mut bus = Mem::new();
+        let mut regs = CoreRegs::at_reset(0x2000_1000, 1);
+        regs.psp = 0x2000_0800;
+        regs.control = CoreRegs::CONTROL_SPSEL;
+        unit.set_level(3, true);
+        let entry = unit.enter(19, &mut regs, &mut bus).unwrap();
+        assert_eq!(entry.frame, 0x2000_07E0, "the frame goes on the process stack");
+        assert_eq!((regs.psp, regs.msp, regs.lr), (0x2000_07E0, 0x2000_1000, 0xFFFF_FFFD));
+        assert_eq!((regs.control, regs.sp()), (0, 0x2000_1000), "the handler runs on the main stack");
+        unit.set_level(3, false);
+        unit.exit(0xFFFF_FFFD, &mut regs, &mut bus).unwrap();
+        assert_eq!((regs.psp, regs.control, regs.sp()), (0x2000_0800, CoreRegs::CONTROL_SPSEL, 0x2000_0800));
+    }
+
+    #[test]
+    fn ccr_writes_are_reported() {
+        let mut unit = unit();
+        assert_eq!(unit.ccr(), 0x200);
+        assert_eq!(unit.write(0xD14, 0x10, 0xFF, 0).ccr, Some(0x210), "DIV_0_TRP set, STKALIGN kept");
+        assert_eq!(unit.ccr(), 0x210);
+        assert_eq!(unit.write(0xD10, 0, u32::MAX, 0).ccr, None);
     }
 
     #[test]

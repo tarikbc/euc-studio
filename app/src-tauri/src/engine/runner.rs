@@ -19,7 +19,8 @@ use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 use super::display::DisplayLayout;
-use super::host::Host;
+use super::host::{Host, Tone};
+use super::lights::LightsLayout;
 use super::phone::{PhoneDecoder, PhoneFrame};
 
 /// Physics and firmware advance in steps of this many simulated seconds.
@@ -34,10 +35,22 @@ const SLICE: Duration = Duration::from_millis(8);
 const PUMP_PERIOD: Duration = Duration::from_millis(16);
 /// Behind by more than this, the sim gives up catching up (the measured factor drops instead).
 const MAX_DEBT_S: f64 = 0.25;
-/// Simulated seconds between two queued phone commands. The stock firmware drops its answer to
-/// `V` when the next command follows within about half a second (seen in the simulator: `b`
-/// 0.5 s after `V` gives no banner, 1.0 s after gives both).
-const COMMAND_GAP_S: f64 = 1.0;
+/// Simulated seconds between two queued phone commands, as two taps would be.
+const COMMAND_GAP_S: f64 = 0.3;
+/// How long the queue holds after a command that expects a text answer (`V`, `N`). The stock
+/// firmware answers about 0.7 to 1.7 s later and drops the answer when another command arrives
+/// first (seen in the simulator), so the next command waits for the answer or this timeout.
+const ANSWER_TIMEOUT_S: f64 = 3.0;
+
+/// A byte waiting for its simulated send time.
+struct Pending {
+    at: f64,
+    byte: u8,
+    /// The command's label, on its first byte (the timeline shows it when that byte goes out).
+    label: Option<String>,
+    /// On the last byte of a command that expects a text answer.
+    answer: bool,
+}
 
 /// Builds a host for a scenario, reporting progress (`"Fetching the stock image"`).
 pub type HostFactory = Box<dyn Fn(&str, &mut dyn FnMut(&str)) -> Result<Built, String> + Send>;
@@ -53,6 +66,8 @@ pub struct Built {
     pub note: Option<String>,
     /// The wheel's display replica, if the profile describes it.
     pub display: Option<DisplayLayout>,
+    /// The tail light's LED layout, if the profile describes it.
+    pub lights: Option<LightsLayout>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,6 +103,10 @@ pub enum Message {
     Display {
         layout: Option<DisplayLayout>,
     },
+    /// The tail light's LED layout (sent with the bodies; `null` when the wheel has none).
+    Lights {
+        layout: Option<LightsLayout>,
+    },
     Events {
         events: Vec<Event>,
     },
@@ -96,6 +115,10 @@ pub enum Message {
     },
     Outputs {
         outputs: Outputs,
+    },
+    /// Buzzer changes at their simulated times, for the web view to play.
+    Buzzer {
+        tones: Vec<Tone>,
     },
 }
 
@@ -109,6 +132,7 @@ enum Cmd {
     Send {
         bytes: Vec<(f64, u8)>,
         label: String,
+        answer: bool,
     },
     Stop,
 }
@@ -185,9 +209,10 @@ impl Runner {
         let _ = self.tx.send(Cmd::Restart(scenario));
     }
 
-    /// Queues bytes for the firmware's BLE input, each after its gap in simulated seconds.
-    pub fn send(&self, bytes: Vec<(f64, u8)>, label: String) {
-        let _ = self.tx.send(Cmd::Send { bytes, label });
+    /// Queues bytes for the firmware's BLE input, each after its gap in simulated seconds;
+    /// `answer` holds the queue after them until the firmware answers (see [`ANSWER_TIMEOUT_S`]).
+    pub fn send(&self, bytes: Vec<(f64, u8)>, label: String, answer: bool) {
+        let _ = self.tx.send(Cmd::Send { bytes, label, answer });
     }
 }
 
@@ -211,9 +236,12 @@ fn pump(outbox: &Mutex<Outbox>, sinks: &Mutex<Option<Sinks>>, stop: &AtomicBool)
         let sinks = lock(sinks);
         let Some(s) = sinks.as_ref() else { continue };
         // Messages that reset or describe bodies go before the samples that depend on them.
-        let (early, late): (Vec<_>, Vec<_>) = messages
-            .into_iter()
-            .partition(|m| matches!(m, Message::Reset { .. } | Message::Bodies { .. } | Message::Display { .. }));
+        let (early, late): (Vec<_>, Vec<_>) = messages.into_iter().partition(|m| {
+            matches!(
+                m,
+                Message::Reset { .. } | Message::Bodies { .. } | Message::Display { .. } | Message::Lights { .. }
+            )
+        });
         for m in early {
             let _ = s.messages.send(m);
         }
@@ -236,6 +264,7 @@ struct Sim {
     label: Option<String>,
     note: Option<String>,
     display: Option<DisplayLayout>,
+    lights: Option<LightsLayout>,
     error: Option<String>,
     outputs: Option<Outputs>,
     outputs_at: Option<Instant>,
@@ -247,10 +276,13 @@ struct Sim {
     snapshot: Snapshot,
     events: Vec<Event>,
     ble: Vec<(f64, u8)>,
+    tones: Vec<Tone>,
     frames: Vec<PhoneFrame>,
     phone: PhoneDecoder,
     /// Bytes waiting for their simulated send time; a command's first byte carries its label.
-    pending: VecDeque<(f64, u8, Option<String>)>,
+    pending: VecDeque<Pending>,
+    /// Holding the queue for an answer until this simulated time.
+    awaiting: Option<f64>,
     window: VecDeque<(Instant, f64)>,
     last_status: Instant,
 }
@@ -267,6 +299,7 @@ impl Sim {
             label: None,
             note: None,
             display: None,
+            lights: None,
             error: None,
             outputs: None,
             outputs_at: None,
@@ -278,9 +311,11 @@ impl Sim {
             snapshot: Snapshot::default(),
             events: Vec::new(),
             ble: Vec::new(),
+            tones: Vec::new(),
             frames: Vec::new(),
             phone: PhoneDecoder::default(),
             pending: VecDeque::new(),
+            awaiting: None,
             window: VecDeque::new(),
             last_status: Instant::now(),
         }
@@ -359,15 +394,18 @@ impl Sim {
                     out.messages.push(Message::Reset { scenario: self.scenario.clone() });
                     out.messages.push(Message::Bodies { bodies });
                     out.messages.push(Message::Display { layout: built.display.clone() });
+                    out.messages.push(Message::Lights { layout: built.lights.clone() });
                 }
                 self.build = Some(built.build);
                 self.label = Some(built.label);
                 self.note = built.note;
                 self.display = built.display;
+                self.lights = built.lights;
                 self.outputs = None;
                 self.host = Some(built.host);
                 self.phone = PhoneDecoder::default();
                 self.pending.clear();
+                self.awaiting = None;
                 self.window.clear();
                 self.debt = 0.0;
                 self.steps = 0;
@@ -413,6 +451,7 @@ impl Sim {
                     self.post(Message::Reset { scenario: self.scenario.clone() });
                     self.post(Message::Bodies { bodies });
                     self.post(Message::Display { layout: self.display.clone() });
+                    self.post(Message::Lights { layout: self.lights.clone() });
                 }
                 self.outputs = None;
                 self.post_status();
@@ -443,14 +482,14 @@ impl Sim {
                 }
                 self.build();
             }
-            Cmd::Send { bytes, label } => {
+            Cmd::Send { bytes, label, answer } => {
                 let now = self.host.as_ref().map_or(0.0, |h| h.time_s());
-                // A command queued behind another waits a little after it, as two taps would.
-                let mut at = now.max(self.pending.back().map_or(now, |p| p.0 + COMMAND_GAP_S));
+                let mut at = now.max(self.pending.back().map_or(now, |p| p.at + COMMAND_GAP_S));
                 let mut label = Some(label);
-                for (gap, byte) in bytes {
+                let last = bytes.len().saturating_sub(1);
+                for (i, (gap, byte)) in bytes.into_iter().enumerate() {
                     at += gap;
-                    self.pending.push_back((at, byte, label.take()));
+                    self.pending.push_back(Pending { at, byte, label: label.take(), answer: answer && i == last });
                 }
             }
             Cmd::Stop => {}
@@ -489,15 +528,22 @@ impl Sim {
     fn step_once(&mut self) {
         let Some(host) = self.host.as_mut() else { return };
         let t = host.time_s();
-        while let Some((_, byte, label)) = self.pending.pop_front_if(|p| p.0 <= t) {
-            // The timeline shows a command when its first byte goes out.
-            if let Some(text) = label {
+        if self.awaiting.is_some_and(|until| t >= until) {
+            Self::release(&mut self.pending, &mut self.awaiting, t);
+        }
+        while self.awaiting.is_none()
+            && let Some(p) = self.pending.pop_front_if(|p| p.at <= t)
+        {
+            if let Some(text) = p.label {
                 self.events.push(Event { t_s: t, kind: EventKind::Command, text });
             }
-            if let Err(e) = host.inject_ble(&[byte]) {
+            if let Err(e) = host.inject_ble(&[p.byte]) {
                 self.events.push(Event { t_s: t, kind: EventKind::Fault, text: e });
                 self.pending.clear();
                 break;
+            }
+            if p.answer {
+                self.awaiting = Some(t + ANSWER_TIMEOUT_S);
             }
         }
         host.step(STEP_S);
@@ -507,16 +553,29 @@ impl Sim {
         }
     }
 
+    /// Ends a hold on the queue at `t`; the commands behind it keep their spacing from now on.
+    fn release(pending: &mut VecDeque<Pending>, awaiting: &mut Option<f64>, t: f64) {
+        *awaiting = None;
+        let late = pending.front().map_or(0.0, |p| (t - p.at).max(0.0));
+        for p in pending {
+            p.at += late;
+        }
+    }
+
     /// Takes a snapshot, events and BLE output and puts them in the outbox.
     fn sample(&mut self) {
         let Some(host) = self.host.as_mut() else { return };
         host.snapshot(&mut self.snapshot);
         host.drain_events(&mut self.events);
         host.drain_ble_tx(&mut self.ble);
+        host.drain_tones(&mut self.tones);
         if !self.ble.is_empty() {
             let from = self.frames.len();
             self.phone.push(&self.ble, &mut self.frames);
             self.ble.clear();
+            if self.awaiting.is_some() && self.frames[from..].iter().any(|f| f.reply) {
+                Self::release(&mut self.pending, &mut self.awaiting, host.time_s());
+            }
             for f in &self.frames[from..] {
                 if f.reply {
                     self.events.push(Event {
@@ -536,6 +595,9 @@ impl Sim {
         }
         if !self.frames.is_empty() {
             out.messages.push(Message::Frames { frames: std::mem::take(&mut self.frames) });
+        }
+        if !self.tones.is_empty() {
+            out.messages.push(Message::Buzzer { tones: std::mem::take(&mut self.tones) });
         }
         // Board outputs go out when they change, at most 30 times a second.
         if self.outputs_at.is_none_or(|at| at.elapsed() >= Duration::from_millis(33))

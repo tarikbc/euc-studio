@@ -13,23 +13,23 @@ name = "euc"
 path = "src/main.rs"
 
 [features]
-# The Unicorn CPU backend for `euc sim run`. GPL-2.0: development builds only, never shipped.
-unicorn = ["dep:euc-core", "dep:euc-unicorn"]
+# The Unicorn CPU backend (`--cpu unicorn`). GPL-2.0: development builds only, never shipped.
+# Without it `euc sim` runs on our own core (`--cpu own`, the default).
+unicorn = ["euc-sim/unicorn"]
 
 [dependencies]
 anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-euc-core = { workspace = true, optional = true }
+euc-ble-radio = { workspace = true, features = ["radio"] }
 euc-fwsource.workspace = true
 euc-image.workspace = true
 euc-physics.workspace = true
 euc-profile.workspace = true
-euc-proto-begode.workspace = true
+euc-proto-begode = { workspace = true, features = ["ble"] }
 euc-sim.workspace = true
 euc-telemetry.workspace = true
-euc-unicorn = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

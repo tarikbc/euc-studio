@@ -5,6 +5,8 @@
 #   <name>.bin   raw flash image starting at the link address (what the OTA flasher sends)
 #   <name>.map   GNU ld map file
 #   size-report.json   per-module flash/RAM totals, checked against size-budget.toml (over budget = failed build)
+# For the Begode Extreme it also checks that profiles/begode-extreme/probes.toml matches struct app
+# (tools/gen_probes.py --check; regenerate with the `probes` target).
 #
 # The board target (euc_board_<board-id>) brings the linker script, the board headers and the MCU port.
 function(euc_add_image name)
@@ -53,4 +55,11 @@ function(euc_add_image name)
         BYPRODUCTS "${bin}" "${map}" "${out_dir}/size-report.json"
         COMMENT "Image ${name}.bin and size report"
         VERBATIM)
+    if(arg_BOARD STREQUAL "begode-extreme")
+        add_custom_command(TARGET ${name} POST_BUILD
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gen_probes.py"
+                --cc "${CMAKE_C_COMPILER}" --check
+            COMMENT "Simulator probes match struct app"
+            VERBATIM)
+    endif()
 endfunction()

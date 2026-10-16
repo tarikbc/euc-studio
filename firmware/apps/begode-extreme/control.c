@@ -14,7 +14,6 @@
 
 #define BKP_TRIP              1U
 #define BKP_SETTINGS          3U
-#define ADC_DATA_TO_RAW       3U
 #define BALANCE_RESTART_TICKS 10
 #define DISPLAY_PERIOD_TICKS  100U
 #define SERVICE_WAIT_MS       200U
@@ -63,8 +62,7 @@ void ADC1_2_IRQHandler(void)
     app.foc_pending = false;
 
     struct euc_motor_foc_in in;
-    in.sample.phase_a_raw = (uint16_t)(stm32f1_adc1_injected(1U) >> ADC_DATA_TO_RAW);
-    in.sample.phase_b_raw = (uint16_t)(stm32f1_adc2_injected(1U) >> ADC_DATA_TO_RAW);
+    in.sample = app_current_sample();
     in.speed_dm_per_s = app.foc_speed_dm_per_s;
     in.drive_disabled = app.foc_drive_disabled;
     in.hard_cut_request = app.foc_hard_cut_request;

@@ -1,0 +1,181 @@
+# Begode Extreme: body geometry measured on a 3D scan of a real wheel (GOM structured-light
+# scanner, 1.6 M triangles, mm units; scan by Tarik Caramanico). The raw scan stays private; the
+# cleaned render model is in app/public/models/begode-extreme/. docs/hardware/geometry.md
+# explains every method.
+#
+# Frame (the same as the MJCF in crates/euc-physics): x forward, y left, z up, metres, origin on
+# the axle centre in the wheel's mid-plane. "Forward" is the headlight and handle end; the shock
+# is at the rear. The shell is upright: z is the normal of the shell's flat bottom face.
+#
+# Evidence tags:
+#   MEASURED  = fitted or read on the scan (accuracy given where it matters)
+#   INFERRED  = derived from measurements plus one stated assumption
+#   ESTIMATE  = the part is not in the scan; a reasoned guess
+#   DEFAULT   = kept from plant.toml / the MJCF until someone measures it
+
+schema = 1
+
+[frame]
+origin = "axle centre, wheel mid-plane"
+axes = "x forward, y left, z up"
+# The axle in the shell's frame. The scanned wheel sits 0.13 deg yawed and 0.25 deg rolled
+# against the shell (bearing and slider play); the frame keeps the shell square. MEASURED
+axle_axis = [0.0023, 1.0, 0.0044]
+
+[tire]
+size = "3.00-12"               # MEASURED: moulded on the sidewall (12 in rim, 3.00 in section)
+code = "J802-02"               # the owner's photo confirms the size and shows this tread code
+tread = "knobby off-road, staggered rectangular knobs, 15 repeats of 24 deg"  # MEASURED (scan)
+outer_diameter_m = 0.4593      # MEASURED: knob tips, unloaded, +-1 mm (tips 0.2290-0.2304 by angle)
+radius_free_m = 0.2296         # MEASURED: half the above = axle height when unloaded
+tread_base_radius_m = 0.2250   # MEASURED: between the knobs, +-0.5 mm
+width_m = 0.0814               # MEASURED: widest sidewall section (at radius 0.19 m), +-0.5 mm
+crown_radius_m = 0.058         # MEASURED: lateral curvature of the tread envelope, +-3 mm
+# Firmware: 0.0505 m per electrical turn. With 28 pole pairs that is a 1.414 m rolling
+# circumference, radius 0.2251 m = 4.5 mm under the free knob radius (load and knob squash).
+# 26 pole pairs (plant.toml) give 0.2090 m, 20.6 mm smaller than this tire. INFERRED
+rolling_radius_m = 0.2251
+pole_pairs = 28                # INFERRED from the line above; only 28 fits a 3.00-12 tire
+
+[rim]
+bead_diameter_m = 0.3048       # MEASURED: the sidewall ends at radius 0.150-0.152 m (12 in nominal)
+flange_diameter_m = 0.320      # MEASURED: +-3 mm
+flange_spacing_m = 0.0614      # MEASURED: inner faces of the two flanges
+
+[hub]
+width_m = 0.0805               # MEASURED: outer faces of the motor side covers
+
+[ground]
+# The scan stops 89 mm above the floor, so the contact patch is not in it. MEASURED (free radius)
+axle_height_m = 0.2296
+axle_height_loaded_m = 0.2251  # INFERRED: equals the firmware's rolling radius
+
+[pedals]
+# CNC aluminium decks (D-shaped, hexagonal cut-outs, grip pins). The decks were off the wheel for
+# the scan: only the hinge brackets and pins are in it. Sizes below are ESTIMATES from shop photo
+# proportions (notch = 0.16 of the length, width = 0.47 of the length) and the bracket the notch
+# must clear; one real measurement replaces them.
+in_scan = false
+pivot_axis = "x"               # MEASURED: a 6 mm pin, fore-aft
+pivot_y_m = 0.1148             # MEASURED: +-y, pin to pin 0.2296 m
+pivot_z_m = 0.0075             # MEASURED: above the axle
+bracket_min_m = [-0.0221, 0.1043, -0.0312]  # MEASURED: left bracket (mirror for the right)
+bracket_max_m = [0.0235, 0.1351, 0.0101]
+length_m = 0.290               # ESTIMATE +-0.030
+width_m = 0.135                # ESTIMATE +-0.015 (hinge tab edge to outer edge)
+thickness_m = 0.009            # ESTIMATE +-0.002, plate centred on the pin
+inner_edge_y_m = 0.1088        # ESTIMATE: hinge tabs 6 mm inside the pin
+outer_edge_y_m = 0.2438        # ESTIMATE
+notch_m = [0.050, 0.0212]      # ESTIMATE: hinge notch length, depth past the pin (clears the bracket)
+deck_top_z_m = 0.012           # ESTIMATE +-0.005 (grip pins add 3 mm)
+surface_height_m = 0.2416      # ESTIMATE: deck top above the ground, unloaded
+fold = "about the pin (x); the left deck folds up with +90 deg about x, the right with -90 deg"
+
+[shell]
+# Four battery packs, two on each side of the tire, split fore and aft by the slider channel
+# where the axle block rides up and down on the suspension. All MEASURED (face fits, +-0.5 mm).
+pack_x_m = [-0.1243, 0.1243]
+pack_outer_y_m = [-0.1023, 0.1013]
+pack_inner_y_m = [-0.0458, 0.0443]   # 3.5-5 mm from the tire sidewall
+pack_top_z_m = 0.3703
+pack_bottom_z_m = -0.0298            # at the fore and aft ends
+pack_lip_z_m = -0.0415               # bottom lip between the ends
+lowest_z_m = -0.0518                 # axle block under the channel
+channel_half_width_m = 0.0293
+length_m = 0.2485
+width_m = 0.2035                     # packs; 0.2702 over the pedal brackets
+# Whole wheel: shock at the rear to tread at the front, top of the handle above the ground.
+overall_length_m = 0.4794
+overall_width_m = 0.2702
+overall_height_m = 0.7149
+body_min_m = [-0.2497, -0.1352, -0.0519]
+body_max_m = [0.1876, 0.1352, 0.4853]
+
+[seat]
+top_z_m = 0.4695               # MEASURED: on the centre line; 0.699 m above the ground
+x_m = [-0.1647, 0.1113]        # MEASURED: seat cover
+y_m = [-0.0931, 0.0914]
+
+[handle]
+# Front carry handle: a 20 mm tube along y between two side plates. MEASURED (circle fit 0.02 mm)
+tube_centre_m = [0.1323, 0.0, 0.4738]
+tube_radius_m = 0.0100
+tube_half_length_m = 0.069
+top_z_m = 0.4838
+
+[display]
+# Flat smoked window on top, in front of the seat and behind the handle, facing up. The window
+# is MEASURED; the board's place under it is INFERRED (centred, +-10 mm), its orientation comes
+# from display.toml [mount] (top of the digits to the front, read upright by the rider).
+board = "T16-007"
+window_z_m = 0.4383
+window_tilt_deg = 0.15
+window_x_m = [0.041, 0.1265]
+window_y_m = [-0.0543, 0.0521]
+led_panel_centre_m = [0.0833, -0.0011, 0.4383]
+normal = [0.0, 0.0, 1.0]
+board_x_axis = [0.0, -1.0, 0.0]   # board "right" = rider's right
+board_y_axis = [-1.0, 0.0, 0.0]   # board "down" (drawing y) = rearward
+
+[lights]
+# Headlight: four round lenses in one bar under the handle, facing forward. MEASURED
+headlight_face_x_m = 0.1751
+headlight_lens_diameter_m = 0.022
+headlight_lenses_m = [
+    [0.1751, -0.0457, 0.3905], [0.1751, -0.0157, 0.3905],
+    [0.1751, 0.0143, 0.3905], [0.1751, 0.0443, 0.3905],
+]
+headlight_bar_min_m = [0.157, -0.057, 0.374]
+headlight_bar_max_m = [0.1751, 0.057, 0.407]
+tail_light = "the tail light roller: see [roller] here and profiles/begode-extreme/lights.toml"
+
+[roller]
+# The round tube across the rear end of the seat, along y. Owner (confirmed): it holds the
+# controller's Bluetooth data board (blue status LED at the top centre), the RGB tail-light LED
+# rings (the two translucent halves glow orange-red around a black centre band), and a speaker in
+# each end cap, driven by a separate Bluetooth audio device. lights.toml has the LEDs.
+centre_m = [-0.1868, 0.0, 0.4491]    # MEASURED (circle fit 0.67 mm)
+radius_m = 0.0261                    # MEASURED
+min_m = [-0.2143, -0.0592, 0.4216]   # MEASURED, with the mounting arms
+max_m = [-0.1593, 0.0585, 0.4766]
+center_band_half_m = 0.0078          # ESTIMATE (owner video, lights.toml); no seam in the scan
+sleeve_y_m = [0.0078, 0.0375]        # +-y: translucent halves, from the band to the end collars
+# End caps (speakers): a collar r 0.0275-0.028 from |y| 0.0375 to 0.046, then a recessed end face
+# at |y| 0.0505 with an annular grille (r 0.012-0.022, radial windows). MEASURED
+speaker_caps_m = [[-0.1868, 0.0505, 0.4491], [-0.1868, -0.0505, 0.4491]]  # normals +y and -y
+speaker_grille_m = [0.012, 0.022]    # inner and outer radius
+ble_led_m = [-0.1868, -0.008, 0.4754]  # ESTIMATE (owner video): top of the band, right edge
+
+[imu]
+# The controller board is inside the body and not visible in the scan. DEFAULT (findings)
+above_axle_m = 0.15
+
+# Collision shapes proposed for the MJCF, in the frame above (sent to eng). Boxes: centre and
+# half sizes; capsules: end points and radius.
+[collision]
+# Tire as a torus: tube 0.058 at 0.1716 from the axle matches the knob tips and the crown within
+# 1.5 mm up to +-37 mm off the centre plane (about 40 deg of lean). In MuJoCo: a ring of 48
+# capsules (0.37 mm ripple), or the sdf torus plugin.
+tire_torus = { major_m = 0.1716, minor_m = 0.058 }
+# Same outer diameter, true width, sharper crown (if the side reach matters more than the crown).
+tire_torus_width = { major_m = 0.1889, minor_m = 0.0407 }
+pack_left = { centre = [0.0, 0.0734, 0.1644], half = [0.1243, 0.0284, 0.2059] }
+pack_right = { centre = [0.0, -0.0734, 0.1644], half = [0.1243, 0.0284, 0.2059] }
+top = { centre = [-0.0267, -0.0009, 0.4199], half = [0.1380, 0.0923, 0.0496] }
+front = { centre = [0.1495, 0.0, 0.4250], half = [0.0382, 0.0750, 0.0590] }
+roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radius = 0.0275 }
+shock = { from = [-0.169, 0.0, 0.383], to = [-0.204, 0.0, 0.162], radius = 0.035 }
+pedal_bracket_left = { centre = [0.0007, 0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
+pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
+# ESTIMATE: deployed pedal decks (see [pedals]), centred on the pins, top at deck_top_z_m.
+pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
+pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
+
+# The cleaned render model (public), see app/public/models/begode-extreme/README.md.
+[model]
+files = ["begode-extreme-lod0.glb", "begode-extreme-lod1.glb", "begode-extreme-lod2.glb"]
+axes = "glTF: x forward, y up, z right; (x, y, z) = (X, Z, -Y) of the frame above"
+wheel_nodes = ["tire", "hub", "rim"]     # under node "wheel": spin about z
+pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold about x
+roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
+                "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts

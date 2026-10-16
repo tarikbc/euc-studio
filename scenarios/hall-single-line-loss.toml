@@ -2,11 +2,11 @@
 # in six, the stock firmware's invalid-state counter keeps resetting, and it never cuts: it rides on
 # with a wrong rotor angle in two sectors of six and counts only two hall edges per electrical turn
 # instead of six. This file records that degradation as checks that pass on the stock build
-# (GW1825007, 2026-10-16). Measured there:
-#   torque ripple (standard deviation) 3.5 N·m before the fault, 16.5 N·m after (Iq 20.6 A);
-#   firmware speed estimate RMS error 0.18 km/h before, 13.6 km/h after (it reads 6.7 km/h at
-#   20.3 km/h: a third), so its speed tiltback and alarms would act at three times their setting;
-#   pitch standard deviation 0.32° before, 0.58° after, |pitch| at most 3.4°.
+# (GW1825007, 2026-10-16, measured 3.00-12 tire). Measured there:
+#   torque ripple (standard deviation) 3.9 N·m before the fault, 19.9 N·m after (Iq 23.1 A);
+#   firmware speed estimate RMS error 0.11 km/h before, 13.4 km/h after (it reads 6.7 km/h at
+#   20.1 km/h: a third), so its speed tiltback and alarms would act at three times their setting;
+#   pitch standard deviation 0.34° before, 0.54° after, |pitch| at most 3.4°.
 # A firmware that checks hall plausibility should cut cleanly or estimate the angle and speed from
 # the two working lines: tighten the "after" bounds to the "before" ones when it does.
 schema = 1
@@ -58,13 +58,13 @@ by_s = 15.0
 [[expect]]
 check = "ripple"
 signal = "torque_nm"
-max = 20.0
+max = 25.0
 from_s = 16.0
 
 [[expect]]
 check = "ripple"
 signal = "iq_a"
-max = 26.0
+max = 29.0
 from_s = 16.0
 
 [[expect]]

@@ -3,41 +3,38 @@
 
 use euc_fwsource::{FetchOptions, FirmwareCache, UreqClient};
 use euc_profile::{Channel, FirmwareSource, ProfileSource, Sha256, WheelProfile};
-use euc_sim::scenario::Scenario;
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 
 use super::cpu;
 use super::display::DisplayLayout;
 use super::host::{RideHost, StillHost};
+use super::lights::LightsLayout;
 use super::runner::Built;
-
-/// The scenarios the studio rides, as the repository's `scenarios/*.toml`.
-pub const SCENARIO_FILES: [(&str, &str); 2] = [
-    ("ride-20kmh-stop", include_str!("../../../../scenarios/ride-20kmh-stop.toml")),
-    ("balance-60s", include_str!("../../../../scenarios/balance-60s.toml")),
-];
+use super::scenarios;
 
 /// Snapshots per simulated second; the runner steps in 1/120 s.
 const SAMPLE_HZ: f64 = 120.0;
 
-/// Scenario `id`, parsed.
-pub fn scenario(id: &str) -> Result<Scenario, String> {
-    let (_, text) = SCENARIO_FILES.iter().find(|(name, _)| *name == id).ok_or_else(|| format!("no scenario {id}"))?;
-    Scenario::from_toml(text).map_err(|e| format!("scenario {id}: {e}"))
-}
-
 /// Builds the host for scenario `id`. Runs on the sim thread; `progress` names each step.
 pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, String> {
-    let scenario = scenario(id)?;
+    let scenario = scenarios::load(id)?;
     progress("Loading the wheel profile");
     let source = ProfileSource::Builtin;
     let files = WheelFiles::load(&source, &scenario.wheel).map_err(|e| e.to_string())?;
     let wheel = &files.profile;
     // The display replica is optional: a wheel without `display.toml` shows the raw digits.
-    let display = match source.read(&wheel.id, "display.toml") {
-        Ok(text) => Some(DisplayLayout::parse(&text)?),
-        Err(_) => None,
-    };
+    // The display and tail-light layouts are optional: without them (or with a file that does not
+    // parse) the run goes on and the card shows the raw digits and LEDs.
+    let mut problems = Vec::new();
+    let display = source
+        .read(&wheel.id, "display.toml")
+        .ok()
+        .and_then(|text| DisplayLayout::parse(&text).map_err(|e| problems.push(e)).ok());
+    let lights = source
+        .read(&wheel.id, "lights.toml")
+        .ok()
+        .and_then(|text| LightsLayout::parse(&text).map_err(|e| problems.push(e)).ok());
+    let note = (!problems.is_empty()).then(|| problems.join("; "));
     let (image, label) = stock_image(wheel, progress)?;
     let sha256 = Sha256::digest(&image);
     // Stock-map addresses only mean something in the build they were taken from.
@@ -74,8 +71,9 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 host: Box::new(RideHost::new(session, scenario)?),
                 label: "stock firmware".into(),
                 build: label,
-                note: None,
+                note,
                 display,
+                lights,
             })
         }
         // Without a body model the firmware still runs, on a wheel that stands still.
@@ -85,8 +83,12 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 host: Box::new(StillHost::new(machine, battery_v)),
                 label: "stock firmware (no physics)".into(),
                 build: label,
-                note: Some(format!("The wheel stands still: {e}")),
+                note: Some(format!("The wheel stands still: {e}")).map(|n| match &note {
+                    Some(more) => format!("{n}; {more}"),
+                    None => n,
+                }),
                 display,
+                lights,
             })
         }
     }
@@ -121,19 +123,6 @@ fn stock_image(wheel: &WheelProfile, progress: &mut dyn FnMut(&str)) -> Result<(
 }
 
 #[cfg(test)]
-mod scenario_tests {
-    use super::*;
-
-    #[test]
-    fn every_offered_scenario_parses() {
-        for (id, ..) in super::super::SCENARIOS {
-            let scenario = scenario(id).expect(id);
-            assert_eq!(scenario.name, id);
-        }
-    }
-}
-
-#[cfg(all(test, feature = "unicorn"))]
 mod tests {
     use std::time::Instant;
 
@@ -167,7 +156,7 @@ mod tests {
     }
 
     /// Needs the stock image in the firmware cache (`euc fetch begode-extreme`):
-    /// `cargo test --features unicorn -- --ignored --nocapture`.
+    /// `cargo test -- --ignored --nocapture` (our own core; `EUC_CPU=unicorn` with the feature).
     #[test]
     #[ignore = "needs the stock image in the local firmware cache"]
     fn stock_firmware_boots_and_streams() {
@@ -190,10 +179,19 @@ mod tests {
         // The phone asks for the version, then sounds the horn.
         rig.host.inject_ble(b"V").expect("inject");
         rig.run(1.0);
+        let mut boot_tones = Vec::new();
+        rig.host.drain_tones(&mut boot_tones);
         rig.host.inject_ble(b"b").expect("inject");
         rig.run(2.0);
         let mut events = Vec::new();
         rig.host.drain_events(&mut events);
+        let mut tones = Vec::new();
+        rig.host.drain_tones(&mut tones);
+        println!("boot tones {boot_tones:?}");
+        println!("horn tones {tones:?}");
+        let starts = tones.iter().filter(|t| t.hz > 0.0).count();
+        assert_eq!(starts, 2, "the horn beeps twice");
+        assert!(tones.iter().all(|t| t.hz == 0.0 || (t.hz - 2700.0).abs() < 10.0), "at about 2.7 kHz");
         let outputs = rig.host.outputs().expect("outputs");
         let replies: Vec<_> = rig.frames.iter().filter(|f| f.reply).map(|f| f.summary.clone()).collect();
         println!("replies {replies:?}; beeps {:?}", events.iter().filter(|e| e.text.starts_with("Beep")).count());

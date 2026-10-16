@@ -1,6 +1,6 @@
 [package]
 name = "euc-display"
-description = "The wheel's front display: which LEDs the driver's grid bytes light, and where they are"
+description = "The wheel's front display and tail light: which LEDs the firmware lights, and where they are"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

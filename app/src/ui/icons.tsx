@@ -8,6 +8,7 @@ export {
   ArrowRight,
   BatteryMedium,
   Bell,
+  BellOff,
   Bluetooth,
   BluetoothOff,
   Box,

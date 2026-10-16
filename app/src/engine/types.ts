@@ -3,6 +3,7 @@
 // loop and re-render only on coarse changes (`subscribe`/`getVersion`).
 
 import type { RingBuffer } from "../lib/ring.ts";
+import type { Tone } from "./buzzerAudio.ts";
 import type { BodyInfo, Outputs } from "./telemetry.gen.ts";
 
 /** The lanes and readouts the UI shows. Each engine maps its own signals onto them. */
@@ -96,6 +97,8 @@ export interface PhoneFrame {
   fields: [string, string][];
   /** The bytes, hex. */
   hex: string;
+  /** Present and true for a text answer to a phone command (`V`, `N`). */
+  reply?: boolean;
 }
 
 /** A command the phone can send. Never-send commands are not listed at all. */
@@ -120,7 +123,7 @@ export interface EngineStatus {
   message: string;
   /** Firmware build label (`GW1825020`) when known. */
   build?: string;
-  /** CPU backend (`unicorn`, `demo`). */
+  /** CPU backend (`own`, `unicorn`, `demo`). */
   backend: string;
   /** What runs ("Stock firmware, no physics yet"). */
   label?: string;
@@ -157,6 +160,52 @@ export interface DisplayLayout {
   pieces: DisplayPiece[];
 }
 
+/**
+ * The tail light (`lights.toml`): a roller whose two translucent halves glow, the LED rings inside
+ * it, the BLE module's status light and the speaker caps. Wheel frame: x forward, y left, z up, m.
+ */
+export interface LightsLayout {
+  /** LED slots the firmware sends. */
+  slots: number;
+  roller: {
+    centre_m: Vec3;
+    axis: Vec3;
+    radius_m: number;
+    band_half_width_m: number;
+    glow_half_length_m: number;
+    /** What the diffuser passes of each colour channel, 0..1. */
+    diffuser_tint: Vec3;
+    unlit: string;
+    band: string;
+  } | null;
+  /** `normal` points out of the light; for a `radial` ring it runs along the tube. */
+  rings: {
+    id: string;
+    side: "left" | "right";
+    centre_m: Vec3;
+    normal: Vec3;
+    up: Vec3;
+    facing: "normal" | "radial";
+    diameter_m: number;
+  }[];
+  /** Strip LEDs (1-based `index`: colour `outputs.leds[index - 1]`), where their light shows. */
+  leds: { index: number; ring: number; face_m: [number, number]; wheel_m: Vec3; direction: Vec3 }[];
+  indicators: { id: string; colour: string; position_m: Vec3 }[];
+  speakers: {
+    id: string;
+    side: "left" | "right";
+    centre_m: Vec3;
+    normal: Vec3;
+    radius_m: number;
+    grille_inner_m: number;
+    grille_outer_m: number;
+  }[];
+  /** The bar that holds the light, `[min, max]` corners; null while unknown. */
+  bar: [Vec3, Vec3] | null;
+}
+
+type Vec3 = [number, number, number];
+
 export interface EngineClient {
   readonly kind: "demo" | "live";
   readonly time: RingBuffer;
@@ -172,6 +221,12 @@ export interface EngineClient {
   readonly outputs: Outputs | null;
   /** The display replica's layout; null when the wheel has none (or for the demo). */
   readonly display: DisplayLayout | null;
+  /** The tail light's layout; null when the wheel has none (or for the demo). */
+  readonly lights: LightsLayout | null;
+  /** Times the buzzer started sounding in this run. */
+  readonly beeps: number;
+  /** Buzzer changes as they arrive, at their simulated times (live engine only). */
+  subscribeTones(fn: (tones: Tone[]) => void): () => void;
   readonly status: EngineStatus;
   readonly playing: boolean;
   readonly targetRtf: number;

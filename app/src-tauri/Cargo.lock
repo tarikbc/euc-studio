@@ -860,6 +860,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "euc-armv7m"
+version = "0.1.0"
+dependencies = [
+ "euc-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "euc-core"
 version = "0.1.0"
 dependencies = [
@@ -939,6 +947,7 @@ dependencies = [
 name = "euc-sim"
 version = "0.1.0"
 dependencies = [
+ "euc-armv7m",
  "euc-core",
  "euc-devices",
  "euc-physics",
@@ -947,6 +956,8 @@ dependencies = [
  "euc-proto-begode",
  "euc-stm32f1",
  "euc-telemetry",
+ "euc-unicorn",
+ "object",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -974,7 +985,6 @@ dependencies = [
  "euc-sim",
  "euc-stm32f1",
  "euc-telemetry",
- "euc-unicorn",
  "serde",
  "serde_json",
  "tauri",
@@ -2415,6 +2425,15 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+]
+
+[[package]]
+name = "object"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

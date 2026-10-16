@@ -1,0 +1,65 @@
+# Overlean on a 30 % battery (115 V at rest instead of 130 V): the same rider and settings as
+# overlean-top-speed.toml, so the comparison shows how much earlier the cutout comes with less
+# voltage headroom. See that file for what the checks mean.
+schema = 1
+name = "overlean-top-speed-30pct"
+description = "Accelerate past the motor's limit on a 30 % battery: the cutout comes earlier."
+wheel = "begode-extreme"
+seconds = 32.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [26, 100]]
+settings = "tarik-2026-10-15"
+
+[[timeline]]
+at_s = 0.0
+fault = "battery_soc"
+soc = 0.30
+
+[[expect]]
+check = "record"
+var = "vq_active"
+scale = 0.0031746     # 1/315: the app's PWM %
+stat = "first_above"
+threshold = 80.0
+
+[[expect]]
+check = "record"
+var = "pwm_alarm"
+stat = "first_above"
+threshold = 1.0
+
+[[expect]]
+check = "record"
+var = "vq_active"
+scale = 0.0031746     # PWM saturated: the q-current loop has no headroom left
+stat = "first_above"
+threshold = 100.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+var = "tiltback_pwm_deg"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+signal = "battery_v"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+var = "balance_disabled"
+stat = "first_above"
+threshold = 1.0
+
+[[expect]]
+check = "upright"

@@ -26,15 +26,25 @@ async function shot(page: Page, name: string, project: string) {
   return file;
 }
 
-async function openRide(page: Page) {
-  // preroll fills the scopes with 14 s of the ride scenario (cruising at 20 km/h). Headless
-  // browsers render WebGL in software, so the app picks reduced 3D quality; README screenshots
-  // force full quality instead.
+/**
+ * Opens Ride and waits until it is ready. preroll fills the scopes with 14 s of the ride
+ * scenario (cruising at 20 km/h). With `scene: false` the 3D view stays off (`?scene=off`):
+ * tests about the shell do not wait for WebGL, which a slow runner draws in software. Headless
+ * browsers render WebGL in software, so the app picks reduced 3D quality; README screenshots
+ * force full quality instead.
+ */
+async function openRide(page: Page, { scene = true } = {}) {
   const quality = process.env.DOCS_SCREENSHOTS ? "&quality=high" : "";
-  await page.goto(`/?preroll=14${quality}#/ride`);
-  await expect(page.getByTestId("viewport").locator("canvas")).toBeVisible();
-  await expect(page.getByText("Building the scene")).toHaveCount(0, { timeout: 30_000 });
-  await page.waitForTimeout(1200);
+  await page.goto(`/?preroll=14${scene ? "" : "&scene=off"}${quality}#/ride`);
+  await waitForRide(page);
+}
+
+/** The shell is up and the 3D view has drawn its first frame (or is off). */
+async function waitForRide(page: Page) {
+  await expect(page.getByTestId("viewport")).toHaveAttribute("data-scene", /ready|off/, {
+    timeout: 60_000,
+  });
+  await expect(page.getByText("Building the scene")).toHaveCount(0);
 }
 
 test.beforeEach(async ({ page, browserName }) => {
@@ -61,7 +71,7 @@ test("ride workspace: viewport, telemetry, events", async ({ page }, info) => {
 });
 
 test("workspace switching with ⌘1-⌘4", async ({ page }, info) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   for (const [key, name, heading] of [
     ["2", "tune", "See inside the firmware while it rides"],
     ["3", "compare", "Find where two firmwares part ways"],
@@ -78,21 +88,21 @@ test("workspace switching with ⌘1-⌘4", async ({ page }, info) => {
 });
 
 test("docks toggle and persist", async ({ page }) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   const right = page.getByTestId("dock-right");
   const width = async () => (await right.boundingBox())?.width ?? 0;
-  expect(await width()).toBeGreaterThan(200);
+  await expect.poll(width).toBeGreaterThan(200);
   await page.keyboard.press("ControlOrMeta+b");
   await expect.poll(width).toBeLessThan(2);
   await page.reload();
-  await expect(page.getByTestId("viewport")).toBeVisible();
+  await waitForRide(page);
   await expect.poll(width).toBeLessThan(2);
   await page.keyboard.press("ControlOrMeta+b");
   await expect.poll(width).toBeGreaterThan(200);
 });
 
 test("command palette and shortcuts sheet", async ({ page }, info) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   await page.keyboard.press("ControlOrMeta+k");
   const input = page.getByPlaceholder("Type a command or search");
   await expect(input).toBeFocused();
@@ -114,26 +124,26 @@ test("command palette and shortcuts sheet", async ({ page }, info) => {
 });
 
 test("phone tab explains that it needs the live engine", async ({ page }, info) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   await page.getByRole("tab", { name: "Phone" }).click();
   await expect(page.getByText("The phone needs the live engine")).toBeVisible();
   await shot(page, "phone-demo", info.project.name);
 });
 
 test("the event list fills again after a restart", async ({ page }, info) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   const list = page.getByRole("heading", { name: "Events" }).locator("xpath=ancestor::section[1]");
   await expect(list.getByText("First telemetry frame")).toBeVisible();
   await page.keyboard.press("r");
   // The demo re-runs from 0 s: its boot events come back and their rows must show.
-  await expect(list.getByText("First telemetry frame")).toBeVisible({ timeout: 10_000 });
+  await expect(list.getByText("First telemetry frame")).toBeVisible();
   await page.waitForTimeout(3000);
   await expect(list.getByText("First telemetry frame")).toBeVisible();
   await shot(page, "events-after-restart", info.project.name);
 });
 
 test("play, pause and the real-time factor", async ({ page }) => {
-  await openRide(page);
+  await openRide(page, { scene: false });
   await page.getByRole("button", { name: "Pause simulation" }).click();
   await expect(page.getByText("Demo engine")).toBeVisible();
   await expect(page.getByText("paused", { exact: true })).toBeVisible();

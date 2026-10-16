@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { series } from "../../design/tokens.ts";
 import { engine } from "../../engine/index.ts";
 import { DisplayDecal } from "./DisplayDecal.tsx";
+import { TailLight3D } from "./TailLight3D.tsx";
+import { type WheelModel, useWheelModel } from "./wheelModel.ts";
 
 // A stylized electric unicycle built from primitives, about the size of a Begode Extreme
 // (22 inch tire). Units are meters; the wheel rolls about z and travels along +x. The shell is
@@ -103,53 +105,6 @@ function useSideShell() {
   }, []);
 }
 
-/** LEDs per side of the shell (the Extreme's strip has 32: 16 a side, order INFERRED). */
-const LEDS_PER_SIDE = 16;
-const LED_OFF = new THREE.Color("#141416");
-const ledColor = new THREE.Color();
-
-/**
- * One side's light strip as 16 emissive cells. Colours come from the engine's board outputs on
- * every frame (no React render); without outputs (the demo) the strip glows in the UI accent.
- */
-function LedStrip({ side, fallback }: { side: number; fallback: THREE.Color }) {
-  const mesh = useRef<THREE.InstancedMesh>(null);
-  const placed = useRef(false);
-  useFrame(() => {
-    const m = mesh.current;
-    if (!m) return;
-    if (!placed.current) {
-      const at = new THREE.Matrix4();
-      for (let i = 0; i < LEDS_PER_SIDE; i++) {
-        at.makeTranslation(-0.15 + (0.3 * (i + 0.5)) / LEDS_PER_SIDE, 0, 0);
-        m.setMatrixAt(i, at);
-      }
-      m.instanceMatrix.needsUpdate = true;
-      placed.current = true;
-    }
-    const leds = engine.outputs?.leds;
-    for (let i = 0; i < LEDS_PER_SIDE; i++) {
-      // The right side (z > 0) takes the first half of the strip (INFERRED order).
-      const rgb = leds?.[(side > 0 ? 0 : LEDS_PER_SIDE) + i];
-      if (!leds) ledColor.copy(fallback);
-      else if (!rgb || rgb[0] + rgb[1] + rgb[2] === 0) ledColor.copy(LED_OFF);
-      else ledColor.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
-      m.setColorAt(i, ledColor);
-    }
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
-  });
-  return (
-    <instancedMesh
-      ref={mesh}
-      args={[undefined, undefined, LEDS_PER_SIDE]}
-      position={[0, -0.17, side * 0.0262]}
-    >
-      <boxGeometry args={[(0.3 / LEDS_PER_SIDE) * 0.82, 0.014, 0.002]} />
-      <meshBasicMaterial toneMapped={false} />
-    </instancedMesh>
-  );
-}
-
 function ShellMaterial() {
   return (
     <meshPhysicalMaterial
@@ -197,8 +152,9 @@ export function WheelVisual() {
 }
 
 /**
- * Shell, pedals and lights around the axle (local frame: x forward, y up, axle along z). The
- * light strip follows the UI accent until the emulated firmware drives the LEDs.
+ * Shell, pedals and lights around the axle (local frame: x forward, y up, axle along z). With
+ * the live engine the tail light shows the firmware's LED colours; the demo trims the side panels
+ * in the UI accent instead.
  */
 export function ShellVisual({ accent }: { accent: string }) {
   const led = useMemo(() => new THREE.Color(accent), [accent]);
@@ -210,8 +166,13 @@ export function ShellVisual({ accent }: { accent: string }) {
           <mesh geometry={sideShell} castShadow receiveShadow>
             <ShellMaterial />
           </mesh>
-          {/* Light strip: the firmware's WS2812 colours when the engine drives them, else the accent. */}
-          <LedStrip side={s} fallback={led} />
+          {/* Accent trim (demo only; the live wheel shows its real tail light). */}
+          {!engine.lights && (
+            <mesh position={[0, -0.17, s * 0.0262]}>
+              <boxGeometry args={[0.3, 0.014, 0.002]} />
+              <meshBasicMaterial color={led} toneMapped={false} />
+            </mesh>
+          )}
           {/* Vent detail. */}
           {[0, 1, 2, 3].map((i) => (
             <mesh key={i} position={[-0.09 + i * 0.06, 0.14, s * 0.0262]}>
@@ -236,6 +197,7 @@ export function ShellVisual({ accent }: { accent: string }) {
         <meshStandardMaterial color="#48484A" roughness={0.35} metalness={0.7} />
       </mesh>
       <DisplayDecal />
+      {engine.lights && <TailLight3D layout={engine.lights} />}
       {/* Headlight on the front of the fairing, tail light behind. */}
       <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
         <boxGeometry args={[0.004, 0.036, 0.1]} />
@@ -276,8 +238,36 @@ export function ShellVisual({ accent }: { accent: string }) {
   );
 }
 
+/** Centre of the scanned display window's LED panel, shell frame (geometry.toml [display]). */
+const SCAN_DISPLAY: [number, number, number] = [0.0833, 0.4391, 0.0011];
+/** Axle height of the scanned tire, unloaded. */
+const SCAN_AXLE_Y = 0.2296;
+
+/** The spinning part: the scanned tire, hub and rim when the model loaded, else the stylized wheel. */
+export function WheelPart({ model }: { model: WheelModel | null }) {
+  const scanned = useMemo(() => model?.wheel.clone(true), [model]);
+  return scanned ? <primitive object={scanned} /> : <WheelVisual />;
+}
+
+/**
+ * The part that follows the shell: the scanned body (its own tail-light bar and pedals) with the
+ * live display and LEDs on it, else the stylized shell.
+ */
+export function BodyPart({ model, accent }: { model: WheelModel | null; accent: string }) {
+  const scanned = useMemo(() => model?.body.clone(true), [model]);
+  if (!scanned) return <ShellVisual accent={accent} />;
+  return (
+    <>
+      <primitive object={scanned} />
+      <DisplayDecal position={SCAN_DISPLAY} fit={1} />
+      {engine.lights && <TailLight3D layout={engine.lights} body={false} />}
+    </>
+  );
+}
+
 /** The demo's kinematic wheel: rolls by distance, pitches and rolls with the demo signals. */
 export function EucModel({ accent }: { accent: string }) {
+  const model = useWheelModel();
   const spin = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const root = useRef<THREE.Group>(null);
@@ -291,12 +281,12 @@ export function EucModel({ accent }: { accent: string }) {
   });
 
   return (
-    <group ref={root} position={[0, TIRE_R, 0]}>
+    <group ref={root} position={[0, model ? SCAN_AXLE_Y : TIRE_R, 0]}>
       <group ref={spin}>
-        <WheelVisual />
+        <WheelPart model={model} />
       </group>
       <group ref={body}>
-        <ShellVisual accent={accent} />
+        <BodyPart model={model} accent={accent} />
       </group>
     </group>
   );

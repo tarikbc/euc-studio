@@ -42,7 +42,15 @@ the URL to force the demo engine in the desktop window.
 every 10 s, and prints them to the terminal (`PERF ...`). The window must stay in front: a covered
 window gets few frames, and its lines show that in the frame count.
 `EUC_STUDIO_CONTROL=<file>` (dev builds) runs each line written to that file as a command:
-`restart [scenario]`, `play`, `pause`, `rtf <x>`, `send <command id> [value]`.
+`restart [scenario]`, `play`, `pause`, `rtf <x>`, `send <command id> [value]`, `eval <js>`.
+
+In the window:
+
+- The run bar lists every scenario in the repository's `scenarios/` folder.
+- The wheel is the scanned Begode Extreme from `public/models/begode-extreme/` when the files are
+  there (level of detail 1, or 2 without a GPU), else a stylized model.
+- The Display card shows the replica of the wheel's display board and its tail light. The bell
+  plays the firmware's buzzer through the speakers (off by default; ⌘K "Toggle buzzer sound").
 
 ## Check
 

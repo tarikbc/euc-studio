@@ -94,6 +94,8 @@ pub struct Machine {
     pub early_quanta: u64,
     /// Resets after power-on.
     pub resets: u32,
+    /// Cycles the core spent asleep in `WFI` or `WFE`.
+    pub slept_cycles: u64,
 }
 
 impl Machine {
@@ -186,6 +188,7 @@ impl Machine {
         let board = (names.len() - 1) as DeviceId;
         sys.reset_components(ResetKind::Power);
         cpu.reset(reset_sp, reset_vector);
+        cpu.set_ccr(sys.exc.ccr());
         let marker_addrs: Vec<u32> = markers.iter().map(|&(addr, _)| addr).collect();
         cpu.watch(&marker_addrs);
         Ok(Self {
@@ -205,6 +208,7 @@ impl Machine {
             quanta: 0,
             early_quanta: 0,
             resets: 0,
+            slept_cycles: 0,
         })
     }
 
@@ -239,12 +243,18 @@ impl Machine {
             let executed = self.cpu.retired() - before;
             self.quanta += 1;
             self.handle(exit);
+            if let Some(ccr) = self.sys.ccr_pending.take() {
+                self.cpu.set_ccr(ccr);
+            }
             if self.sys.early || self.sys.reset_pending.is_some() || self.sys.diag.halted.is_some() {
                 self.early_quanta += 1;
                 self.cycles = self.sys.chunk_start + self.sys.skip + 1;
             } else {
                 self.instr += executed;
                 self.cycles = self.sys.chunk_start + (executed as f64 * self.cpi) as u64 + self.sys.skip;
+                if matches!(exit, Exit::WaitForInterrupt | Exit::WaitForEvent) {
+                    self.sleep(end);
+                }
             }
         }
         self.sys.chunk_start = self.cycles;
@@ -255,7 +265,7 @@ impl Machine {
     fn handle(&mut self, exit: Exit) {
         let pc = self.cpu.regs().pc;
         let (kind, text) = match exit {
-            Exit::Budget | Exit::Yield => return,
+            Exit::Budget | Exit::Yield | Exit::WaitForInterrupt | Exit::WaitForEvent => return,
             Exit::Fault(Fault::Bus(fault)) if fault.kind == BusFaultKind::ReadOnly => {
                 ("write-code-flash", format!("store to code flash 0x{:08X} from PC 0x{pc:08X} (ignored)", fault.addr))
             }
@@ -266,6 +276,21 @@ impl Machine {
             other => ("cpu-exception", format!("{other:?} at PC 0x{pc:08X} (not modeled)")),
         };
         self.sys.blocker(kind, text, true);
+    }
+
+    /// `WFI` or `WFE` retired: the core sleeps until an exception that would preempt becomes
+    /// pending (`PRIMASK` does not keep it asleep, ARM ARM B1.5.19), so time skips to the next
+    /// event, or to `end` when nothing is scheduled. A wake-up with nothing to take is allowed:
+    /// firmware waits in a loop around the instruction.
+    fn sleep(&mut self, end: u64) {
+        if self.sys.exc.best_pending(false).is_some() {
+            return;
+        }
+        let wake = self.sys.next_event().map_or(end, |at| at.min(end));
+        if wake > self.cycles {
+            self.slept_cycles += wake - self.cycles;
+            self.cycles = wake;
+        }
     }
 
     /// Takes the best pending exception, after stepping out of an IT block.
@@ -308,6 +333,7 @@ impl Machine {
         self.sys.diag.events.push((now, format!("{what} #{}: {why}", self.resets)));
         self.sys.reset_components(kind);
         self.cpu.reset(self.reset_sp, self.reset_vector);
+        self.cpu.set_ccr(self.sys.exc.ccr());
     }
 
     /// `HardFault`, `SysTick`, `TIM8_UP`, `IRQ61`...
@@ -589,6 +615,70 @@ release_after_latch_s = 0.1
 
     fn error(extra: &str) -> String {
         build(extra, &[0; 0x200]).err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    /// An image at `0x0800_3000`: SP, reset vector `+0x100 + reset`, SysTick vector `+0x140`,
+    /// with `main` at +0x100 and `tick` at +0x140.
+    fn image(reset: u32, main: &[u16], tick: &[u16]) -> Vec<u8> {
+        let mut image = vec![0_u8; 0x200];
+        image[..4].copy_from_slice(&0x2000_1000_u32.to_le_bytes());
+        image[4..8].copy_from_slice(&(0x0800_3101 + reset).to_le_bytes());
+        image[60..64].copy_from_slice(&0x0800_3141_u32.to_le_bytes());
+        for (at, code) in [(0x100, main), (0x140, tick)] {
+            for (i, h) in code.iter().enumerate() {
+                image[at + 2 * i..at + 2 * i + 2].copy_from_slice(&h.to_le_bytes());
+            }
+        }
+        image
+    }
+
+    /// The machine on our own core.
+    fn own(image: &[u8]) -> Machine {
+        let board: BoardFile = toml::from_str(BOARD).unwrap();
+        let config = MachineConfig {
+            board: &board,
+            stockmap: None,
+            image,
+            load_addr: 0x0800_3000,
+            hclk: 72_000_000,
+            plant: PlantState::default(),
+            injections: Vec::new(),
+            power_cycles: Vec::new(),
+            cpi: 1.25,
+            max_quantum: 4000,
+            marker_window_s: 0.0,
+        };
+        let mut registry = Registry::new();
+        crate::board::register(&mut registry);
+        Machine::new(&config, &registry, crate::cpu::Backend::Own.factory().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn wfi_sleeps_until_the_next_interrupt() {
+        // VTOR, SysTick every 1 ms (HCLK/8, TICKINT), then `wfi; b back`. The handler counts.
+        let main = [
+            0xF64E, 0x5008, 0xF2CE, 0x0000, 0xF243, 0x0100, 0xF6C0, 0x0100, 0x6001, 0xF24E, 0x0014, 0xF2CE, 0x0000,
+            0xF242, 0x3127, 0x6001, 0xF24E, 0x0010, 0xF2CE, 0x0000, 0x2103, 0x6001, 0xBF30, 0xE7FD,
+        ];
+        let tick = [0xF240, 0x0000, 0xF2C2, 0x0000, 0x6801, 0x3101, 0x6001, 0x4770];
+        let mut machine = own(&image(0, &main, &tick));
+        assert_eq!(machine.run(72_000 * 10 + 36_000), None);
+        let ticks = u32::from_le_bytes(machine.memory(0x2000_0000, 4).unwrap().try_into().unwrap());
+        assert_eq!(ticks, 10, "one handler run per millisecond");
+        assert!(machine.slept_cycles > 72_000 * 9, "asleep most of the time: {} cycles", machine.slept_cycles);
+        assert!(machine.instr < 1_000, "{} instructions", machine.instr);
+    }
+
+    #[test]
+    fn ccr_writes_reach_the_cpu() {
+        // CCR.DIV_0_TRP, then `sdiv r4, r2, r3` with r3 = 0: a UsageFault, so a fatal blocker.
+        let main = [0xF64E, 0x5014, 0xF2CE, 0x0000, 0x2110, 0x6001, 0x2205, 0x2300, 0xFB92, 0xF4F3, 0xE7FE];
+        let mut machine = own(&image(0, &main, &[0x4770]));
+        let halted = machine.run(72_000).map(str::to_owned);
+        assert_eq!(
+            halted.as_deref(),
+            Some("cpu-exception: division by zero at PC 0x08003110 (HardFault/UsageFault on HW)")
+        );
     }
 
     #[test]

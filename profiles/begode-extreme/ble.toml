@@ -1,0 +1,39 @@
+# Begode Extreme: the BLE module, a transparent UART bridge on the controller's USART1 (HM-10 style).
+# Read by crates/euc-ble-radio for `euc sim serve --ble` and `euc replay` (docs/ble-radio.md, "Adding a brand").
+
+schema = 1
+
+# The protocol of the bytes on the link: euc-proto-begode finds the text replies in the stream and
+# answers writes in a replay like the stock firmware.
+protocol = "begode"
+
+[advertising]
+# The simulator's own name, so an app never takes it for a real wheel (`--name` overrides it).
+name = "GotWay_EMU"
+# What real wheels advertise: GotWay_ and five digits (GotWay_71105).
+name_pattern = "GotWay_*"
+# Service UUIDs in the advertisement: 16-bit (FFE0), 32-bit or 128-bit (8-4-4-4-12).
+services = ["FFE0"]
+# Manufacturer data, hex, company id first (little-endian); empty: none. Not known for this module.
+manufacturer = ""
+
+[[service]]
+uuid = "FFE0"
+
+# One characteristic both ways. roles: tx = the wheel's output goes out on it as notifications,
+# rx = writes on it go into the wheel. A module with the Nordic UART service would have two:
+# 6E400003-B5A3-F393-E0A9-E50E24DCCA9E (notify, tx) and 6E400002-B5A3-F393-E0A9-E50E24DCCA9E (write, rx).
+[[service.characteristic]]
+uuid = "FFE1"
+properties = ["notify", "write", "write-without-response"]
+roles = ["tx", "rx"]
+
+[module]
+kind = "uart-bridge"
+# The module packs the UART stream into notifications of 20 bytes...
+chunk = 20
+# ...and sends a shorter one once the line has been idle for 1 ms: a lone 24-byte frame goes out as
+# 20 + 4, the stock firmware's bursts of five frames as six notifications of 20 bytes.
+idle_ms = 1
+# Shortest time between two notifications: the module sends them back to back.
+interval_ms = 0

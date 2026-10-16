@@ -28,7 +28,7 @@
 //! it to the end.
 
 use euc_devices::{DeviceFault, Mpu6500, SmartBms};
-use euc_physics::{Assist, Intent, Rider};
+use euc_physics::{Assist, Intent, Rider, Terrain};
 use euc_plant::fault::PlantFault;
 use euc_telemetry::{CHANNELS, EventKind, Signals, Snapshot};
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,9 @@ pub struct Scenario {
     /// Settings preset the wheel boots with (`profiles/<wheel>/settings.toml`); none: a blank
     /// settings journal.
     pub settings: Option<String>,
+    /// The ground: a slope, bumps, potholes (`euc_physics::Terrain`); flat by default.
+    #[serde(default)]
+    pub terrain: Terrain,
     /// BLE commands to send.
     #[serde(default)]
     pub inject: Vec<Inject>,
@@ -239,6 +242,24 @@ pub enum Expect {
         /// Until this time, seconds (default: the end).
         by_s: Option<f64>,
     },
+    /// Records a measurement and always passes: a statistic of a telemetry signal or of a
+    /// stock-map variable (times `scale`) over a window.
+    Record {
+        /// Telemetry key; give this or `var`.
+        signal: Option<String>,
+        /// Stock-map RAM variable; give this or `signal`.
+        var: Option<String>,
+        /// Factor applied to `var` (default 1).
+        scale: Option<f64>,
+        /// What to record.
+        stat: Stat,
+        /// The level for `first_above` and `first_below`.
+        threshold: Option<f64>,
+        /// From this time on, seconds (default: power-on).
+        from_s: Option<f64>,
+        /// Until this time, seconds (default: the end).
+        by_s: Option<f64>,
+    },
     /// A firmware variable of the stock map has every bit of `bits` set (an alarm flag).
     FirmwareBits {
         /// Stock-map RAM variable name (`alerts`).
@@ -252,11 +273,30 @@ pub enum Expect {
     },
 }
 
+/// What a `record` check measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stat {
+    /// The largest value, and when.
+    Max,
+    /// The smallest value, and when.
+    Min,
+    /// The mean.
+    Mean,
+    /// When the value first reaches `threshold` or more.
+    FirstAbove,
+    /// When the value first falls to `threshold` or less.
+    FirstBelow,
+    /// The value when the wheel first falls over.
+    AtFall,
+}
+
 impl Expect {
     /// The stock-map variable this check reads, if any.
-    fn firmware_var(&self) -> Option<&str> {
+    pub fn firmware_var(&self) -> Option<&str> {
         match self {
             Self::FirmwareBits { var, .. } | Self::FirmwareTracks { var, .. } => Some(var),
+            Self::Record { var, .. } => var.as_deref(),
             _ => None,
         }
     }
@@ -265,8 +305,19 @@ impl Expect {
     fn signal(&self) -> Option<&str> {
         match self {
             Self::Ripple { signal, .. } | Self::FirmwareTracks { signal, .. } => Some(signal),
+            Self::Record { signal, .. } => signal.as_deref(),
             _ => None,
         }
+    }
+
+    /// Why this check cannot work as written, if it cannot.
+    fn problem(&self) -> Option<String> {
+        let Self::Record { signal, var, stat, threshold, .. } = self else { return None };
+        if signal.is_some() == var.is_some() {
+            return Some("a record check needs either signal or var".into());
+        }
+        let needs_level = matches!(stat, Stat::FirstAbove | Stat::FirstBelow);
+        (needs_level && threshold.is_none()).then(|| "first_above and first_below need a threshold".into())
     }
 }
 
@@ -318,6 +369,9 @@ impl Scenario {
         }
         if scenario.push.iter().any(|&[at, n, length]| !(at >= 0.0 && n.is_finite() && length > 0.0)) {
             return bad("push needs [start s, newtons, duration s] with a positive duration".into());
+        }
+        if let Some(problem) = scenario.expects.iter().find_map(Expect::problem) {
+            return bad(problem);
         }
         if let Some(signal) =
             scenario.expects.iter().filter_map(Expect::signal).find(|s| !CHANNELS.iter().any(|c| c.key == *s))
@@ -473,6 +527,13 @@ impl Expect {
             Self::Ripple { ref signal, max, from_s, by_s } => {
                 judge_ripple(samples, observed, signal, max, from_s.unwrap_or(release_s), by_s)
             }
+            Self::Record { ref signal, ref var, scale, stat, threshold, from_s, by_s } => {
+                let source = match (signal, var) {
+                    (Some(signal), _) => Source::Signal(signal),
+                    (None, var) => Source::Var(var.as_deref().unwrap_or(""), scale.unwrap_or(1.0)),
+                };
+                judge_record(samples, observed, source, (stat, threshold), (from_s.unwrap_or(0.0), by_s))
+            }
             Self::FirmwareTracks { ref var, scale, ref signal, max_rms, from_s, by_s } => {
                 let window = (from_s.unwrap_or(release_s), by_s);
                 judge_tracks(samples, observed, (var, scale), signal, max_rms, window)
@@ -575,6 +636,75 @@ fn judge_ripple(
     let mean = values.iter().sum::<f64>() / n;
     let spread = (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
     CheckResult { what, passed: spread <= max, measured: format!("standard deviation {spread:.2}, mean {mean:.2}") }
+}
+
+/// Where a `record` check takes its values.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Signal(&'a str),
+    Var(&'a str, f64),
+}
+
+impl Source<'_> {
+    /// The value at one observed sample.
+    fn value(self, seen: &Observation) -> Option<f64> {
+        match self {
+            Self::Signal(key) => signal_value(&seen.signals, key),
+            Self::Var(var, scale) => Some(seen.values.iter().find(|(name, _)| name == var)?.1 * scale),
+        }
+    }
+}
+
+/// [`Expect::Record`].
+fn judge_record(
+    samples: &[Sample],
+    observed: &[Observation],
+    source: Source<'_>,
+    (stat, threshold): (Stat, Option<f64>),
+    (from, by_s): (f64, Option<f64>),
+) -> CheckResult {
+    let name = match source {
+        Source::Signal(key) => key.to_owned(),
+        Source::Var(var, scale) if (scale - 1.0).abs() < f64::EPSILON => var.to_owned(),
+        Source::Var(var, scale) => format!("{var} x {scale}"),
+    };
+    let points: Vec<(f64, f64)> = window(samples, from, by_s)
+        .filter_map(|(s, i)| Some((s.t_s, source.value(observed.get(i)?)?)))
+        .filter(|(_, v)| v.is_finite())
+        .collect();
+    let level = threshold.unwrap_or(0.0);
+    let fall = window(samples, from, by_s)
+        .find(|(s, _)| s.fallen)
+        .map(|(s, i)| (s.t_s, observed.get(i).and_then(|o| source.value(o))));
+    let measured = if points.is_empty() {
+        "not observed".to_owned()
+    } else {
+        match stat {
+            Stat::Max | Stat::Min => {
+                let pick = |a: &&(f64, f64), b: &&(f64, f64)| a.1.total_cmp(&b.1);
+                let (t, v) = if stat == Stat::Max { points.iter().max_by(pick) } else { points.iter().min_by(pick) }
+                    .copied()
+                    .unwrap_or_default();
+                format!("{} {v:.2} at {t:.2} s", if stat == Stat::Max { "max" } else { "min" })
+            }
+            Stat::Mean => format!("mean {:.2}", points.iter().map(|p| p.1).sum::<f64>() / points.len() as f64),
+            Stat::AtFall => match fall {
+                Some((t, Some(v))) => format!("{v:.2} when the wheel fell at {t:.2} s"),
+                Some((t, None)) => format!("not observed when the wheel fell at {t:.2} s"),
+                None => "the wheel did not fall".to_owned(),
+            },
+            Stat::FirstAbove | Stat::FirstBelow => {
+                let above = stat == Stat::FirstAbove;
+                let word = if above { "above" } else { "below" };
+                points.iter().find(|(_, v)| if above { *v >= level } else { *v <= level }).map_or_else(
+                    || format!("never {word} {level}"),
+                    |(t, v)| format!("first {word} {level} at {t:.2} s ({v:.2})"),
+                )
+            }
+        }
+    };
+    let what = format!("record {name} from {from:.1} s {}", by_text(by_s));
+    CheckResult { what, passed: true, measured }
 }
 
 /// [`Expect::FirmwareTracks`].
@@ -693,7 +823,8 @@ impl Ride {
                 session.log(EventKind::Fault, format!("fault {} ends", timed.fault.kind()));
             }
         }
-        let snapshot = session.step();
+        let mut snapshot = session.step();
+        snapshot.signals.target_speed_kmh = target as f32;
         let state = session.machine().plant().live_part().map(|l| l.physics().state());
         self.samples.push(Sample {
             t_s: snapshot.t_s,
@@ -908,6 +1039,40 @@ kmh = 19.0
         assert_eq!((lagging.passed, lagging.measured.as_str()), (false, "RMS error 5.60; mean 14.40 against 20.00"));
         let typo = format!("{RIDE}\n[[expect]]\ncheck = \"ripple\"\nsignal = \"torque\"\nmax = 1.0\n");
         assert!(Scenario::from_toml(&typo).unwrap_err().to_string().contains("unknown telemetry signal \"torque\""));
+    }
+
+    #[test]
+    fn records_always_pass_and_say_what_they_saw() {
+        let at = |t_s| Sample { t_s, speed_kmh: 0.0, pitch_deg: 0.0, fallen: false, cutoff: false };
+        let samples = [at(1.0), at(2.0), at(3.0)];
+        let seen = |speed: f32, vq: f64| Observation {
+            values: vec![("vq_active".to_owned(), vq)],
+            signals: Signals { speed_kmh: speed, ..Signals::default() },
+            ..Observation::default()
+        };
+        let observed = [seen(10.0, 6300.0), seen(30.0, 31500.0), seen(20.0, 9450.0)];
+        let record = |signal: Option<&str>, var: Option<&str>, stat, threshold| Expect::Record {
+            signal: signal.map(str::to_owned),
+            var: var.map(str::to_owned),
+            scale: var.map(|_| 1.0 / 315.0),
+            stat,
+            threshold,
+            from_s: None,
+            by_s: None,
+        };
+        let measured = |e: Expect| {
+            let result = e.judge_observed(&samples, &observed, 0.0);
+            assert!(result.passed);
+            result.measured
+        };
+        assert_eq!(measured(record(Some("speed_kmh"), None, Stat::Max, None)), "max 30.00 at 2.00 s");
+        assert_eq!(measured(record(Some("speed_kmh"), None, Stat::Mean, None)), "mean 20.00");
+        let pwm = record(None, Some("vq_active"), Stat::FirstAbove, Some(80.0));
+        assert_eq!(measured(pwm), "first above 80 at 2.00 s (100.00)");
+        assert_eq!(measured(record(None, Some("vq_active"), Stat::FirstBelow, Some(5.0))), "never below 5");
+        let both =
+            format!("{RIDE}\n[[expect]]\ncheck = \"record\"\nsignal = \"speed_kmh\"\nvar = \"x\"\nstat = \"max\"\n");
+        assert!(Scenario::from_toml(&both).unwrap_err().to_string().contains("either signal or var"));
     }
 
     #[test]

@@ -68,6 +68,9 @@ pub struct UnicornError(unicorn_engine::uc_error);
 struct Shared {
     /// The bus of the current [`Cpu::run`]; `None` outside it.
     bus: Option<NonNull<dyn Bus>>,
+    /// `IPSR` as the engine's exception unit keeps it. QEMU never takes an exception here, so
+    /// its own `IPSR` stays 0; register reads put this one back.
+    ipsr: u32,
     /// How the current run ended early, if it did.
     exit: Option<Exit>,
     /// Watched addresses not reached yet, with their hooks.
@@ -300,12 +303,14 @@ fn finish(uc: &mut Unicorn<'_, Shared>, bus: &mut dyn Bus, result: Result<u32, B
 fn on_interrupt(uc: &mut Unicorn<'_, Shared>, intno: u32) {
     let pc = read_reg(uc, RegisterARM::PC);
     if intno == EXCP_EXCEPTION_EXIT && pc >= EXC_RETURN_MIN {
-        let before = read_regs(uc);
+        let mut before = read_regs(uc);
+        before.xpsr |= uc.get_data().ipsr;
         let mut regs = before.clone();
         // SAFETY: interrupt callbacks only run inside `Cpu::run`.
         let bus = unsafe { uc.get_data().bus() };
         bus.exception_return(&mut regs, pc | 1);
         write_changes(uc, &before, &regs);
+        uc.get_data_mut().ipsr = regs.xpsr & CoreRegs::XPSR_IPSR;
         if bus.take_yield() {
             stop(uc, Exit::Yield);
         }
@@ -399,6 +404,7 @@ impl Cpu for UnicornCpu {
         ] {
             write_reg(&mut self.uc, reg, value);
         }
+        self.uc.get_data_mut().ipsr = 0;
         self.regs = read_regs(&self.uc);
         self.synced = self.regs.clone();
     }
@@ -412,6 +418,7 @@ impl Cpu for UnicornCpu {
         let bus: NonNull<dyn Bus + 'static> = unsafe { std::mem::transmute(bus) };
         let shared = self.uc.get_data_mut();
         shared.bus = Some(bus);
+        shared.ipsr = self.regs.xpsr & CoreRegs::XPSR_IPSR;
         shared.exit = None;
         shared.budget = u64::from(max_instr);
         shared.executed = 0;
@@ -429,6 +436,7 @@ impl Cpu for UnicornCpu {
             let _ = self.uc.remove_hook(hook);
         }
         self.regs = read_regs(&self.uc);
+        self.regs.xpsr |= self.uc.get_data().ipsr;
         self.synced = self.regs.clone();
         self.retired += executed;
         match (exit, result) {

@@ -15,7 +15,10 @@ export default defineConfig({
   workers: 1,
   retries: CI ? 1 : 0,
   reporter: CI ? [["list"], ["html", { open: "never" }]] : "list",
-  timeout: 60_000,
+  // A CI runner draws WebGL on the CPU and is slow at everything else too: tests wait on the
+  // app's own ready signals, with room for a slow machine, rather than on fixed short sleeps.
+  timeout: CI || SLOW ? 180_000 : 60_000,
+  expect: { timeout: CI || SLOW ? 20_000 : 5_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
     viewport: { width: 1440, height: 900 },

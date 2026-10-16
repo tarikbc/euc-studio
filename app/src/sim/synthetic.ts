@@ -160,6 +160,11 @@ export class DemoEngine implements EngineClient {
   readonly phoneCommands: PhoneCommand[] = [];
   readonly outputs = null;
   readonly display = null;
+  readonly lights = null;
+  readonly beeps = 0;
+  subscribeTones(): () => void {
+    return () => {};
+  }
   get status(): EngineStatus {
     return {
       state: this.playing ? "running" : "paused",

@@ -24,6 +24,8 @@ interface UiState {
   shortcutsOpen: boolean;
   /** Bumped to ask the dock layout to reset to defaults. */
   layoutEpoch: number;
+  /** Play the wheel's buzzer through the speakers (off by default). */
+  buzzerSound: boolean;
 
   navigate: (route: Route) => void;
   setAccent: (accent: AccentName) => void;
@@ -33,6 +35,7 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void;
   setRightTab: (tab: RightTab) => void;
   setShortcutsOpen: (open: boolean) => void;
+  setBuzzerSound: (on: boolean) => void;
 }
 
 const DEFAULT_DOCKS: DockState = { right: true, bottom: true };
@@ -70,6 +73,7 @@ export const useUi = create<UiState>((set, get) => ({
   rightTab: readStored<RightTab>("rightTab", "telemetry") === "phone" ? "phone" : "telemetry",
   shortcutsOpen: false,
   layoutEpoch: 0,
+  buzzerSound: readStored<boolean>("buzzerSound", false) === true,
 
   navigate: (route) => {
     if (get().route === route) return;
@@ -105,6 +109,10 @@ export const useUi = create<UiState>((set, get) => ({
     set({ rightTab });
   },
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setBuzzerSound: (buzzerSound) => {
+    writeStored("buzzerSound", buzzerSound);
+    set({ buzzerSound });
+  },
 }));
 
 if (typeof window !== "undefined") {

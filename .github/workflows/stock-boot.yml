@@ -1,8 +1,9 @@
 name: stock-boot
 
-# Boots the official Begode Extreme firmware in the simulator (Unicorn backend) and checks the
-# milestones. The image is fetched from Begode's update server at run time and verified against
-# the pinned sha256; it lives in the runner's temp folder only and is never cached or uploaded.
+# Boots the official Begode Extreme firmware in the simulator and checks the milestones and the
+# ride scenarios, on our own CPU core as shipped and on the Unicorn oracle. The image is fetched
+# from Begode's update server at run time and verified against the pinned sha256; it lives in the
+# runner's temp folder only and is never cached or uploaded.
 
 on:
   push:
@@ -48,19 +49,45 @@ jobs:
         run: echo "EUC_CACHE_DIR=$RUNNER_TEMP/euc-firmware" >> "$GITHUB_ENV"
       - name: Fetch the stock image (verified against its pin)
         run: cargo run --release --locked -p euc-cli -- fetch begode-extreme
-      - name: Boot tests
-        run: cargo test --release --locked -p euc-unicorn
-      - name: 30 s run with V, N and b commands
-        run: >
-          cargo run --release --locked -p euc-cli --features unicorn --
-          sim run begode-extreme --seconds 30 --inject V@2.6 --inject N@3.6 --inject b@4.6
-      - name: "Scenario: rider stands for 60 s"
-        run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/balance-60s.toml
-      - name: "Scenario: ride to 20 km/h and stop"
-        run: cargo run --release --locked -p euc-cli --features unicorn -- sim run --scenario scenarios/ride-20kmh-stop.toml
-      - name: BLE bridge (docs/bridge.md)
+      - name: Boot tests (Unicorn backend, and our core alone)
+        run: |
+          cargo test --release --locked -p euc-unicorn
+          cargo test --release --locked -p euc-armv7m --test stock_boot
+      # The shipped build: no `unicorn` feature, so `euc sim` runs on our own core (--cpu own).
+      - name: Build euc as shipped (our core)
+        run: cargo build --release --locked -p euc-cli
+      - name: "Our core: 30 s run with V, N and b commands"
+        run: ./target/release/euc sim run begode-extreme --seconds 30 --inject V@2.6 --inject N@3.6 --inject b@4.6
+      - name: "Our core: rider stands for 60 s"
+        run: ./target/release/euc sim run --scenario scenarios/balance-60s.toml
+      - name: "Our core: ride to 20 km/h and stop"
+        run: ./target/release/euc sim run --scenario scenarios/ride-20kmh-stop.toml
+      - name: "Our core: BLE bridge (docs/bridge.md)"
         run: |
           ./target/release/euc sim serve begode-extreme --seconds 15 &
+          server=$!
+          ./target/release/euc sim bridge-test --seconds 8
+          wait "$server"
+      # Unicorn, the development oracle: the same runs, plus our core checked against it.
+      - name: "Unicorn: lock-step and differential fuzzing of our core"
+        run: cargo test --release --locked -p euc-armv7m --features unicorn --test lockstep --test fuzz_unicorn -- --nocapture
+        env:
+          EUC_LOCKSTEP_SECONDS: "10"
+      - name: "Unicorn: 30 s run with V, N and b commands"
+        run: >
+          cargo run --release --locked -p euc-cli --features unicorn --
+          sim run begode-extreme --cpu unicorn --seconds 30 --inject V@2.6 --inject N@3.6 --inject b@4.6
+      - name: "Unicorn: rider stands for 60 s"
+        run: >
+          cargo run --release --locked -p euc-cli --features unicorn --
+          sim run --cpu unicorn --scenario scenarios/balance-60s.toml
+      - name: "Unicorn: ride to 20 km/h and stop"
+        run: >
+          cargo run --release --locked -p euc-cli --features unicorn --
+          sim run --cpu unicorn --scenario scenarios/ride-20kmh-stop.toml
+      - name: "Unicorn: BLE bridge (docs/bridge.md)"
+        run: |
+          ./target/release/euc sim serve begode-extreme --cpu unicorn --seconds 15 &
           server=$!
           ./target/release/euc sim bridge-test --seconds 8
           wait "$server"

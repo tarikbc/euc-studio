@@ -3,12 +3,13 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { engine, useEngineVersion } from "../../engine/index.ts";
 import { POSE_FLOATS, type Geom } from "../../engine/telemetry.gen.ts";
-import { ShellVisual, WheelVisual } from "./EucModel.tsx";
+import { BodyPart, WheelPart } from "./EucModel.tsx";
+import { useWheelModel } from "./wheelModel.ts";
 
 // The live engine's bodies, posed every frame from the latest snapshot. Everything sits inside
 // one group that turns the physics world (MuJoCo: z up) into three.js (y up), so body poses go
-// in unchanged. The wheel and the shell get the studio's stylized model; every other body (the
-// rider) is drawn from its MJCF geoms.
+// in unchanged. The wheel and the shell get the scanned model (else the stylized one); every
+// other body (the rider) is drawn from its MJCF geoms.
 
 /** Visuals are modelled y up with the axle on z; a body frame has z up with the axle on y. */
 const TO_BODY_FRAME: [number, number, number] = [Math.PI / 2, 0, 0];
@@ -55,6 +56,7 @@ function GeomMesh({ geom }: { geom: Geom }) {
 
 export function LiveBodies({ accent }: { accent: string }) {
   useEngineVersion();
+  const model = useWheelModel();
   const bodies = engine.bodies;
   const nodes = useRef<(THREE.Group | null)[]>([]);
 
@@ -87,11 +89,11 @@ export function LiveBodies({ accent }: { accent: string }) {
         >
           {b.role === "wheel" ? (
             <group rotation={TO_BODY_FRAME}>
-              <WheelVisual />
+              <WheelPart model={model} />
             </group>
           ) : b.role === "shell" ? (
             <group rotation={TO_BODY_FRAME}>
-              <ShellVisual accent={accent} />
+              <BodyPart model={model} accent={accent} />
             </group>
           ) : (
             b.geoms.map((g, j) => <GeomMesh key={j} geom={g} />)

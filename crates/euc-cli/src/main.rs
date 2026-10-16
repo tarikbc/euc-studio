@@ -1,11 +1,15 @@
 //! `euc`: the headless EUC Studio command line.
 
+mod ble;
+mod compare;
 mod fetch;
 mod firmware;
 mod image;
 mod paths;
+mod replay;
 mod serve;
 mod sim;
+mod tcp;
 mod ui;
 
 use std::cell::Cell;
@@ -48,6 +52,8 @@ enum Command {
     /// Run firmware in the simulator.
     #[command(subcommand)]
     Sim(sim::Command),
+    /// Play a BLE capture back as a wheel, on this Mac's Bluetooth or a TCP bridge (docs/ble-radio.md).
+    Replay(replay::Args),
 }
 
 /// Whether a command's verdict was positive. Errors are separate: they abort with a message.
@@ -74,6 +80,7 @@ fn main() -> ExitCode {
         Command::Firmware(command) => firmware::run(&ctx, command),
         Command::Image(command) => image::run(&ctx, command),
         Command::Sim(command) => sim::run(&ctx, command),
+        Command::Replay(args) => replay::run(&ctx, &args),
     };
     match result {
         Ok(Verdict::Ok) => ExitCode::SUCCESS,

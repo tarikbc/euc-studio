@@ -16,13 +16,15 @@
 mod mjcf;
 mod params;
 mod rider;
+mod terrain;
 
 use euc_telemetry::{BodyInfo, BodyRole, Geom, GeomKind, Pose};
 use mujoco_rs::prelude::*;
 use thiserror::Error;
 
-pub use params::{Assist, ParamError, Rider, RiderControl, Setup, Shell, Tire, Wheel, WheelBody};
+pub use params::{Assist, ParamError, Rider, RiderControl, Setup, Shapes, Shell, Solid, Tire, Torus, Wheel, WheelBody};
 pub use rider::{Intent, RiderController};
+pub use terrain::{Feature, Terrain};
 
 use mjcf::names;
 

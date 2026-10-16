@@ -1,0 +1,67 @@
+# Overlean: the rider keeps accelerating (5 km/h per second, towards 100 km/h) past what the motor
+# can give, on the maintainer's settings (current-mode drive, hard pedals, speed tiltback 69 km/h,
+# PWM alarm 80 % with PWM tiltback). As speed grows, the back-EMF and the winding's reactance eat
+# the voltage headroom; when the q-current loop saturates (PWM 100 %) the motor can no longer push
+# the wheel ahead of the rider and the wheel nose-dives: the classic cutout.
+#
+# The `record` checks always pass: they note when each warning came and what the wheel was doing
+# when it fell. `upright` is the safety verdict: it fails on the stock firmware. The speed where
+# it happens depends on the motor's inductance and flux, which are defaults until measured
+# (docs/models/electrical.md); docs/models/scenarios.md has the numbers.
+schema = 1
+name = "overlean-top-speed"
+description = "Accelerate past the motor's limit on a full battery: when do the warnings come, and does the stock firmware hold?"
+wheel = "begode-extreme"
+seconds = 32.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [26, 100]]
+settings = "tarik-2026-10-15"
+
+[[expect]]
+check = "record"
+var = "vq_active"
+scale = 0.0031746     # 1/315: the app's PWM %
+stat = "first_above"
+threshold = 80.0
+
+[[expect]]
+check = "record"
+var = "pwm_alarm"
+stat = "first_above"
+threshold = 1.0
+
+[[expect]]
+check = "record"
+var = "vq_active"
+scale = 0.0031746     # PWM saturated: the q-current loop has no headroom left
+stat = "first_above"
+threshold = 100.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+var = "tiltback_pwm_deg"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+signal = "battery_v"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "at_fall"
+
+[[expect]]
+check = "record"
+var = "balance_disabled"
+stat = "first_above"
+threshold = 1.0
+
+[[expect]]
+check = "upright"

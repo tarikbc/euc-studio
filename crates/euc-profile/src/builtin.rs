@@ -11,9 +11,13 @@ use crate::{Origin, ProfileError, WHEEL_FILE, WheelProfile};
 /// the code, never a `profiles/` folder it happens to find on disk. A new wheel or file is added
 /// here (the tests below fail until it is).
 const FILES: &[(&str, &str, &str)] = &[
+    ("begode-extreme", "ble.toml", include_str!("../../../profiles/begode-extreme/ble.toml")),
     ("begode-extreme", "board.toml", include_str!("../../../profiles/begode-extreme/board.toml")),
     ("begode-extreme", "display.toml", include_str!("../../../profiles/begode-extreme/display.toml")),
+    ("begode-extreme", "geometry.toml", include_str!("../../../profiles/begode-extreme/geometry.toml")),
+    ("begode-extreme", "lights.toml", include_str!("../../../profiles/begode-extreme/lights.toml")),
     ("begode-extreme", "plant.toml", include_str!("../../../profiles/begode-extreme/plant.toml")),
+    ("begode-extreme", "probes.toml", include_str!("../../../profiles/begode-extreme/probes.toml")),
     ("begode-extreme", "settings.toml", include_str!("../../../profiles/begode-extreme/settings.toml")),
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),

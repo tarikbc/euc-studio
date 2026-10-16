@@ -101,6 +101,55 @@ size = 2
 kind = "s16"
 note = "the speed the balance law schedules its gains with, cm/s, forward positive, from hall edges per 20 ms (balance findings §4)"
 
+[[ram]]
+name = "vq_active"
+addr = 0x2000_037A
+size = 2
+kind = "s16"
+note = "the q voltage the FOC applies (Q15 of Vbus/√3; 0 while braking at a standstill); |Vq| / 315 is the app's PWM % (motor findings §6)"
+
+[[ram]]
+name = "pwm_alarm"
+addr = 0x2000_0265
+size = 1
+kind = "u8"
+note = "PWM alarm flag: set while the PWM is above the alarm threshold (`W P`, 80 % by default); drives alert bit 0 and, with `e`, the PWM tiltback"
+
+[[ram]]
+name = "tiltback_speed_deg"
+addr = 0x2000_022C
+size = 4
+kind = "f32"
+note = "speed tiltback offset added to the balance error, degrees (balance findings §5.1)"
+
+[[ram]]
+name = "tiltback_battery_deg"
+addr = 0x2000_0248
+size = 4
+kind = "f32"
+note = "battery voltage and temperature tiltback offset, degrees (balance findings §5.1)"
+
+[[ram]]
+name = "tiltback_pwm_deg"
+addr = 0x2000_024C
+size = 4
+kind = "f32"
+note = "PWM tiltback offset, degrees; only with `e` (balance findings §5.1)"
+
+[[ram]]
+name = "attitude_pitch_deg"
+addr = 0x2000_0204
+size = 4
+kind = "f32"
+note = "the firmware's own pitch estimate (Mahony filter), degrees, positive nose down (balance findings §3)"
+
+[[ram]]
+name = "drive_command"
+addr = 0x2000_0394
+size = 4
+kind = "f32"
+note = "balance command to the FOC, ±1050: 20 Q15 Iq counts per unit in current mode, 30 Q15 Vq counts in voltage mode (motor findings §6)"
+
 # Cutoff flags (balance findings §5.3 and §6): scenarios fail if one is set after the stand lets go.
 [[ram]]
 name = "balance_disabled"

@@ -12,6 +12,7 @@ use euc_sim::scenario::{Ride, Scenario};
 use euc_sim::{Machine, Report, Session};
 use euc_stm32f1::Dma;
 use euc_telemetry::{BodyInfo, BodyRole, Event, EventKind, Geom, GeomKind, Outputs, Pose, Signals, Snapshot};
+use serde::Serialize;
 
 /// A simulation the runner can step. Nothing in it reads the wall clock or blocks. It is built
 /// and used on the sim thread only (CPU backends need not be `Send`).
@@ -36,6 +37,17 @@ pub trait Host {
     fn outputs(&self) -> Option<Outputs> {
         None
     }
+    /// Buzzer changes since the last call, at their exact simulated time.
+    fn drain_tones(&mut self, _out: &mut Vec<Tone>) {}
+}
+
+/// A buzzer change: from `t_s` on, the buzzer sounds `hz` at `duty` of the period high (`hz` 0:
+/// silent). The duty sets the loudness; the firmware's beeper volume is the compare value.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Tone {
+    pub t_s: f64,
+    pub hz: f64,
+    pub duty: f64,
 }
 
 /// The LED strip's timer period in ticks (TIM3 ARR 29 + 1) and its DMA channel.
@@ -58,6 +70,9 @@ struct BoardWatch {
     reported_markers: usize,
     next_report_s: f64,
     buzzing: bool,
+    /// Buzzer changes read so far, and the new ones.
+    buzzer_seen: u64,
+    tones: Vec<Tone>,
     halted: Option<String>,
 }
 
@@ -73,6 +88,8 @@ impl BoardWatch {
             reported_markers: 0,
             next_report_s: 0.5,
             buzzing: false,
+            buzzer_seen: 0,
+            tones: Vec::new(),
             halted: None,
         }
     }
@@ -94,18 +111,20 @@ impl BoardWatch {
             self.next_report_s = now + 1.0;
             self.collect_report(machine);
         }
-        // A buzzer that starts sounding is worth a timeline entry (the `b` horn beeps twice).
-        let tone = machine.component::<Buzzer>("buzzer").and_then(Buzzer::tone);
-        if tone.is_some() != self.buzzing {
-            self.buzzing = tone.is_some();
-            if let Some(pwm) = tone {
-                self.events.push(Event {
-                    t_s: now,
-                    kind: EventKind::Firmware,
-                    text: format!("Beep, {:.1} kHz", pwm.frequency_hz() / 1000.0),
-                });
+        // Every buzzer change at its exact time; a start is worth a timeline entry (the `b` horn
+        // beeps twice).
+        let Some(buzzer) = machine.component::<Buzzer>("buzzer") else { return };
+        for change in buzzer.changes_since(self.buzzer_seen) {
+            let t_s = change.at as f64 / self.hclk;
+            let (hz, duty) = change.tone.map_or((0.0, 0.0), |pwm| (pwm.frequency_hz(), pwm.duty()));
+            if hz > 0.0 && !self.buzzing {
+                let text = format!("Beep, {:.1} kHz", hz / 1000.0);
+                self.events.push(Event { t_s, kind: EventKind::Firmware, text });
             }
+            self.buzzing = hz > 0.0;
+            self.tones.push(Tone { t_s, hz, duty });
         }
+        self.buzzer_seen = buzzer.changes();
     }
 
     /// Turns the boot markers the machine logged into events.
@@ -269,6 +288,10 @@ impl Host for RideHost {
         self.watch.drain_ble_tx(self.session.machine(), out);
     }
 
+    fn drain_tones(&mut self, out: &mut Vec<Tone>) {
+        out.append(&mut self.watch.tones);
+    }
+
     fn inject_ble(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.session.machine_mut().inject_ble(bytes);
         Ok(())
@@ -348,6 +371,10 @@ impl Host for StillHost {
 
     fn drain_ble_tx(&mut self, out: &mut Vec<(f64, u8)>) {
         self.watch.drain_ble_tx(&self.machine, out);
+    }
+
+    fn drain_tones(&mut self, out: &mut Vec<Tone>) {
+        out.append(&mut self.watch.tones);
     }
 
     fn inject_ble(&mut self, bytes: &[u8]) -> Result<(), String> {

@@ -95,6 +95,12 @@ pub enum ClientMessage {
         /// How long, seconds.
         seconds: f64,
     },
+    /// A test control for the wheel's BLE link (`docs/ble-radio.md`): `silent`, `resume`, `off`,
+    /// `on` or `quit`.
+    Control {
+        /// The control's word.
+        command: String,
+    },
 }
 
 /// How UART bytes become notifications.
@@ -269,5 +275,7 @@ mod tests {
         assert_eq!(from_hex("564E"), Some(b"VN".to_vec()));
         assert_eq!(from_hex("5"), None);
         assert!(serde_json::from_str::<ClientMessage>(r#"{"type":"write","bytes":"V"}"#).is_err());
+        let control: ClientMessage = serde_json::from_str(r#"{"type":"control","command":"silent"}"#).unwrap();
+        assert_eq!(control, ClientMessage::Control { command: "silent".into() });
     }
 }

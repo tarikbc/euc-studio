@@ -275,6 +275,34 @@
   }
 }
 
+/* The bell's wiggle on each beep of the wheel's buzzer. */
+@keyframes bell-ring {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(14deg);
+  }
+  45% {
+    transform: rotate(-11deg);
+  }
+  70% {
+    transform: rotate(6deg);
+  }
+}
+
+.bell-ring {
+  transform-origin: 50% 15%;
+  animation: bell-ring 0.38s var(--ease-snappy);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bell-ring {
+    animation: none;
+  }
+}
+
 @keyframes pop-out {
   from {
     opacity: 1;

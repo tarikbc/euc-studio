@@ -7,12 +7,12 @@
  *   ring        moves one step every 100 - 3 x (display speed) ticks up to 30 km/h, every 10 ticks above;
  *               forward above +4 mm/s (0..72, then 0), backward below -4 (down to 1, then 73)
  *   brake       every 150 ticks the display speed is noted; 3 km/h or more below the note sets the brake
- * count to 40, else it falls by 1 every 10 ticks to 3. Four or more: brake flash standstill  under 2 km/h for
- * more than 40 x 10 ticks: breathing; 2 km/h or more: moving update      set when the time base is a multiple
- * of 5
+ *               count to 40, else it falls by 1 every 10 ticks to 3; four or more: brake flash
+ *   standstill  under 2 km/h for more than 40 x 10 ticks: breathing; 2 km/h or more: moving
+ *   update      set when the time base is a multiple of 5
  *
  * Render part, every RTC tick after the alarm task, once `update` has been set:
- *   breathing   while standing: brightness steps +-1 between 0 and 131 (see below for the rate)
+ *   breathing   while standing: brightness steps +-1 between 0 and 131, one step every 4 ticks
  *   brake flash both patterns: LEDs 1..24 red (100) when time base % 50 == 0, dark when it is 25
  *   pattern 0   standing (display speed < 2): LEDs 1..24 red at the breathing brightness. Moving: two red
  *               comets of 6 (brightness 1 2 4 16 40 130) on both rings, from ring position + 1. Roll above
@@ -26,9 +26,9 @@
  *
  * The stock firmware never clears `update`, so its render runs on every main-loop pass. Everything above
  * depends on the time base only and repeats harmlessly, except the breathing: it steps once per pass during
- * every 10th tick, so its speed follows the CPU load. In the simulator the stock image makes about 12 passes
- * per tick at a standstill (one breath in 0.43 s). Compat steps 12 every 10th tick (quirk
- * STRIP_BREATH_PER_PASS); clean steps 1 every tick (one breath in 0.53 s).
+ * every 10th tick, so its speed follows the CPU load (quirk STRIP_BREATH_PER_PASS, kept by neither profile).
+ * On the wheel one breath takes about 2.1 s; one step every 4 ticks gives 2.11 s in both profiles, whatever
+ * the main loop does.
  */
 #ifndef EUC_LIGHTS_STRIP_H
 #define EUC_LIGHTS_STRIP_H

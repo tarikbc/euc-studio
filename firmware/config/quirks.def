@@ -53,6 +53,8 @@ EUC_QUIRK_DEF(DEFERRED_TILTBACK_OFF, 1, 0, "0x08007498 cmd_tiltback_off",
               "'\"' sent while moving stays pending and turns tiltback off later, when the wheel slows.")
 EUC_QUIRK_DEF(SERVICE_WITHOUT_CONFIRM, 1, 0, "0x08006FA8 service_requests",
               "'!@', 'cy' and '+-' from any unpaired BLE client cut the motor at once, even with a rider on.")
+EUC_QUIRK_DEF(BOOT_TEXT_WAIT, 1, 0, "0x08003270 printf at boot",
+              "Boot text on USART1 holds the CPU 3 ms; compat waits as long without sending it (DEBUG_PRINTF).")
 
 /* Motor drive and protection */
 EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 0, "0x08007C04 phase current check",
@@ -89,8 +91,8 @@ EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",
               "'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest.")
 EUC_QUIRK_DEF(LOCK_LIGHT_STAYS_ON, 1, 0, "0x080073AC RTC tick, 0x08005538 button_light_mode",
               "In transport lock the telemetry shows the light off, but PB12 keeps its last duty.")
-EUC_QUIRK_DEF(STRIP_BREATH_PER_PASS, 1, 0, "0x08005A3C led_update_flag, 0x08005A5C led_strip_effects",
-              "The strip effects run on every main-loop pass, so the standstill breathing speed follows the CPU load.")
+EUC_QUIRK_DEF(STRIP_BREATH_PER_PASS, 0, 0, "0x08005A3C led_update_flag, 0x08005A5C led_strip_effects",
+              "The strip effects run every main-loop pass, so the breathing speed follows the CPU load (2.1 s on the wheel).")
 
 /* BMS link (USART3) */
 EUC_QUIRK_DEF(BMS_PARTIAL_REPLY, 1, 0, "0x0800B318 usart3_rx_parse",

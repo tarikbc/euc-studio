@@ -69,7 +69,8 @@ into notifications of 20 bytes and sends a shorter one when the line has been qu
 2.2 ms apart) arrive as six notifications of 20 bytes, as in the capture
 `tests/data/begode-extreme/idle-2026-10-15.hex`. Frames therefore straddle notifications: a client
 reassembles the stream (the frame format is in [protocol/begode.md](protocol/begode.md);
-`euc_proto_begode::Assembler` does it in Rust).
+`euc_proto_begode::Assembler` does it in Rust). The rules come from the wheel profile's `ble.toml`
+(`[module]`), and the BLE radio sends the same notifications ([ble-radio.md](ble-radio.md)).
 
 `--notify burst` sends each burst (bytes less than 1 ms apart) as one notification of any length, for
 clients that do not care about the module's packet size.
@@ -81,11 +82,16 @@ clients that do not care about the module's packet size.
 | `write` | `hex` | Bytes a phone wrote to FFE1. They reach the firmware's BLE UART at the current simulated time, at the UART's pace. |
 | `rider` | `kmh` | The rider rides at this ground speed (0 stands still). Takes the rider over from a scenario. |
 | `push` | `newtons`, `seconds` | Pushes the rider forward (negative: back) at the centre of mass for a while. |
+| `control` | `command` | A test control for the wheel's BLE link: `silent`, `resume`, `off`, `on` or `quit` ([ble-radio.md](ble-radio.md#test-controls)). `silent` and `off` stop the `notify` messages too; while `off`, `write` is refused. |
 
 ```json
 {"type":"write","hex":"56"}
 {"type":"rider","kmh":15}
+{"type":"control","command":"silent"}
 ```
+
+`--ble` puts the same link on this Mac's own Bluetooth radio, beside the TCP bridge, and `euc replay`
+serves a capture on either; see [ble-radio.md](ble-radio.md).
 
 Write one command byte per `write`, at least 0.1 s apart, as the vendor app does: the stock
 firmware handles one received byte per control tick and keeps only the last one, so bytes that

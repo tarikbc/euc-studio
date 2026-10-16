@@ -1,19 +1,21 @@
 //! The model on its own, balanced by a plain PD law on the motor torque instead of firmware.
 
-use euc_physics::{Intent, Physics, Setup, Shell, TIMESTEP_S, Tire, Wheel, WheelBody};
+use euc_physics::{Intent, Physics, Setup, Shapes, Shell, TIMESTEP_S, Tire, Torus, Wheel, WheelBody};
 
-/// The Begode Extreme's `[body]` values (as in profiles/begode-extreme/plant.toml).
+/// The Begode Extreme's `[body]` values (as in profiles/begode-extreme/plant.toml), with the
+/// scanned tire torus.
 fn extreme() -> WheelBody {
     WheelBody {
-        tire: Tire { radius_m: 0.209, half_width_m: 0.038, friction: 0.9, crr: 0.012, contact_time_s: 0.02 },
-        wheel: Wheel { mass_kg: 16.0, spin_inertia_kgm2: 0.42 },
+        tire: Tire { radius_m: 0.2251, half_width_m: 0.0407, friction: 0.9, crr: 0.012, contact_time_s: 0.02 },
+        wheel: Wheel { mass_kg: 16.0, spin_inertia_kgm2: 0.487 },
         shell: Shell {
             mass_kg: 26.0,
             com_above_axle_m: 0.10,
             inertia_kgm2: [0.85, 0.92, 0.46],
-            pedal_below_axle_m: 0.03,
+            pedal_below_axle_m: -0.010,
             imu_above_axle_m: 0.15,
         },
+        shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), solids: Vec::new() }),
     }
 }
 

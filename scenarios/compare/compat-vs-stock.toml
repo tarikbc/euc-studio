@@ -1,0 +1,80 @@
+# How far our firmware's compat profile may stray from the stock firmware on the shipped scenarios
+# (`euc sim compare --a stock --b compat --tolerance ...`; CI: .github/workflows/compare.yml).
+# docs/compare.md describes the format.
+#
+# The two firmwares run different code, so their interrupts take different numbers of cycles and
+# the plant is sampled a few cycles apart: the rides are close but not identical. The limits below
+# are about twice what was measured on 2026-10-16 with the measured 3.00-12 tire (balance-60s,
+# ride-20kmh-stop): tight enough that a real behaviour change shows, loose enough for that timing
+# noise. Tables marked KNOWN DIFFERENCE hide a real compat difference: remove them when compat
+# matches the stock firmware there.
+
+# Every check both runs judge must give the same verdict.
+same_checks = true
+
+[channels]            # largest |stock - compat|, in the channel's unit
+speed_kmh = 0.3
+wheel_rad_s = 1.0     # the wheel's speed relative to the shell also carries the pitch rate
+pitch_deg = 1.0
+roll_deg = 0.01
+distance_m = 0.1
+battery_v = 0.5
+soc_pct = 0.01
+board_temp_c = 0.5
+motor_temp_c = 0.5
+
+[channels_rms]        # RMS of stock - compat, for currents and torque (their transients are sharp)
+torque_nm = 3.0
+iq_a = 4.0
+battery_a = 0.5
+phase_a_a = 15.0
+phase_b_a = 15.0
+phase_c_a = 15.0
+
+[scenario.hard-braking-30kmh]
+note = "Braking from 30 km/h: the phase currents swing fast, so their RMS differs more."
+[scenario.hard-braking-30kmh.channels]
+speed_kmh = 0.8
+wheel_rad_s = 3.0
+pitch_deg = 2.5
+battery_v = 3.0
+distance_m = 0.3
+[scenario.hard-braking-30kmh.channels_rms]
+torque_nm = 9.0
+iq_a = 11.0
+battery_a = 2.5
+phase_a_a = 92.0
+phase_b_a = 92.0
+phase_c_a = 92.0
+
+[scenario.low-battery-tiltback]
+note = "KNOWN DIFFERENCE: compat raises the low-battery alert (alerts bit 3) at 1.6 s, stock later; the motor current then differs (Iq RMS 4.8 A)."
+[scenario.low-battery-tiltback.channels_rms]
+torque_nm = 8.0
+iq_a = 10.0
+
+[scenario.hall-loss-while-riding]
+note = "KNOWN DIFFERENCE (timing-sensitive): compat's cut on a total hall loss at 15 s does not always come within 0.2 s as stock's does. Judged until the fault."
+until_s = 15.0
+same_checks = false
+
+[scenario.hall-single-line-loss]
+note = "KNOWN DIFFERENCE: after one hall line drops at 15 s, compat drives the motor differently (battery up to 2 V apart); the scenario's checks still agree. Judged until the fault."
+until_s = 15.0
+
+[scenario.overlean-top-speed]
+note = "The rider accelerates towards the motor's limit; near it the two firmwares' currents part ways (from about 17 s). Judged until then."
+until_s = 16.5
+
+[scenario.overlean-top-speed-30pct]
+note = "As overlean-top-speed at 30 % charge."
+until_s = 16.5
+
+[scenario.hill-climb-low-battery]
+note = "Near the end of the climb the battery sags towards cutoff and the runs part ways (from about 32 s). Judged until then."
+until_s = 31.5
+
+[scenario.pothole-20kmh]
+note = "KNOWN DIFFERENCE: both wheels fall after the pothole, compat with a firmware cutoff (19.9 s), stock without one (20.4 s); the impact at about 8.7 s amplifies the timing noise. Judged until the impact."
+until_s = 8.5
+same_checks = false

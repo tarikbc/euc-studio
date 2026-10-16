@@ -1,0 +1,77 @@
+# A pothole at 20 km/h: 2 cm deep, 50 cm long, with steep edges, on the maintainer's settings.
+# The wheel drops in and hits the far edge; the impact takes about a fifth of the wheel's speed
+# in 20 ms, the shell pitches nose down past 45° (so `upright` fails), and the firmware answers
+# with full forward torque. Its own fall detector (40° for 105 ms) does not trip: the wheel
+# recovers and rides on.
+#
+# The outcome is decided by the mechanics within 0.1 s, faster than the firmware's balance loop
+# can change much, and it depends on the body model: a rigid rider without knees and a tire
+# without a carcass absorb an edge worse than a person and a real tire (docs/models/scenarios.md
+# has the depths tried). The `record` checks always pass; `upright` and `no_cutoff` are the
+# safety verdict.
+schema = 1
+name = "pothole-20kmh"
+description = "Hit a 2 cm deep pothole at 20 km/h: the impact, the firmware's answer, and whether the wheel stays up."
+wheel = "begode-extreme"
+seconds = 23.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [11, 20]]
+settings = "tarik-2026-10-15"
+
+[terrain]
+length_m = 120.0
+
+[[terrain.feature]]
+kind = "pothole"
+at_m = 50.0
+depth_m = 0.02
+length_m = 0.5
+
+[[expect]]
+check = "record"
+signal = "distance_m"
+stat = "first_above"
+threshold = 50.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "min"
+from_s = 15.0
+by_s = 19.9
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "max"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 15.0
+
+# After the dip the shell rides nose down while the firmware believes it is level: the pitch rate
+# passed the IMU's ±500 °/s range, so the gyro clipped and the attitude estimate lost the excess.
+# Its error, firmware estimate against the true pitch, is recorded here (the bound only records).
+[[expect]]
+check = "firmware_tracks"
+var = "attitude_pitch_deg"
+scale = -1.0          # the firmware's pitch is positive nose down
+signal = "pitch_deg"
+max_rms = 45.0
+from_s = 20.8
+by_s = 22.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

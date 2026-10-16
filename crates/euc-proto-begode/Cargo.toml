@@ -8,7 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# The Begode protocol on the BLE link: text replies and the stock answers to writes, for
+# euc-ble-radio's link and replay (module `ble`).
+ble = ["dep:euc-ble-radio"]
+
 [dependencies]
+euc-ble-radio = { workspace = true, optional = true }
 encoding_rs.workspace = true
 thiserror.workspace = true
 

@@ -100,6 +100,8 @@ void app_rtc_tick(void);
 void app_main_loop_pass(void);
 /* Applies the actions of one command call (control.c). */
 void app_apply_commands(const struct euc_cmd_out *out);
+/* The phase-current sample of the last injected ADC conversion. */
+struct euc_current_sample app_current_sample(void);
 /* The hall inputs as the hall module expects them. */
 uint8_t app_hall_lines(void);
 

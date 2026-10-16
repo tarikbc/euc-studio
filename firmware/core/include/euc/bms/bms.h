@@ -14,6 +14,9 @@
  * the buffer holds at that time, so a short or missing reply repeats old data (quirk BMS_PARTIAL_REPLY);
  * clean parses only complete replies and counts a missing one as a failed check of every block.
  *
+ * Until the first reply is parsed, the lowest temperature reads 5000 and the highest 0 (stock power-on
+ * values, telemetry frame 01).
+ *
  * Health: a block fails when status bits 13:12 are 0, bits 11:10 are not both set, or bits 6:4 are not 0.
  * Three failures in a row on any block latch the BMS fault (alarm beep). Nothing in the drive reads the BMS.
  */

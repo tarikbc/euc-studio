@@ -153,8 +153,29 @@ function Commands() {
 function Log() {
   const [open, setOpen] = useState<number | null>(null);
   const frames = engine.frames.slice(-80).reverse();
+  // Text answers would scroll away under the telemetry stream: the last few stay on top.
+  const replies = engine.frames
+    .filter((f) => f.reply)
+    .slice(-4)
+    .reverse();
   return (
-    <div className="px-16 pt-16 pb-16">
+    <div className="px-16 pt-16 pb-16" data-testid="phone-log">
+      {replies.length > 0 && (
+        <div className="mb-16">
+          <h3 className="label">Answers</h3>
+          <ul className="mt-4">
+            {replies.map((f) => (
+              <li
+                key={f.id}
+                className="grid h-[32px] grid-cols-[56px_1fr] items-center gap-8 border-b border-hairline last:border-b-0"
+              >
+                <span className="num text-11 text-fg-2">{formatClock(f.t)}</span>
+                <span className="num truncate text-12 text-fg">{f.summary}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex items-baseline justify-between">
         <h3 className="label">Received</h3>
         <span className="num text-11 text-fg-3">{engine.frames.length} lines</span>

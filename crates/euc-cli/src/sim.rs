@@ -8,6 +8,7 @@ use std::time::Instant;
 use anyhow::{Context as _, bail};
 use euc_fwsource::{FetchOptions, UreqClient};
 use euc_profile::{Channel, FirmwareSource, Sha256, WheelProfile};
+use euc_sim::cpu::Backend;
 use euc_sim::recording::{Header, Recorder};
 use euc_sim::scenario::{self, Outcome, Scenario};
 use euc_sim::{CpuFactory, Machine, MachineConfig, PlantState, Report, Session, WheelFiles};
@@ -25,6 +26,8 @@ pub(crate) enum Command {
     Serve(crate::serve::ServeArgs),
     /// Connect to `euc sim serve`, write a few commands, and check the stream that comes back.
     BridgeTest(crate::serve::BridgeTestArgs),
+    /// Ride one scenario with two firmware images on the same inputs and report where they differ.
+    Compare(crate::compare::CompareArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -66,8 +69,13 @@ pub(crate) struct Args {
     /// Most instructions per quantum.
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
-    /// End every quantum after exactly its instruction budget, as the Python reference harness
-    /// does (slower: a CPU callback per instruction). Default: at the next block boundary.
+    /// CPU backend: `own` (our Cortex-M3 core, in every build) or `unicorn` (development builds
+    /// with the `unicorn` feature only).
+    #[arg(long, default_value = "own", value_name = "own|unicorn")]
+    cpu: Backend,
+    /// With --cpu unicorn: end every quantum after exactly its instruction budget, as the Python
+    /// reference harness and our core do (slower: a CPU callback per instruction). Default: at
+    /// the next block boundary.
     #[arg(long)]
     exact_quanta: bool,
     /// Battery voltage.
@@ -89,6 +97,7 @@ pub(crate) struct Args {
 struct RunOutput<'a> {
     wheel: &'a str,
     firmware: FirmwareOut,
+    cpu: &'static str,
     wall_seconds: f64,
     realtime_factor: f64,
     steady_state: Steady,
@@ -115,12 +124,11 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         Command::Run(args) => args,
         Command::Serve(args) => return crate::serve::serve(ctx, &args),
         Command::BridgeTest(args) => return crate::serve::bridge_test(ctx, &args),
+        Command::Compare(args) => return crate::compare::compare(ctx, &args),
     };
-    let Some(backend) = BACKEND else {
-        bail!(
-            "this euc has no CPU backend. The Unicorn backend is GPL-2.0 and for development only; \
-             run `cargo run -p euc-cli --features unicorn -- sim run ...`"
-        );
+    let cpu = match args.cpu {
+        Backend::Unicorn { .. } => Backend::Unicorn { exact: args.exact_quanta },
+        own @ Backend::Own => own,
     };
     let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
     let wheel_id = match (&args.wheel, &scenario) {
@@ -169,12 +177,12 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     };
     let firmware_out = FirmwareOut { label, sha256, bytes: image.len() };
     if let Some(scenario) = scenario {
-        let live = files.live(scenario.rider, scenario.assist)?;
-        let machine = Machine::new_live(&config, &euc_sim::registry(), backend(args.exact_quanta), live)?;
+        let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
+        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu)?, live)?;
         let session = Session::new(machine, stock.then_some(&files.stockmap), args.sample_hz);
-        return ride(ctx, &args, &files, &scenario, session, firmware_out);
+        return ride(ctx, &args, &files, &scenario, session, firmware_out, cpu);
     }
-    let mut machine = Machine::new(&config, &euc_sim::registry(), backend(args.exact_quanta))?;
+    let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu)?)?;
 
     let total = (args.seconds * hclk as f64) as u64;
     let warm = total.min((args.warmup * hclk as f64) as u64);
@@ -190,6 +198,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let output = RunOutput {
         wheel: &wheel.id,
         firmware: firmware_out,
+        cpu: cpu.name(),
         wall_seconds: round(wall),
         realtime_factor: round(report.sim_seconds / wall),
         steady_state: Steady {
@@ -215,6 +224,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
 struct RideOutput<'a> {
     wheel: &'a str,
     firmware: FirmwareOut,
+    cpu: &'static str,
     scenario: &'a str,
     sim_seconds: f64,
     wall_seconds: f64,
@@ -239,6 +249,7 @@ fn ride(
     scenario: &Scenario,
     mut session: Session,
     firmware: FirmwareOut,
+    cpu: Backend,
 ) -> anyhow::Result<Verdict> {
     let wheel = &files.profile;
     let mut recorder = match &args.record {
@@ -281,6 +292,7 @@ fn ride(
     let output = RideOutput {
         wheel: &wheel.id,
         firmware,
+        cpu: cpu.name(),
         scenario: &scenario.name,
         sim_seconds: round(sim_seconds),
         wall_seconds: round(wall),
@@ -301,6 +313,7 @@ fn ride(
 fn print_ride(wheel: &WheelProfile, scenario: &Scenario, args: &Args, output: &RideOutput<'_>) {
     ui::row(STRONG, "wheel", format!("{} ({}), from {}", wheel.name, wheel.id, wheel.origin));
     ui::row(STRONG, "firmware", format!("{}  {}", output.firmware.label, output.firmware.sha256.short()));
+    ui::row(STRONG, "cpu", output.cpu);
     ui::row(STRONG, "scenario", format!("{}: {}", ui::safe(&scenario.name), ui::safe(&scenario.description)));
     ui::row(
         STRONG,
@@ -342,25 +355,10 @@ fn print_ride(wheel: &WheelProfile, scenario: &Scenario, args: &Args, output: &R
     }
 }
 
-/// The CPU backend this build has: Unicorn with the `unicorn` feature, none otherwise (our own
-/// core arrives in M3).
-#[cfg(feature = "unicorn")]
-pub(crate) const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = Some(unicorn);
-#[cfg(not(feature = "unicorn"))]
-pub(crate) const BACKEND: Option<fn(bool) -> Box<CpuFactory<'static>>> = None;
-
-#[cfg(feature = "unicorn")]
-#[allow(unsafe_code)]
-fn unicorn(exact: bool) -> Box<CpuFactory<'static>> {
-    use euc_unicorn::{Quantum, UnicornCpu};
-    let quantum = if exact { Quantum::Exact } else { Quantum::Block };
-    Box::new(move |regions| {
-        // SAFETY: `Machine::new` calls this with regions whose memory it owns in boxed buffers
-        // that never move and outlive the CPU it stores next to them; it touches that memory
-        // during a run only from inside the run's bus callbacks.
-        let cpu = unsafe { UnicornCpu::with_quantum(regions, quantum) }.map_err(|e| e.to_string())?;
-        Ok(Box::new(cpu) as Box<dyn euc_core::Cpu>)
-    })
+/// The factory for the `cpu` backend, or why this build cannot run it (Unicorn without the
+/// `unicorn` feature).
+pub(crate) fn cpu_factory(cpu: Backend) -> anyhow::Result<Box<CpuFactory<'static>>> {
+    cpu.factory().map_err(anyhow::Error::msg)
 }
 
 fn round(value: f64) -> f64 {
@@ -440,6 +438,7 @@ fn print(wheel: &WheelProfile, output: &RunOutput<'_>) {
     let report = output.report;
     ui::row(STRONG, "wheel", format!("{} ({}), from {}", wheel.name, wheel.id, wheel.origin));
     ui::row(STRONG, "firmware", format!("{}  {}", output.firmware.label, output.firmware.sha256.short()));
+    ui::row(STRONG, "cpu", output.cpu);
     ui::row(
         STRONG,
         "ran",

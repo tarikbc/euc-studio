@@ -1,0 +1,71 @@
+# Hard braking: the rider cruises at 30 km/h and then leans back hard to stop as fast as they can
+# (asking for up to 6 m/s², about 0.6 g), on the maintainer's settings (current-mode drive, hard
+# pedals). The motor brakes by regeneration: it pushes current back into the battery, the bus
+# voltage rises, and the pedals tip nose up while the wheel decelerates. Danger points: a cutout
+# from an over-current or over-voltage limit, or the rider pitching over the front.
+#
+# The `record` checks always pass and note the peaks; `upright` and `no_cutoff` are the safety
+# verdict.
+schema = 1
+name = "hard-braking-30kmh"
+description = "Lean back hard at 30 km/h: how hard does the stock firmware brake, and does it hold?"
+wheel = "begode-extreme"
+seconds = 22.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [12, 30], [16, 30], [17, 0]]
+settings = "tarik-2026-10-15"
+
+[rider.control]
+brake_max = 6.0           # m/s²: a rider braking as hard as they dare
+lean_max_deg = 30.0
+lean_rate_deg_s = 60.0
+speed_kp = 2.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "first_below"
+threshold = 1.0
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "min"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "min"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "battery_a"
+stat = "min"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "battery_v"
+stat = "max"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+var = "alerts"
+stat = "max"
+from_s = 16.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

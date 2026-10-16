@@ -76,6 +76,14 @@ pub trait Cpu {
     /// The engine calls it after a write to memory that may hold code (a flash program cycle,
     /// RAM-resident functions), so a stale decode never runs.
     fn invalidate(&mut self, addr: u32, len: u32);
+
+    /// The firmware wrote `CCR` (`0xE000_ED14`), or a reset restored it. A backend that models
+    /// `CCR.UNALIGN_TRP` and `CCR.DIV_0_TRP` takes them from here; the engine ends the run right
+    /// after the write, so the next instruction already sees the new value. The default ignores
+    /// it (the Unicorn backend keeps QEMU's own reset `CCR`).
+    fn set_ccr(&mut self, ccr: u32) {
+        let _ = ccr;
+    }
 }
 
 /// Why [`Cpu::run`] returned.

@@ -101,7 +101,8 @@ export function EventsPanel() {
   const [filter, setFilter] = useState<Filter>("all");
   const all = engine.events;
   const visible = all.filter((e) => inGroup(filter, e));
-  const shown = visible.slice(-60).reverse();
+  // Newest first by simulated time (boot milestones arrive in batches, after later events).
+  const shown = visible.slice(-60).sort((a, b) => b.t - a.t || b.id - a.id);
   // Rows that arrive after the panel mounted slide in; the ones already there do not.
   const [firstNew] = useState(() => (all.at(-1)?.id ?? 0) + 1);
   const count = (f: Filter) => all.filter((e) => inGroup(f, e)).length;

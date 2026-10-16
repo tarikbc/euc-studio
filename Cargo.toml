@@ -3,6 +3,8 @@ members = ["crates/*"]
 # Everything but euc-unicorn: Unicorn is GPL-2.0, a development and CI oracle that never ships,
 # so a plain `cargo build` or `cargo test` does not compile it.
 default-members = [
+    "crates/euc-armv7m",
+    "crates/euc-ble-radio",
     "crates/euc-cli",
     "crates/euc-core",
     "crates/euc-devices",
@@ -28,6 +30,9 @@ repository = "https://github.com/tarikbc/euc-studio"
 publish = false
 
 [workspace.dependencies]
+euc-armv7m = { path = "crates/euc-armv7m" }
+# Members that need the CoreBluetooth radio enable its `radio` feature (euc-cli does).
+euc-ble-radio = { path = "crates/euc-ble-radio", default-features = false }
 euc-core = { path = "crates/euc-core" }
 euc-devices = { path = "crates/euc-devices" }
 euc-fwsource = { path = "crates/euc-fwsource" }
@@ -47,12 +52,40 @@ anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
 crc32fast = "1.5"
 directories = "6.0"
+# CoreBluetooth for the BLE radio (euc-ble-radio, macOS only): objc2's generated bindings.
+dispatch2 = { version = "0.3", default-features = false, features = ["std", "objc2"] }
 encoding_rs = "0.8"
 hex = "0.4"
 # MuJoCo 3.9.0 (Apache-2.0), linked dynamically from the official release that tools/fetch-mujoco
 # downloads; the `+mj-` suffix must match its VERSION.
 mujoco-rs = { version = "=5.0.0", default-features = false }
 object = { version = "0.40", default-features = false, features = ["read_core", "elf", "std"] }
+objc2 = "0.6"
+objc2-core-bluetooth = { version = "0.3", default-features = false, features = [
+    "std",
+    "dispatch2",
+    "CBATTRequest",
+    "CBAdvertisementData",
+    "CBAttribute",
+    "CBCentral",
+    "CBCharacteristic",
+    "CBError",
+    "CBManager",
+    "CBPeer",
+    "CBPeripheralManager",
+    "CBService",
+    "CBUUID",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSData",
+    "NSDictionary",
+    "NSError",
+    "NSObject",
+    "NSString",
+    "NSUUID",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"

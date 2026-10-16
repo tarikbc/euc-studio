@@ -29,8 +29,8 @@
 #define STANDSTILL_MOVING    3U
 #define UPDATE_TICKS         5U
 
-#define BREATH_TOP            130U /* rising past this turns it down: the top is 131 */
-#define STOCK_PASSES_PER_TICK 12U  /* stock main-loop passes per tick, standing, in the simulator */
+#define BREATH_TOP        130U /* rising past this turns it down: the top is 131 */
+#define BREATH_STEP_TICKS 4U   /* one step per 4 ticks: 2.11 s per breath, as on the wheel */
 
 #define BRAKE_PERIOD     50U
 #define BRAKE_DARK_PHASE 25U
@@ -171,21 +171,15 @@ static const struct euc_strip_pixel dark = {0U, 0U, 0U};
 
 static void step_breath(struct euc_strip_state *state, uint32_t t)
 {
-    if (state->standstill != STANDSTILL_BREATHING) {
+    if ((state->standstill != STANDSTILL_BREATHING) || ((t % BREATH_STEP_TICKS) != 0U)) {
         return;
     }
-    uint32_t steps = 1U;
-    if (EUC_QUIRK(STRIP_BREATH_PER_PASS)) {
-        steps = ((t % TEN_TICKS) == 0U) ? STOCK_PASSES_PER_TICK : 0U;
+    state->breath = state->breath_rising ? (uint8_t)(state->breath + 1U) : (uint8_t)(state->breath - 1U);
+    if (state->breath > BREATH_TOP) {
+        state->breath_rising = false;
     }
-    for (uint32_t i = 0U; i < steps; i++) {
-        state->breath = state->breath_rising ? (uint8_t)(state->breath + 1U) : (uint8_t)(state->breath - 1U);
-        if (state->breath > BREATH_TOP) {
-            state->breath_rising = false;
-        }
-        if (state->breath == 0U) {
-            state->breath_rising = true;
-        }
+    if (state->breath == 0U) {
+        state->breath_rising = true;
     }
 }
 

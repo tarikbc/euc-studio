@@ -330,6 +330,8 @@ impl Armv7m {
 impl Cpu for Armv7m {
     fn reset(&mut self, sp: u32, reset_vector: u32) {
         self.regs = CoreRegs::at_reset(sp, reset_vector);
+        // CCR resets with the core (the engine also forwards its value after a reset).
+        self.ccr = 0;
         self.exclusive = false;
         self.event = false;
         self.after_transfer = false;
@@ -375,5 +377,9 @@ impl Cpu for Armv7m {
 
     fn invalidate(&mut self, addr: u32, len: u32) {
         self.mem.invalidate(addr, len);
+    }
+
+    fn set_ccr(&mut self, ccr: u32) {
+        self.ccr = ccr & (CCR_UNALIGN_TRP | CCR_DIV_0_TRP);
     }
 }

@@ -9,7 +9,7 @@ import { Gauge } from "../../ui/Gauge.tsx";
 import { Crosshair, Orbit, RotateCcw } from "../../ui/icons.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Pill } from "../../ui/Pill.tsx";
-import { RollingNumber } from "../../ui/RollingNumber.tsx";
+import { RollingNumber, RollingText } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
@@ -73,18 +73,35 @@ function HudCard({ children, className }: { children: React.ReactNode; className
   );
 }
 
+/** Below this (km/h) the wheel counts as rolling backwards; smaller values are balance noise. */
+const REVERSE_KMH = -0.5;
+
 function Speed() {
   const speed = useLive((l) => l.speed, 8, 1);
+  const reverse = speed < REVERSE_KMH;
+  const digits = "text-44 font-medium tracking-[-0.03em]";
+  const unit = <span className="text-13 font-semibold text-fg-2">km/h</span>;
+  // Like the wheel's own display, the number is the magnitude; the direction is a tag, so a
+  // sign never shifts the card. An invisible "88.8 km/h" holds the width up to 99.9 km/h.
   return (
     <div className="flex flex-col px-16 pt-8 pb-16">
-      <span className="label">Speed</span>
-      <span className="mt-4 flex items-baseline gap-4">
-        <RollingNumber
-          value={speed}
-          decimals={1}
-          className="text-44 font-medium tracking-[-0.03em] text-fg"
-        />
-        <span className="text-13 font-semibold text-fg-2">km/h</span>
+      <span className="flex items-center gap-8">
+        <span className="label">Speed</span>
+        {reverse && (
+          <span className="label text-caution" data-testid="speed-reverse">
+            Reverse
+          </span>
+        )}
+      </span>
+      <span className="mt-4 grid">
+        <span aria-hidden="true" className="invisible flex items-baseline gap-4 [grid-area:1/1]">
+          <RollingText text="88.8" className={digits} />
+          {unit}
+        </span>
+        <span className="flex items-baseline gap-4 [grid-area:1/1]">
+          <RollingNumber value={Math.abs(speed)} decimals={1} className={cx(digits, "text-fg")} />
+          {unit}
+        </span>
       </span>
     </div>
   );
@@ -149,19 +166,29 @@ function Pitch() {
   );
 }
 
+/** `?scene=off` (tests that do not need the 3D view): no WebGL at all. */
+const SCENE_OFF =
+  typeof location !== "undefined" && new URLSearchParams(location.search).get("scene") === "off";
+
 export function Viewport({ active }: { active: boolean }) {
   const camera = useUi((s) => s.camera);
   const setCamera = useUi((s) => s.setCamera);
   const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
-  const ready = scene !== null;
+  const [drawn, setDrawn] = useState(false);
+  const ready = SCENE_OFF || scene !== null;
 
   return (
     <div
       className="relative h-full overflow-hidden rounded-12 border border-hairline bg-bg"
       data-testid="viewport"
+      data-scene={SCENE_OFF ? "off" : drawn ? "ready" : "building"}
     >
       <div className="absolute inset-0">
-        <Scene active={active} onReady={setScene} />
+        {SCENE_OFF ? (
+          <p className="grid h-full place-items-center text-12 text-fg-3">3D view off</p>
+        ) : (
+          <Scene active={active} onReady={setScene} onFirstFrame={() => setDrawn(true)} />
+        )}
       </div>
 
       <EngineOverlay />

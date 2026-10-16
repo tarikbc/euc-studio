@@ -17,15 +17,74 @@ pub struct WheelBody {
     pub wheel: Wheel,
     /// Everything that does not spin: shell, battery, controller, stator, pedals.
     pub shell: Shell,
+    /// Measured collision shapes (the wheel's `geometry.toml` `[collision]`), if any; without them
+    /// the tire is an ellipsoid and the shell a few generic boxes.
+    #[serde(skip)]
+    pub shapes: Option<Shapes>,
+}
+
+/// Collision shapes measured on a real wheel, in the shell frame (x forward, y left, z up,
+/// origin on the axle centre).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Shapes {
+    /// The tire as a torus around the axle (rolls round in the wheel plane, rounded across).
+    pub tire: Option<Torus>,
+    /// Solids of the shell (packs, seat, handle, brackets, pedals), by name.
+    pub solids: Vec<Solid>,
+}
+
+/// A torus around the y axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Torus {
+    /// Distance from the axle to the centre of the tube, metres.
+    pub major_m: f64,
+    /// Radius of the tube (the crown's lateral radius), metres.
+    pub minor_m: f64,
+}
+
+/// One shell solid.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Solid {
+    /// A box.
+    Box {
+        /// Name (`pack_left`, `pedal_right`, ...).
+        name: String,
+        /// Centre, metres.
+        centre: [f64; 3],
+        /// Half sizes, metres.
+        half: [f64; 3],
+    },
+    /// A capsule.
+    Capsule {
+        /// Name.
+        name: String,
+        /// One end of the axis, metres.
+        from: [f64; 3],
+        /// The other end.
+        to: [f64; 3],
+        /// Radius, metres.
+        radius: f64,
+    },
+}
+
+impl Solid {
+    /// The name.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Box { name, .. } | Self::Capsule { name, .. } => name,
+        }
+    }
 }
 
 /// `[body.tire]`.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tire {
-    /// Rolling radius under load, metres.
+    /// Rolling radius under load, metres: from the axle to the ground. With a measured torus,
+    /// the torus is sized to it (its tube keeps the measured crown radius).
     pub radius_m: f64,
-    /// Half width of the tread, metres: the lateral semi-axis of the tire's contact shape.
+    /// Half width of the tread, metres (the lateral semi-axis of the ellipsoid without a measured
+    /// torus).
     pub half_width_m: f64,
     /// Sliding friction coefficient on the ground.
     pub friction: f64,
@@ -170,12 +229,21 @@ pub struct Setup {
     pub air_density: f64,
     /// Gravity, m/s².
     pub gravity: f64,
+    /// The ground.
+    pub terrain: crate::Terrain,
 }
 
 impl Setup {
-    /// The wheel with the default rider and aids, at sea level.
+    /// The wheel with the default rider and aids, at sea level, on flat ground.
     pub fn new(wheel: WheelBody) -> Self {
-        Self { wheel, rider: Rider::default(), assist: Assist::default(), air_density: 1.2, gravity: 9.81 }
+        Self {
+            wheel,
+            rider: Rider::default(),
+            assist: Assist::default(),
+            air_density: 1.2,
+            gravity: 9.81,
+            terrain: crate::Terrain::flat(),
+        }
     }
 
     /// Checks ranges that the types cannot.
@@ -215,10 +283,15 @@ impl Setup {
         if w.tire.contact_time_s < 2.0 * crate::TIMESTEP_S {
             return Err(ParamError(format!("body.tire.contact_time_s must be at least {} s", 2.0 * crate::TIMESTEP_S)));
         }
+        if let Some(torus) = w.shapes.as_ref().and_then(|s| s.tire)
+            && !(torus.minor_m > 0.0 && torus.minor_m < w.tire.radius_m)
+        {
+            return Err(ParamError("the tire torus's tube must be thinner than the rolling radius".into()));
+        }
         if r.ankle_above_pedals_m >= r.com_above_pedals_m {
             return Err(ParamError("rider.ankle_above_pedals_m must be below the centre of mass".into()));
         }
-        Ok(())
+        self.terrain.validate().map_err(ParamError)
     }
 }
 

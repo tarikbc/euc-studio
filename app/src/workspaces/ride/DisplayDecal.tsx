@@ -12,11 +12,12 @@ import { displayAspect, paintDisplay } from "./displayPaint.ts";
 
 /** Texture width in pixels; the height follows the window's aspect. */
 const TEX_W = 512;
-/**
- * The stylized fairing's flat top is 60 mm wide, narrower than the real 83 mm window, so the
- * panel is drawn at this share of its size until the scanned shell replaces the model.
- */
-const FIT = 0.72;
+/** Where the stylized fairing carries the panel; its flat top is 60 mm wide, so the 83 mm
+ * panel is drawn at 72 % there. */
+const STYLIZED: { position: [number, number, number]; fit: number } = {
+  position: [0.12, 0.4015, 0],
+  fit: 0.72,
+};
 
 /** Shell-local directions (x forward, y up, z to the rider's right). */
 const TOWARD: Record<DisplayLayout["board_up"], THREE.Vector3> = {
@@ -34,15 +35,30 @@ function mountRotation(layout: DisplayLayout): THREE.Euler {
   return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
 }
 
-export function DisplayDecal() {
+/** The panel at `position` (its centre, shell frame), at `fit` of its real size. */
+export function DisplayDecal({
+  position = STYLIZED.position,
+  fit = STYLIZED.fit,
+}: {
+  position?: [number, number, number];
+  fit?: number;
+}) {
   // The layout arrives with the run's bodies, after the scene mounts.
   useEngineVersion();
   const layout = engine.kind === "live" ? engine.display : null;
   if (!layout) return null;
-  return <Decal layout={layout} />;
+  return <Decal layout={layout} position={position} fit={fit} />;
 }
 
-function Decal({ layout }: { layout: DisplayLayout }) {
+function Decal({
+  layout,
+  position,
+  fit,
+}: {
+  layout: DisplayLayout;
+  position: [number, number, number];
+  fit: number;
+}) {
   const material = useRef<THREE.MeshBasicMaterial>(null);
   /** The texture, the layout it was made for and the outputs it shows. */
   const painted = useRef<{
@@ -84,9 +100,8 @@ function Decal({ layout }: { layout: DisplayLayout }) {
 
   const [, , w, h] = layout.window;
   return (
-    // Flat on the fairing's top, in front of the handle.
-    <mesh position={[0.12, 0.4015, 0]} rotation={rotation}>
-      <planeGeometry args={[(w / 1000) * FIT, (h / 1000) * FIT]} />
+    <mesh position={position} rotation={rotation}>
+      <planeGeometry args={[(w / 1000) * fit, (h / 1000) * fit]} />
       <meshBasicMaterial ref={material} color={layout.panel} toneMapped={false} />
     </mesh>
   );

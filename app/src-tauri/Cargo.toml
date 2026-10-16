@@ -19,8 +19,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 # The Unicorn CPU backend: GPL-2.0, for development only. `pnpm tauri dev` turns it on
-# (scripts/tauri.mjs); a bundle refuses to compile with it (see src/engine/cpu.rs).
-unicorn = ["dep:euc-unicorn"]
+# (scripts/tauri.mjs) and `EUC_CPU=unicorn` selects it; our own core runs otherwise. A bundle
+# refuses to compile with it (see src/engine/cpu.rs).
+unicorn = ["euc-sim/unicorn"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -40,7 +41,6 @@ euc-proto-begode = { path = "../../crates/euc-proto-begode" }
 euc-sim = { path = "../../crates/euc-sim" }
 euc-stm32f1 = { path = "../../crates/euc-stm32f1" }
 euc-telemetry = { path = "../../crates/euc-telemetry" }
-euc-unicorn = { path = "../../crates/euc-unicorn", optional = true }
 
 [profile.release]
 codegen-units = 1

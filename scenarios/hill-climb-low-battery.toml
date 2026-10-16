@@ -1,0 +1,78 @@
+# Hill climb on a nearly empty battery: 3 % charge (101.8 V at rest, above the stock firmware's
+# 99.2 V battery tiltback threshold), the maintainer's settings, 25 km/h, then a 20 % grade from
+# 40 m (reached over a 10 m vertical curve). The low-voltage alert is on from boot (3 % is below its
+# own threshold); the climb draws more current, the battery sags below 99.2 V, and the firmware
+# tilts the pedals back while the rider is still climbing.
+#
+# The `record` checks always pass; `upright` and `no_cutoff` are the safety verdict. The rider
+# model does not react to tiltback or beeps (it keeps asking for 25 km/h), so how far the tiltback
+# grows says what the firmware does, not what a person would do.
+schema = 1
+name = "hill-climb-low-battery"
+description = "Climb a 20 % grade at 25 km/h on a 3 % battery: the sag triggers the battery tiltback mid-climb."
+wheel = "begode-extreme"
+seconds = 36.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [12, 25]]
+settings = "tarik-2026-10-15"
+
+[terrain]
+slope_pct = 20.0
+slope_start_m = 40.0
+length_m = 300.0
+
+[[timeline]]
+at_s = 0.0
+fault = "battery_soc"
+soc = 0.03
+
+[[expect]]
+check = "record"
+signal = "distance_m"
+stat = "first_above"
+threshold = 40.0
+
+[[expect]]
+check = "firmware_bits"
+var = "alerts"
+bits = 0x08
+
+[[expect]]
+check = "record"
+var = "tiltback_battery_deg"
+stat = "first_above"
+threshold = 2.0
+
+[[expect]]
+check = "record"
+var = "tiltback_battery_deg"
+stat = "max"
+
+[[expect]]
+check = "record"
+signal = "battery_v"
+stat = "min"
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 6.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "min"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 6.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

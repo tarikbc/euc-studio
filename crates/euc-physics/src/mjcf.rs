@@ -1,9 +1,9 @@
 //! The MJCF model, generated from the parameters.
 //!
 //! ```text
-//! world ── floor (plane)
-//!   └─ shell (free joint)     battery packs, handle, pedals, IMU site; origin at the axle
-//!        ├─ wheel (hinge "axle", y)   tire: an ellipsoid round in the wheel plane
+//! world ── floor (plane, or terrain)
+//!   └─ shell (free joint)     measured solids (or generic packs, handle, pedals), IMU site; origin at the axle
+//!        ├─ wheel (hinge "axle", y)   tire: a torus as a ring of capsules (or an ellipsoid)
 //!        └─ rider (hinge "lean", y)   rigid body hinged at the ankles, ankle motor "ankle"
 //! ```
 //!
@@ -12,7 +12,7 @@
 //! touch the ground; the rider has no collision shapes.
 
 use crate::TIMESTEP_S;
-use crate::params::Setup;
+use crate::params::{Setup, Solid};
 
 /// Names the simulator looks up in the compiled model.
 pub(crate) mod names {
@@ -59,9 +59,20 @@ impl Layout {
         let r = setup.wheel.tire.radius_m;
         let pack = [SHELL_SHAPE.pack[0] * r, SHELL_SHAPE.pack[1], SHELL_SHAPE.pack[2] * r];
         let pack_y = setup.wheel.tire.half_width_m + SHELL_SHAPE.pack_gap + pack[1];
-        Self { pack, pack_y, pack_z: SHELL_SHAPE.pack_z * r, pedal_y: pack_y + pack[1] + SHELL_SHAPE.pedal[1] }
+        // Feet stand on the measured left pedal when there is one.
+        let measured_pedal = setup.wheel.shapes.as_ref().and_then(|shapes| {
+            shapes.solids.iter().find_map(|solid| match solid {
+                Solid::Box { name, centre, .. } if name == "pedal_left" => Some(centre[1].abs()),
+                _ => None,
+            })
+        });
+        let pedal_y = measured_pedal.unwrap_or(pack_y + pack[1] + SHELL_SHAPE.pedal[1]);
+        Self { pack, pack_y, pack_z: SHELL_SHAPE.pack_z * r, pedal_y }
     }
 }
+
+/// Capsules in the ring that stands in for a torus: 48 keeps the radius within 0.4 mm.
+const TORUS_SEGMENTS: usize = 48;
 
 /// MJCF text, one element per line.
 #[derive(Default)]
@@ -84,8 +95,11 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
         r#"  <option timestep="{TIMESTEP_S}" gravity="0 0 {}" integrator="implicitfast" cone="pyramidal"/>"#,
         -setup.gravity
     ));
+    if let Some(asset) = setup.terrain.asset() {
+        x.line(asset);
+    }
     x.line("  <worldbody>");
-    x.line(r#"    <geom name="floor" type="plane" size="0 0 1" friction="0.5 0 0" condim="3"/>"#);
+    x.line(setup.terrain.ground());
     x.line(format!(r#"    <body name="{}" pos="0 0 {}">"#, names::SHELL, setup.wheel.tire.radius_m));
     x.line(format!(r#"      <freejoint name="{}"/>"#, names::ROOT));
     shell(&mut x, setup, &layout);
@@ -112,12 +126,33 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
 fn shell(x: &mut Xml, setup: &Setup, layout: &Layout) {
     let shell = setup.wheel.shell;
     let [ixx, iyy, izz] = shell.inertia_kgm2;
-    let Layout { pack, pack_y, pack_z, pedal_y } = *layout;
-    let pedal = SHELL_SHAPE.pedal;
     x.line(format!(
         r#"      <inertial pos="0 0 {}" mass="{}" diaginertia="{ixx} {iyy} {izz}"/>"#,
         shell.com_above_axle_m, shell.mass_kg
     ));
+    match setup.wheel.shapes.as_ref().filter(|s| !s.solids.is_empty()) {
+        Some(shapes) => {
+            for solid in &shapes.solids {
+                x.line(match solid {
+                    Solid::Box { name, centre: [cx, cy, cz], half: [hx, hy, hz] } => {
+                        format!(r#"      <geom name="{name}" type="box" size="{hx} {hy} {hz}" pos="{cx} {cy} {cz}"/>"#)
+                    }
+                    Solid::Capsule { name, from: [ax, ay, az], to: [bx, by, bz], radius } => format!(
+                        r#"      <geom name="{name}" type="capsule" fromto="{ax} {ay} {az} {bx} {by} {bz}" size="{radius}"/>"#
+                    ),
+                });
+            }
+        }
+        None => generic_shell(x, setup, layout),
+    }
+    x.line(format!(r#"      <site name="imu" pos="0 0 {}" size="0.01"/>"#, shell.imu_above_axle_m));
+}
+
+/// Packs, handle and pedals sized from the tire, for a wheel without measured shapes.
+fn generic_shell(x: &mut Xml, setup: &Setup, layout: &Layout) {
+    let shell = setup.wheel.shell;
+    let Layout { pack, pack_y, pack_z, pedal_y } = *layout;
+    let pedal = SHELL_SHAPE.pedal;
     for (side, sign) in [("left", 1.0), ("right", -1.0)] {
         x.line(format!(
             r#"      <geom name="pack_{side}" type="box" size="{} {} {}" pos="0 {} {pack_z}"/>"#,
@@ -140,7 +175,6 @@ fn shell(x: &mut Xml, setup: &Setup, layout: &Layout) {
         pack_y + pack[1],
         pack_z + pack[2] + 0.02
     ));
-    x.line(format!(r#"      <site name="imu" pos="0 0 {}" size="0.01"/>"#, shell.imu_above_axle_m));
 }
 
 /// The spinning wheel and its tire.
@@ -156,12 +190,29 @@ fn wheel(x: &mut Xml, setup: &Setup) {
         wheel.mass_kg, wheel.spin_inertia_kgm2
     ));
     // Rolling friction is a length: resisting torque over normal load, crr times the radius.
-    x.line(format!(
-        r#"        <geom name="tire" type="ellipsoid" size="{r} {hw} {r}" condim="6" friction="{} 0.01 {}" solref="{} 1"/>"#,
-        tire.friction,
-        tire.crr * r,
-        tire.contact_time_s
-    ));
+    let contact =
+        format!(r#"condim="6" friction="{} 0.01 {}" solref="{} 1""#, tire.friction, tire.crr * r, tire.contact_time_s);
+    match setup.wheel.shapes.as_ref().and_then(|s| s.tire) {
+        Some(torus) => {
+            // A ring of capsules along the tube's centre circle in the wheel plane, sized so the
+            // tire stands on its loaded rolling radius (MuJoCo's contact barely sinks in).
+            let major = r - torus.minor_m;
+            let point = |k: usize| {
+                let angle = std::f64::consts::TAU * k as f64 / TORUS_SEGMENTS as f64;
+                (major * angle.cos(), major * angle.sin())
+            };
+            for k in 0..TORUS_SEGMENTS {
+                let ((ax, az), (bx, bz)) = (point(k), point(k + 1));
+                x.line(format!(
+                    r#"        <geom name="tire_{k}" type="capsule" fromto="{ax} 0 {az} {bx} 0 {bz}" size="{}" {contact}/>"#,
+                    torus.minor_m
+                ));
+            }
+        }
+        None => {
+            x.line(format!(r#"        <geom name="tire" type="ellipsoid" size="{r} {hw} {r}" {contact}/>"#));
+        }
+    }
     x.line("      </body>");
 }
 

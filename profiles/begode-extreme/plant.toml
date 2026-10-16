@@ -8,7 +8,7 @@ grid_us = 5.0                 # integration step
 seed = 1                      # sensor and hall noise
 
 [motor]
-pole_pairs = 26               # DEFAULT: firmware 0.0505 m per electrical turn; 16x3 tire, 1.313 m rolling circumference
+pole_pairs = 28               # INFERRED: firmware 0.0505 m per electrical turn on the measured 3.00-12 tire (rolling radius 0.2251 m)
 resistance_ohm = 0.080        # DEFAULT: phase resistance of a 134 V hub motor
 ld_h = 0.000200               # DEFAULT: surface magnets, Ld = Lq
 lq_h = 0.000200               # DEFAULT
@@ -60,22 +60,24 @@ stage = { heat_capacity_j_per_k = 400.0, resistance_k_per_w = 0.5 }    # DEFAULT
 motor = { heat_capacity_j_per_k = 3000.0, resistance_k_per_w = 0.3 }   # DEFAULT
 
 # Mechanics: tire, spinning wheel and shell. Read by crates/euc-physics (through euc-sim);
-# docs/models/body.md explains every value. DEFAULT values are estimates, not measurements.
-# Heights are from the axle, positive up.
+# docs/models/body.md explains every value. DEFAULT values are estimates, not measurements;
+# MEASURED ones come from the 3D scan (geometry.toml, docs/hardware/geometry.md). The collision
+# shapes (tire torus, shell solids) come from geometry.toml [collision]. Heights are from the axle,
+# positive up.
 [body.tire]
-radius_m = 0.209              # rolling circumference 1.313 m, the same as [motor] assumes: firmware speed = true speed
-half_width_m = 0.038          # 3 in tread
+radius_m = 0.2251             # INFERRED: loaded rolling radius; 28 pole pairs x 0.0505 m / 2 pi (free radius 0.2296 MEASURED)
+half_width_m = 0.0407         # MEASURED: 3.00-12 tire, 81.4 mm wide
 friction = 0.9                # DEFAULT: rubber on dry asphalt
 crr = 0.012                   # DEFAULT: rolling resistance coefficient
 contact_time_s = 0.02         # DEFAULT: tire softness, about 200 kN/m under the loaded wheel
 
 [body.wheel]
 mass_kg = 16.0                # DEFAULT: rotor, magnets, rim and tire (the stator is part of the shell)
-spin_inertia_kgm2 = 0.42      # DEFAULT: 0.6 m r^2, most of the mass near the rim
+spin_inertia_kgm2 = 0.487     # DEFAULT: 0.6 m r^2, most of the mass near the rim
 
 [body.shell]
 mass_kg = 26.0                # DEFAULT: 42 kg with the wheel
 com_above_axle_m = 0.10       # DEFAULT: battery packs reach above the axle
 inertia_kgm2 = [0.85, 0.92, 0.46]  # DEFAULT: roll, pitch, yaw of a 0.35 x 0.30 x 0.55 m box
-pedal_below_axle_m = 0.03     # DEFAULT
+pedal_below_axle_m = -0.010   # ESTIMATE (scan): the decks rest 10 mm above the axle, +-15 mm
 imu_above_axle_m = 0.15       # DEFAULT: controller board above the axle

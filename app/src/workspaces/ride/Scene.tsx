@@ -125,10 +125,12 @@ function CameraRig({ mode, still }: { mode: CameraMode; still: boolean }) {
       if (!c) return;
       const rider = hasRider();
       if (orbitFramed.current !== rider) {
-        // A rider arrived (or left): step back to the follow view's distance for that framing,
-        // keeping the viewing direction the user chose.
+        // First frame: the follow view's direction. Later (a rider arrived or left): the
+        // direction the user chose. Either way at the follow view's distance for that framing.
         const distance = FOLLOW_OFFSET.distanceTo(TARGET) * (rider ? 2 : 1);
-        shift.subVectors(camera.position, c.target).setLength(distance);
+        if (orbitFramed.current === null) shift.subVectors(FOLLOW_OFFSET, TARGET);
+        else shift.subVectors(camera.position, c.target);
+        shift.setLength(distance);
         c.target.copy(focus);
         camera.position.copy(focus).add(shift);
         orbitFramed.current = rider;
@@ -265,9 +267,22 @@ function Ticker({ fps }: { fps: number }) {
 export interface SceneProps {
   active: boolean;
   onReady?: (info: { quality: Quality; renderer: string }) => void;
+  /** Called once, after the scene has drawn its first frame (tests wait on it). */
+  onFirstFrame?: () => void;
 }
 
-export function Scene({ active, onReady }: SceneProps) {
+/** Reports the first drawn frame (from the frame after it, so the first one has reached the screen). */
+function FirstFrame({ onFirstFrame }: { onFirstFrame?: () => void }) {
+  const done = useRef(false);
+  useFrame(() => {
+    if (done.current) return;
+    done.current = true;
+    requestAnimationFrame(() => onFirstFrame?.());
+  });
+  return null;
+}
+
+export function Scene({ active, onReady, onFirstFrame }: SceneProps) {
   const camera = useUi((s) => s.camera);
   const accent = useUi((s) => s.accent);
   const [override] = useState(() => qualityOverride(location.search));
@@ -317,6 +332,7 @@ export function Scene({ active, onReady }: SceneProps) {
         </FollowWheel>
       </Suspense>
       <CameraRig mode={camera} still={!high} />
+      <FirstFrame onFirstFrame={onFirstFrame} />
       {active && !high && <Ticker fps={LOW_FPS} />}
     </Canvas>
   );

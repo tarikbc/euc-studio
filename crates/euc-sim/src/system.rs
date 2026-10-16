@@ -119,6 +119,8 @@ pub struct System {
     pc: u32,
     yield_pending: bool,
     pub(crate) reset_pending: Option<(ResetKind, String)>,
+    /// A `CCR` value the firmware wrote, for the machine to hand to the CPU.
+    pub(crate) ccr_pending: Option<u32>,
     pub(crate) irq_names: Vec<String>,
     marker_names: HashMap<u32, String>,
     pub(crate) diag: Diagnostics,
@@ -161,6 +163,7 @@ impl System {
             stuck_skip: 0,
             pc: 0,
             yield_pending: false,
+            ccr_pending: None,
             reset_pending: None,
             irq_names,
             marker_names,
@@ -352,6 +355,11 @@ impl System {
             (Target::Scs, Some(value)) => {
                 let effect = self.exc.write(lane.word, lane.place(value), lane.mask, now);
                 self.scs_effects(effect.enabled, effect.reset_request);
+                if let Some(ccr) = effect.ccr {
+                    // The CPU must see it from the next instruction on: end the run here.
+                    self.ccr_pending = Some(ccr);
+                    self.yield_pending = true;
+                }
                 0
             }
             (Target::Scs, None) => lane.extract(self.exc.read(lane.word, now)),

@@ -6,6 +6,7 @@ import { engine, useEngineVersion } from "../engine/index.ts";
 import { WORKSPACE_IDS, useUi } from "../state/ui.ts";
 import type { PaletteCommand } from "../ui/CommandPalette.tsx";
 import {
+  Bell,
   Camera,
   Cpu,
   Keyboard,
@@ -168,6 +169,24 @@ export function useCommands(): PaletteCommand[] {
         shortcut: "c",
         keywords: ["camera", "3d", "viewport", "orbit", "follow"],
         run: () => ui.setCamera(ui.camera === "follow" ? "orbit" : "follow"),
+      },
+      {
+        id: "view.buzzer",
+        title: "Toggle buzzer sound",
+        group: "View",
+        icon: <Bell />,
+        keywords: ["buzzer", "sound", "audio", "beep", "horn", "mute"],
+        hint: ui.buzzerSound ? "On" : "Off",
+        run: () => {
+          ui.setBuzzerSound(!ui.buzzerSound);
+          toast({
+            tone: "info",
+            title: ui.buzzerSound ? "Buzzer sound off" : "Buzzer sound on",
+            description: ui.buzzerSound
+              ? undefined
+              : "The wheel's buzzer plays through your speakers.",
+          });
+        },
       },
       ...(Object.keys(accents) as AccentName[]).map((a) => ({
         id: `accent.${a}`,

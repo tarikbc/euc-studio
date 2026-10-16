@@ -139,23 +139,23 @@ static void test_breathing_at_a_standstill(void)
         ticks(&state, &t, 1U, 0U, 0, 0.0F, 0U); /* the 41st */
         TEST_ASSERT_EQUAL_UINT8(1U, state.standstill);
         const uint8_t before = state.breath;
-        ticks(&state, &t, 10U, 0U, 0, 0.0F, 0U);
-        if (profiles[p] == EUC_SIL_PROFILE_COMPAT) {
-            TEST_ASSERT_EQUAL_UINT8(before + 12U, state.breath); /* 12 passes in every 10th tick */
-        } else {
-            TEST_ASSERT_EQUAL_UINT8(before + 10U, state.breath); /* 1 per tick */
-        }
+        ticks(&state, &t, 40U, 0U, 0, 0.0F, 0U);
+        TEST_ASSERT_EQUAL_UINT8(before + 10U, state.breath); /* one step every 4 ticks, in both profiles */
         for (uint32_t led = 1U; led <= 24U; led++) {
             assert_led(&state, led, state.breath, 0U, 0U);
         }
         /* Up to 131, then down to 0, then up again */
         uint8_t top = 0U;
-        for (uint32_t i = 0U; i < 400U; i++) {
+        uint32_t top_tick = 0U;
+        for (uint32_t i = 0U; i < 1200U; i++) {
             ticks(&state, &t, 1U, 0U, 0, 0.0F, 0U);
-            top = (state.breath > top) ? state.breath : top;
+            if (state.breath > top) {
+                top = state.breath;
+                top_tick = i;
+            }
         }
-        TEST_ASSERT_TRUE(top <= 131U);
-        TEST_ASSERT_TRUE(top >= 120U);
+        TEST_ASSERT_EQUAL_UINT8(131U, top);
+        TEST_ASSERT_TRUE(top_tick > 400U); /* 2.1 s per breath: the top comes after about 0.9 s */
     }
 }
 

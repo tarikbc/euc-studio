@@ -58,25 +58,30 @@ matter while the roll spring keeps the wheel upright.
 ## The model
 
 ```
-world ── floor (plane)
-  └─ shell (free joint)     battery packs, handle, pedals, IMU site; origin at the axle
-       ├─ wheel (hinge "axle", y)   tire: an ellipsoid round in the wheel plane
+world ── floor (plane, or the scenario's terrain)
+  └─ shell (free joint)     scanned solids (packs, seat, handle, roller, shock, pedals), IMU site; origin at the axle
+       ├─ wheel (hinge "axle", y)   tire: a torus, as a ring of 48 capsules
        └─ rider (hinge "lean", y)   rigid body hinged at the ankles, ankle motor "ankle"
 ```
 
 `Physics::mjcf()` returns the generated MJCF for inspection.
 
-- **Tire.** An ellipsoid with semi-axes (r, half width, r): a circle of radius r in the wheel plane,
-  so it rolls exactly, and rounded across the tread. Contact `condim = 6` gives sliding, torsional and
-  rolling friction. Rolling resistance is MuJoCo's rolling friction, a length: `crr · r`, so the
-  resisting torque is `crr · N · r`, the classic `crr · N` force at the contact. The contact time
-  constant (`solref`) is the tire's softness: 20 ms is about 200 kN/m under the loaded wheel. The
-  ellipsoid's crown is sharper than a real tire's; this only matters for leaning in turns, which M2 does
-  not simulate.
+- **Tire.** A torus around the axle with the scanned crown radius (tube 0.058 m, from
+  `geometry.toml` `[collision]`), built as a ring of 48 capsules (the radius ripples by 0.4 mm). The
+  ring is sized so the tire stands on its loaded rolling radius `radius_m` (0.2251 m): MuJoCo's contact
+  barely sinks in, so the 4.5 mm the real tire flattens under a rider is taken off the scanned free
+  radius (0.2296 m) up front. At speed it rolls on 0.223 m (MuJoCo's soft friction creeps about 1 %),
+  so the firmware reads speeds about 1 % high. Without measured shapes the tire is an ellipsoid with
+  semi-axes (r, half width, r). Contact `condim = 6` gives sliding, torsional and rolling friction.
+  Rolling resistance is MuJoCo's rolling friction, a length: `crr · r`, so the resisting torque is
+  `crr · N · r`, the classic `crr · N` force at the contact. The contact time constant (`solref`) is
+  the tire's softness.
 - **Wheel.** The spinning part of the hub motor (rotor, magnets, rim, tire). The stator belongs to the
   shell. The spin inertia is set directly; the other two axes are half of it (a ring).
-- **Shell.** Mass, centre of mass and inertia from the parameters; the shapes (two battery packs, a
-  handle, two pedals) are for drawing and for the contacts of a fall only.
+- **Shell.** Mass, centre of mass and inertia from the parameters. The shapes are the scan's collision
+  solids (`geometry.toml` `[collision]`: battery packs with their slider channels, seat, handle and
+  headlight, rear roller, shock, pedal brackets, and estimated pedal decks), for drawing and for the
+  contacts of a fall; without them, generic packs, handle and pedals sized from the tire.
 - **Stand.** A weld from the shell to the world holds the wheel upright and still while the firmware
   boots; the scenario releases it. Before time starts, the model settles on the stand for 0.2 s, so
   the first IMU sample already reads a wheel at rest (both the weld and the tire contact are soft).
@@ -118,17 +123,18 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 
 | Parameter | Value | Source |
 |---|---|---|
-| `tire.radius_m` | 0.209 m | rolling circumference 1.313 m, the same the motor model assumes with 26 pole pairs, so the firmware's speed equals the true speed (firmware: 0.0505 m per electrical turn) |
-| `tire.half_width_m` | 0.038 m | 3 in tread |
+| `tire.radius_m` | 0.2251 m | INFERRED: loaded rolling radius, 28 pole pairs × 0.0505 m (the firmware's distance per electrical turn) / 2π; the scanned 3.00-12 tire's free radius is 0.2296 m |
+| `tire.half_width_m` | 0.0407 m | MEASURED: 81.4 mm wide (used only without a torus) |
+| `geometry.toml` `tire_torus` | tube 0.058 m | MEASURED: crown lateral radius; the ring radius follows `radius_m` |
 | `tire.friction` | 0.9 | DEFAULT: rubber on dry asphalt |
 | `tire.crr` | 0.012 | DEFAULT: research sim.py |
 | `tire.contact_time_s` | 0.02 s | DEFAULT: about 200 kN/m |
 | `wheel.mass_kg` | 16 kg | DEFAULT: rotor, rim and tire |
-| `wheel.spin_inertia_kgm2` | 0.42 kg·m² | DEFAULT: 0.6·m·r² |
+| `wheel.spin_inertia_kgm2` | 0.487 kg·m² | DEFAULT: 0.6·m·r² |
 | `shell.mass_kg` | 26 kg | DEFAULT: 42 kg with the wheel |
 | `shell.com_above_axle_m` | 0.10 m | DEFAULT |
 | `shell.inertia_kgm2` | 0.85, 0.92, 0.46 kg·m² | DEFAULT: a 0.35 × 0.30 × 0.55 m box |
-| `shell.pedal_below_axle_m` | 0.03 m | DEFAULT |
+| `shell.pedal_below_axle_m` | −0.010 m | ESTIMATE from the scan: the deck tops sit 10 mm above the axle (±15 mm) |
 | `shell.imu_above_axle_m` | 0.15 m | DEFAULT: research sim.py |
 
 Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the defaults):

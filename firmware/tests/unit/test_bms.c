@@ -60,6 +60,8 @@ static void test_parse_fields(void)
 {
     struct euc_bms_state state;
     euc_bms_init(&state);
+    TEST_ASSERT_EQUAL_INT16(5000, state.temperature_min_c); /* stock power-on value, until the first reply */
+    TEST_ASSERT_EQUAL_INT16(0, state.temperature_max_c);
     put16(&reply[44U + 40U], (uint16_t)(int16_t)-1000);
     euc_bms_parse(&state, reply);
     TEST_ASSERT_EQUAL_INT16(20, state.temperature_c[0]);

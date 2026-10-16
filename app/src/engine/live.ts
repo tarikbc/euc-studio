@@ -6,6 +6,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { formatStats, measureFrames } from "../lib/perf.ts";
 import { RingBuffer } from "../lib/ring.ts";
 import { readBatch } from "./batch.ts";
+import type { Tone } from "./buzzerAudio.ts";
 import {
   type BodyInfo,
   CH,
@@ -17,6 +18,7 @@ import {
   CHANNEL_IDS,
   type ChannelId,
   type DisplayLayout,
+  type LightsLayout,
   type EngineClient,
   type EngineStatus,
   type EventKind,
@@ -49,6 +51,8 @@ type Message =
   | { type: "reset"; scenario: string }
   | { type: "bodies"; bodies: BodyInfo[] }
   | { type: "display"; layout: DisplayLayout | null }
+  | { type: "lights"; layout: LightsLayout | null }
+  | { type: "buzzer"; tones: Tone[] }
   | { type: "events"; events: TelemetryEvent[] }
   | { type: "frames"; frames: PhoneFrame[] }
   | { type: "outputs"; outputs: Outputs };
@@ -119,6 +123,8 @@ export class LiveEngine implements EngineClient {
   phoneCommands: PhoneCommand[] = [];
   outputs: Outputs | null = null;
   display: DisplayLayout | null = null;
+  lights: LightsLayout | null = null;
+  beeps = 0;
   status: EngineStatus = { state: "starting", message: "Connecting to the engine", backend: "…" };
   playing = true;
   targetRtf = 1;
@@ -132,6 +138,8 @@ export class LiveEngine implements EngineClient {
   private listeners = new Set<() => void>();
   private dataVersion = 0;
   private dataListeners = new Set<() => void>();
+  private toneListeners = new Set<(tones: Tone[]) => void>();
+  private buzzing = false;
   /** Batches received, samples dropped by the backend (for diagnostics). */
   readonly stats = { batches: 0, samples: 0, dropped: 0 };
 
@@ -231,6 +239,8 @@ export class LiveEngine implements EngineClient {
         this.latest.poses = null;
         this.latest.t = 0;
         this.outputs = null;
+        this.beeps = 0;
+        this.buzzing = false;
         this.scenarioId = m.scenario;
         break;
       case "bodies":
@@ -239,6 +249,17 @@ export class LiveEngine implements EngineClient {
       case "display":
         this.display = m.layout;
         break;
+      case "lights":
+        this.lights = m.layout;
+        break;
+      case "buzzer":
+        for (const t of m.tones) {
+          if (t.hz > 0 && !this.buzzing) this.beeps++;
+          this.buzzing = t.hz > 0;
+        }
+        for (const fn of this.toneListeners) fn(m.tones);
+        this.emitData();
+        return;
       case "events":
         this.events = [
           ...this.events,
@@ -275,6 +296,11 @@ export class LiveEngine implements EngineClient {
     this.version++;
     for (const fn of this.listeners) fn();
     this.emitData();
+  }
+
+  subscribeTones(fn: (tones: Tone[]) => void): () => void {
+    this.toneListeners.add(fn);
+    return () => this.toneListeners.delete(fn);
   }
 
   subscribeData = (fn: () => void): (() => void) => {

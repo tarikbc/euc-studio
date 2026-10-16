@@ -18,6 +18,8 @@
 #define CELLS_OFFSET         6U
 #define FAILURES_TO_FAULT    3U
 
+#define TEMPERATURE_MIN_AT_POWER_ON 5000 /* frame 01 shows it until the first reply is parsed */
+
 /* Current scale: raw x 90 / 32.768 / 100 = 0.1 A, in double precision, truncated, as the stock code does. */
 #define CURRENT_GAIN    90.0
 #define CURRENT_DIVISOR 32.768
@@ -28,6 +30,7 @@ const uint8_t euc_bms_request[EUC_BMS_REQUEST_BYTES] = {0x1CU, 0x03U, 0x40U, 0x3
 void euc_bms_init(struct euc_bms_state *state)
 {
     (void)memset(state, 0, sizeof(*state));
+    state->temperature_min_c = TEMPERATURE_MIN_AT_POWER_ON;
 }
 
 void euc_bms_tick(struct euc_bms_state *state)

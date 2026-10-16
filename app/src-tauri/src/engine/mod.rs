@@ -10,8 +10,10 @@ mod cpu;
 mod display;
 mod firmware;
 mod host;
+mod lights;
 mod phone;
 mod runner;
+mod scenarios;
 
 use std::sync::Mutex;
 
@@ -21,27 +23,14 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use runner::{Message, Runner, Sinks};
 
-/// Scenarios the studio offers. The first is the default.
-const SCENARIOS: [(&str, &str, &str); 2] = [
-    ("ride-20kmh-stop", "Ride to 20 km/h and stop", "Lean to 20 km/h, hold it for 10 s, brake to a stop."),
-    ("balance-60s", "Balance for 60 s", "The rider stands still for 60 s; the wheel stays up and level."),
-];
-
 #[derive(Default)]
 pub struct EngineState(Mutex<Option<Runner>>);
-
-#[derive(Serialize)]
-pub struct ScenarioInfo {
-    id: &'static str,
-    label: &'static str,
-    detail: &'static str,
-}
 
 /// What the web view needs to set up its live client.
 #[derive(Serialize)]
 pub struct EngineInfo {
     backend: &'static str,
-    scenarios: Vec<ScenarioInfo>,
+    scenarios: Vec<scenarios::ScenarioInfo>,
     commands: Vec<phone::CommandSpec>,
     /// `EUC_STUDIO_PERF=<seconds>`: the web view measures its frame times for that long and logs
     /// them (to the terminal through `frontend_log`).
@@ -60,15 +49,17 @@ pub fn engine_connect(
     stream: Channel<InvokeResponseBody>,
     messages: Channel<Message>,
 ) -> Result<EngineInfo, String> {
+    let scenarios = scenarios::infos();
+    let first = scenarios.first().map(|s| s.id.clone()).unwrap_or_default();
     let mut guard = state.0.lock().map_err(|_| "the engine state is poisoned".to_owned())?;
-    let runner = guard
-        .get_or_insert_with(|| Runner::start(Box::new(firmware::build_host), SCENARIOS[0].0.to_owned(), cpu::BACKEND));
+    let runner =
+        guard.get_or_insert_with(|| Runner::start(Box::new(firmware::build_host), first, cpu::backend().name()));
     runner.attach(Sinks { stream, messages });
     // A reloaded web view needs the bodies and a clean slate even though the run goes on.
     runner.announce();
     Ok(EngineInfo {
-        backend: cpu::BACKEND,
-        scenarios: SCENARIOS.iter().map(|&(id, label, detail)| ScenarioInfo { id, label, detail }).collect(),
+        backend: cpu::backend().name(),
+        scenarios,
         commands: phone::catalogue(),
         perf_seconds: std::env::var("EUC_STUDIO_PERF").ok().and_then(|v| v.parse().ok()),
     })
@@ -95,7 +86,7 @@ pub fn engine_set_rtf(state: State<'_, EngineState>, rtf: f64) -> Result<(), Str
 #[tauri::command]
 pub fn engine_restart(state: State<'_, EngineState>, scenario: Option<String>) -> Result<(), String> {
     if let Some(s) = &scenario
-        && !SCENARIOS.iter().any(|(id, ..)| id == s)
+        && !scenarios::infos().iter().any(|i| i.id == *s)
     {
         return Err(format!("unknown scenario \"{s}\""));
     }
@@ -109,6 +100,7 @@ pub fn engine_send(state: State<'_, EngineState>, id: String, value: Option<u8>)
     let bytes = phone::encode(&command)?;
     let shown: String = bytes.iter().map(|&(_, b)| char::from(b)).collect();
     let label = format!("Phone sent {} ({shown})", command.info().name);
-    with_runner(&state, |r| r.send(bytes, label.clone()))?;
+    let answer = command.safety() == euc_proto_begode::Safety::Read;
+    with_runner(&state, |r| r.send(bytes, label.clone(), answer))?;
     Ok(shown)
 }

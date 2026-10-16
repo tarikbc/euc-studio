@@ -30,8 +30,18 @@
 #define ONE_G_COUNTS     0x2000
 #define BOOT_SETTLE_MS   100U
 #define OFFSET_SETTLE_MS 10U
-#define BOOT_BEEP_TICKS  100U
-#define WATCHDOG_MS      250U
+
+/* Stock busy-waits on USART1 while it prints its boot text; compat waits as long, so the 496 Hz tick starts
+ * in step with the stock firmware (quirk BOOT_TEXT_WAIT; neither profile sends the text, quirk DEBUG_PRINTF).
+ */
+#define BOOT_TEXT_BEFORE_LATCH_US 1344U
+#define BOOT_TEXT_AFTER_IMU_US    1730U
+
+#define INIT_CURRENT_READINGS 3U
+#define INIT_READING_GAP_MS   10U
+#define ADC_DATA_TO_RAW       3U
+#define BOOT_BEEP_TICKS       100U
+#define WATCHDOG_MS           250U
 
 #define CALIBRATION_ROUNDS        5U
 #define CALIBRATION_ROUND_POLLS   110U
@@ -43,6 +53,30 @@
 #define CALIBRATION_RELEASE_POLLS 3U
 
 struct app app;
+
+struct euc_current_sample app_current_sample(void)
+{
+    const struct euc_current_sample sample = {(uint16_t)(stm32f1_adc1_injected(1U) >> ADC_DATA_TO_RAW),
+                                              (uint16_t)(stm32f1_adc2_injected(1U) >> ADC_DATA_TO_RAW)};
+    return sample;
+}
+
+/* Stock: three phase-current readings 20 ms apart once the IMU and BMS are set up. They count toward the
+ * start-up sensor check, and their 60 ms set when the 496 Hz tick starts. */
+static void init_current_readings(void)
+{
+    for (uint32_t i = 0U; i < INIT_CURRENT_READINGS; i++) {
+        stm32f1_delay_ms(INIT_READING_GAP_MS);
+        struct euc_current_out phases;
+        euc_current_read(&app.motor.current, &app.motor.config.current, app_current_sample(), &phases);
+        if (phases.start_check_failed) {
+            app.foc_hard_cut_request = true;
+            app.disable_request = true;
+            app.raise_alerts |= EUC_ALERT_CURRENT_SENSOR;
+        }
+        stm32f1_delay_ms(INIT_READING_GAP_MS);
+    }
+}
 
 uint8_t app_hall_lines(void)
 {
@@ -60,6 +94,13 @@ bool app_power_button_pressed(void)
 static void latch(bool on)
 {
     stm32f1_gpio_write(GPIOB, BOARD_PIN_LATCH, on);
+}
+
+static void boot_text_wait(uint32_t us)
+{
+    if (EUC_QUIRK(BOOT_TEXT_WAIT)) {
+        stm32f1_delay_us(us);
+    }
 }
 
 static void board_gpio_init(void)
@@ -120,6 +161,7 @@ static void power_on_hold(uint16_t boot_count)
             latch(false); /* the controller loses power when the rider lets go of the button */
         }
     }
+    boot_text_wait(BOOT_TEXT_BEFORE_LATCH_US);
     latch(true);
 }
 
@@ -236,7 +278,9 @@ static void init(void)
         app.raise_alerts |= EUC_ALERT_IMU_FAULT;
         app.settings.imu_fault = 1U;
     }
+    boot_text_wait(BOOT_TEXT_AFTER_IMU_US);
     stm32f1_bms_init(app.bms_reply, EUC_BMS_REPLY_BYTES);
+    init_current_readings();
 
     if (ld_calibrated_page[0] == ERASED) {
         imu_calibrate();

@@ -8,7 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# The Unicorn CPU backend (GPL-2.0): development and CI only, never in a shipped build.
+unicorn = ["dep:euc-unicorn"]
+
 [dependencies]
+euc-armv7m.workspace = true
 euc-core.workspace = true
 euc-devices.workspace = true
 euc-physics.workspace = true
@@ -17,6 +22,8 @@ euc-profile.workspace = true
 euc-proto-begode.workspace = true
 euc-stm32f1.workspace = true
 euc-telemetry.workspace = true
+euc-unicorn = { workspace = true, optional = true }
+object.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

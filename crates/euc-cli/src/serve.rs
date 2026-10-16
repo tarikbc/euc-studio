@@ -2,20 +2,23 @@
 //! socket, and a small client to check it. The protocol is in `docs/bridge.md` and
 //! `euc_sim::bridge`.
 
-use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
-use euc_physics::{Assist, Intent, Rider};
+use euc_ble_radio::{Action, Control};
+use euc_physics::{Assist, Intent, Rider, Terrain};
 use euc_proto_begode::{Assembler, Segment, Telemetry, decode_text};
 use euc_sim::bridge::{self, ClientMessage, NeverSend, Notifier, NotifyMode, ServerMessage};
 use euc_sim::scenario::{Ride, Scenario};
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use euc_telemetry::EventKind;
 
-use crate::sim::{BACKEND, BLANK, board_with, firmware, injection, load_scenario};
+use crate::ble::{BleArgs, WheelLink};
+use crate::sim::{BLANK, board_with, cpu_factory, firmware, injection, load_scenario};
+use crate::tcp::{Client, address};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
 
@@ -28,6 +31,9 @@ pub(crate) struct ServeArgs {
     /// simulated wheel to the network.
     #[arg(long, default_value = "tcp://127.0.0.1:7720", value_name = "URL")]
     ble_bridge: String,
+    /// CPU backend: `own` (every build) or `unicorn` (development builds with the feature).
+    #[arg(long, default_value = "own", value_name = "own|unicorn")]
+    cpu: euc_sim::cpu::Backend,
     /// Ride this scenario (its rider, aids, BLE commands, faults, speed profile); a client's
     /// `rider` or `push` message takes the rider over.
     #[arg(long, value_name = "FILE")]
@@ -51,6 +57,8 @@ pub(crate) struct ServeArgs {
     /// Stop after this many simulated seconds (default: run until interrupted).
     #[arg(long)]
     seconds: Option<f64>,
+    #[command(flatten)]
+    radio: BleArgs,
 }
 
 /// `euc sim bridge-test`.
@@ -77,60 +85,6 @@ const SAMPLE_HZ: f64 = 200.0;
 /// Wall seconds `bridge-test` keeps trying to connect.
 const CONNECT_WAIT_S: u64 = 20;
 
-fn address(url: &str) -> anyhow::Result<&str> {
-    url.strip_prefix("tcp://").with_context(|| format!("\"{url}\" is not tcp://HOST:PORT"))
-}
-
-/// One connected client: lines in, lines out, never blocking the simulation.
-struct Client {
-    stream: TcpStream,
-    inbox: Vec<u8>,
-    outbox: Vec<u8>,
-}
-
-impl Client {
-    fn send(&mut self, message: &ServerMessage) {
-        if let Ok(line) = serde_json::to_vec(message) {
-            self.outbox.extend_from_slice(&line);
-            self.outbox.push(b'\n');
-        }
-    }
-
-    /// Writes what the socket takes now. `Err` when the client is gone.
-    fn flush(&mut self) -> io::Result<()> {
-        while !self.outbox.is_empty() {
-            match self.stream.write(&self.outbox) {
-                Ok(0) => return Err(ErrorKind::WriteZero.into()),
-                Ok(n) => {
-                    self.outbox.drain(..n);
-                }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(())
-    }
-
-    /// Complete lines received so far. `Err` when the client is gone.
-    fn lines(&mut self) -> io::Result<Vec<String>> {
-        let mut buf = [0u8; 4096];
-        loop {
-            match self.stream.read(&mut buf) {
-                Ok(0) => return Err(ErrorKind::UnexpectedEof.into()),
-                Ok(n) => self.inbox.extend_from_slice(&buf[..n]),
-                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e),
-            }
-        }
-        let mut lines = Vec::new();
-        while let Some(end) = self.inbox.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = self.inbox.drain(..=end).collect();
-            lines.push(String::from_utf8_lossy(&line).trim().to_owned());
-        }
-        Ok(lines)
-    }
-}
-
 /// Who rides: the scenario until a client takes over.
 enum Driver {
     Scenario(Box<Scenario>, Ride),
@@ -141,8 +95,12 @@ enum Driver {
 struct Server {
     session: Session,
     driver: Driver,
-    notifier: Notifier,
+    /// `--notify burst`: the bridge's own grouping. Otherwise the wheel's module model (in
+    /// `wheel`) cuts the notifications, for the radio and the bridge alike.
+    burst: Option<Notifier>,
     guard: NeverSend,
+    /// The wheel's BLE link: the radio with `--ble`, the test controls, the link log.
+    wheel: WheelLink,
     client: Option<Client>,
     hello: ServerMessage,
     hclk: f64,
@@ -155,6 +113,9 @@ struct Server {
 pub(crate) fn serve(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Verdict> {
     if !(args.rate > 0.0 && args.rate.is_finite()) {
         bail!("--rate must be positive");
+    }
+    if args.radio.ble && args.notify == "burst" {
+        bail!("--ble sends the module's 20-byte notifications; leave out --notify burst");
     }
     let mut server = Server::new(ctx, args)?;
     let addr = address(&args.ble_bridge)?;
@@ -170,7 +131,21 @@ pub(crate) fn serve(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Verdict> 
     let sim0 = server.session.time_s();
     loop {
         server.accept(&listener)?;
-        server.read();
+        let mut actions = server.read();
+        actions.extend(server.wheel.poll());
+        for action in actions {
+            match action {
+                Action::Write { characteristic, bytes } => {
+                    if let Some(bytes) = server.wheel.to_uart(characteristic, &bytes) {
+                        server.inject(bytes);
+                    }
+                }
+                Action::Quit => {
+                    ui::row(GOOD, "done", format!("quit at {:.1} s simulated", server.session.time_s()));
+                    return Ok(Verdict::Ok);
+                }
+            }
+        }
         server.advance_to(sim0 + started.elapsed().as_secs_f64() * args.rate);
         server.publish();
         let t = server.session.time_s();
@@ -189,9 +164,7 @@ pub(crate) fn serve(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Verdict> 
 impl Server {
     /// Builds the wheel with a live plant, on its stand at power-on.
     fn new(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Self> {
-        let Some(backend) = BACKEND else {
-            bail!("this euc has no CPU backend; run `cargo run -p euc-cli --features unicorn -- sim serve ...`");
-        };
+        let cpu = cpu_factory(args.cpu)?;
         let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
         let wheel_id = match (&args.wheel, &scenario) {
             (Some(wheel), _) => wheel.clone(),
@@ -228,8 +201,10 @@ impl Server {
             max_quantum: 4000,
             marker_window_s: 4.0,
         };
-        let (rider, assist) = scenario.as_ref().map_or((Rider::default(), Assist::default()), |s| (s.rider, s.assist));
-        let machine = Machine::new_live(&config, &euc_sim::registry(), backend(false), files.live(rider, assist)?)?;
+        let (rider, assist, terrain) = scenario
+            .as_ref()
+            .map_or((Rider::default(), Assist::default(), Terrain::flat()), |s| (s.rider, s.assist, s.terrain.clone()));
+        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu, files.live_on(rider, assist, terrain)?)?;
         let mut session = Session::new(machine, stock.then_some(&files.stockmap), SAMPLE_HZ);
         let driver = match scenario {
             Some(scenario) => {
@@ -249,11 +224,16 @@ impl Server {
             t: 0.0,
         };
         let now = session.time_s();
+        let link = WheelLink::start(ctx, &wheel.id, &args.radio)?;
+        if mode == NotifyMode::Split {
+            link.require_uart_bridge()?;
+        }
         Ok(Self {
             session,
             driver,
-            notifier: Notifier::new(mode, files.hclk()),
+            burst: (mode == NotifyMode::Burst).then(|| Notifier::new(mode, files.hclk())),
             guard: NeverSend::default(),
+            wheel: link,
             client: None,
             hello,
             hclk: files.hclk() as f64,
@@ -274,7 +254,7 @@ impl Server {
                 stream.set_nodelay(true)?;
                 let t = self.session.time_s();
                 ui::row(GOOD, "client", format!("{peer} connected at {t:.2} s"));
-                let mut client = Client { stream, inbox: Vec::new(), outbox: Vec::new() };
+                let mut client = Client::new(stream);
                 let mut hello = self.hello.clone();
                 if let ServerMessage::Hello { t: at, .. } = &mut hello {
                     *at = t;
@@ -293,38 +273,55 @@ impl Server {
         self.client = None;
     }
 
-    /// Handles every complete line the client sent.
-    fn read(&mut self) {
+    /// Handles every complete line the client sent; returns the quit control if one came.
+    fn read(&mut self) -> Vec<Action> {
         let lines = match self.client.as_mut().map(Client::lines) {
             Some(Ok(lines)) => lines,
             Some(Err(_)) => {
                 self.drop_client();
-                return;
+                return Vec::new();
             }
-            None => return,
+            None => return Vec::new(),
         };
+        let mut actions = Vec::new();
         for line in lines.iter().filter(|l| !l.is_empty()) {
-            if let Err(text) = self.handle(line) {
-                let t = self.session.time_s();
-                if let Some(client) = self.client.as_mut() {
-                    client.send(&ServerMessage::Log { t, level: "warn".into(), text });
+            match self.handle(line) {
+                Ok(action) => actions.extend(action),
+                Err(text) => {
+                    let t = self.session.time_s();
+                    if let Some(client) = self.client.as_mut() {
+                        client.send(&ServerMessage::Log { t, level: "warn".into(), text });
+                    }
                 }
             }
         }
+        actions
+    }
+
+    /// Bytes a phone wrote (over the radio or the bridge) go into the firmware's BLE UART.
+    fn inject(&mut self, bytes: &[u8]) {
+        for (command, why) in self.guard.check(bytes) {
+            let text = format!("never-send command \"{command}\" passed through (on a real wheel it {why})");
+            ui::row(WARN, "never-send", &text);
+            self.session.log(EventKind::Command, text);
+        }
+        self.session.machine_mut().inject_ble(bytes);
     }
 
     /// One client message; `Err` says what was wrong with it.
-    fn handle(&mut self, line: &str) -> Result<(), String> {
+    fn handle(&mut self, line: &str) -> Result<Option<Action>, String> {
         let session = &mut self.session;
         match serde_json::from_str::<ClientMessage>(line).map_err(|e| format!("cannot read {line:?}: {e}"))? {
             ClientMessage::Write { hex } => {
                 let bytes = bridge::from_hex(&hex).ok_or_else(|| format!("bad hex: {hex}"))?;
-                for (command, why) in self.guard.check(&bytes) {
-                    let text = format!("never-send command \"{command}\" passed through (on a real wheel it {why})");
-                    ui::row(WARN, "never-send", &text);
-                    session.log(EventKind::Command, text);
+                if !self.wheel.link.tcp_write(&bytes) {
+                    return Err("the wheel's radio is off: write ignored".into());
                 }
-                session.machine_mut().inject_ble(&bytes);
+                self.inject(&bytes);
+            }
+            ClientMessage::Control { command } => {
+                let control = command.parse::<Control>().map_err(|e| e.to_string())?;
+                return Ok(self.wheel.link.control(control));
             }
             ClientMessage::Rider { kmh } if kmh.is_finite() => {
                 self.driver = Driver::Manual { release_s: 0.0 };
@@ -339,7 +336,7 @@ impl Server {
             }
             _ => return Err(format!("out of range: {line}")),
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Runs whole sample periods up to simulated time `target`.
@@ -370,15 +367,25 @@ impl Server {
 
     /// Sends what the firmware said, what happened and the state; drops a client that is gone.
     fn publish(&mut self) {
-        let mut out = Vec::new();
-        for (cycle, byte) in self.session.machine_mut().take_ble_tx() {
-            out.extend(self.notifier.push(cycle, byte));
-        }
-        out.extend(self.notifier.idle(self.session.machine().cycles));
-        let mut messages: Vec<ServerMessage> = out
-            .into_iter()
-            .map(|(cycle, bytes)| ServerMessage::Notify { t: cycle as f64 / self.hclk, hex: bridge::to_hex(&bytes) })
-            .collect();
+        let hclk = self.hclk;
+        let tx = self.session.machine_mut().take_ble_tx();
+        let now = self.session.machine().cycles;
+        // The link sends each notification on the radio; while silent or off, nowhere.
+        let out: Vec<(f64, Vec<u8>)> = match self.burst.as_mut() {
+            Some(notifier) => {
+                let mut out: Vec<(u64, Vec<u8>)> =
+                    tx.into_iter().flat_map(|(cycle, byte)| notifier.push(cycle, byte)).collect();
+                out.extend(notifier.idle(now));
+                let characteristic = self.wheel.link.profile().tx();
+                out.into_iter()
+                    .filter(|(_, bytes)| self.wheel.link.notify(characteristic, bytes))
+                    .map(|(cycle, bytes)| (cycle as f64 / hclk, bytes))
+                    .collect()
+            }
+            None => self.wheel.uart(tx.into_iter().map(|(cycle, byte)| (cycle as f64 / hclk, byte)), now as f64 / hclk),
+        };
+        let mut messages: Vec<ServerMessage> =
+            out.into_iter().map(|(t, bytes)| ServerMessage::Notify { t, hex: bridge::to_hex(&bytes) }).collect();
         for event in self.session.take_events() {
             let warn = matches!(event.kind, EventKind::Cutoff | EventKind::Fault);
             if warn {
