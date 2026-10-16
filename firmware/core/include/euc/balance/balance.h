@@ -17,6 +17,11 @@
  *
  * Units: angles in degrees, speeds as named (cm/s, mm/s, 0.1 m/s, m/s), the motor command in duty units
  * (+-1050 = full modulation; app PWM % = command / 10.5).
+ *
+ * Fail-closed rules (firmware/README.md): in the clean profile a NaN or infinity at the attitude, law,
+ * ramp-down or output stage sets the command to 0, keeps the motor off until power-off and latches
+ * numeric_fault (quirk NAN_FAIL_OPEN). In both profiles the published motor command is always finite and
+ * within the output limit; a non-finite command is published as 0.
  */
 #ifndef EUC_BALANCE_BALANCE_H
 #define EUC_BALANCE_BALANCE_H
@@ -79,6 +84,7 @@ struct euc_balance_state {
     bool motor_disabled; /* soft disable: the command ramps to zero */
     bool fallen;         /* the disable came from the pitch cut-off: automatic recovery allowed */
     bool tipped;         /* a roll cut-off fired */
+    bool numeric_fault;  /* clean: a NaN or infinity stopped the drive; latched until power-off */
 
     /* Error angle, degrees, and the offsets added to it */
     float error_deg;
@@ -115,6 +121,7 @@ struct euc_balance_state {
     float command; /* this tick's command, duty units */
     float command_prev;
     float command_limit; /* soft-start limit: +1 per tick up to 1050 */
+    float motor_command; /* published to the current loop: finite and within +-command_limit */
 };
 
 struct euc_balance_out {
@@ -123,6 +130,7 @@ struct euc_balance_out {
     float roll_deg;
     int16_t speed_cm_per_s;
     bool motor_disabled;
+    bool numeric_fault;      /* latched: for the alarm task and telemetry */
     bool handle_double_beep; /* second handle press: the alarm task plays a double beep */
     uint8_t beep_count;
     uint8_t beep_ticks[EUC_BALANCE_MAX_BEEPS]; /* requested beeps, length in ticks */

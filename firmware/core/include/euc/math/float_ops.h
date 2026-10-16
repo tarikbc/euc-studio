@@ -13,6 +13,7 @@
 #ifndef EUC_MATH_FLOAT_OPS_H
 #define EUC_MATH_FLOAT_OPS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "euc/math/libm.h"
@@ -53,6 +54,12 @@ static inline float euc_f32_flush(float value)
         return euc_f32_from_bits(bits & EUC_F32_SIGN_MASK);
     }
     return value;
+}
+
+/* True for every value except NaN and +-infinity (exponent bits not all ones). */
+static inline bool euc_f32_is_finite(float value)
+{
+    return (euc_f32_bits(value) & EUC_F32_EXPONENT_MASK) != EUC_F32_EXPONENT_MASK;
 }
 
 /* |x| by clearing the sign bit (exact, no rounding). */

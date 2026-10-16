@@ -9,12 +9,15 @@
  * clamped to +-25 m/s). The command is then scaled to a 128.0 V battery: command = u x 1280 / V (0.1 V,
  * clamped 106.0..134.0 V).
  *
- * Output: slew limit 120 per tick, then the soft-start limit (+1 per tick up to 1050), then published.
- * While soft-disabled the law does not run and the command ramps to zero by 2 per tick.
+ * Output: slew limit 120 per tick, then the soft-start limit (+1 per tick up to 1050), then published through
+ * the actuator boundary (finite, within the limit). While soft-disabled the law does not run and the command
+ * ramps to zero by 2 per tick. Clean (NAN_FAIL_OPEN off): a non-finite value at the law, ramp-down or output
+ * stage stops the drive (balance_numeric_fault).
  */
 #include <float.h>
 #include <stdint.h>
 
+#include "balance_internal.h"
 #include "euc/balance/balance.h"
 #include "euc/math/float_ops.h"
 
@@ -100,10 +103,16 @@ void euc_balance_step_law(struct euc_balance_state *state, const struct euc_bala
     }
     const float command = euc_f32_from_f64(u);
     state->command = euc_f32_div(euc_f32_mul(command, LAW_REFERENCE_X10_DV), (float)voltage_dv);
+    if (!EUC_QUIRK(NAN_FAIL_OPEN) && !euc_f32_is_finite(state->command)) {
+        balance_numeric_fault(state);
+    }
 }
 
 void euc_balance_step_ramp_down(struct euc_balance_state *state)
 {
+    if (!EUC_QUIRK(NAN_FAIL_OPEN) && !euc_f32_is_finite(state->command)) {
+        balance_numeric_fault(state);
+    }
     float command = state->command;
     if (command > EUC_BALANCE_COMMAND_LIMIT) {
         command = euc_f32_sub(EUC_BALANCE_COMMAND_LIMIT, COMMAND_RAMP_DOWN_PER_TICK);
@@ -122,8 +131,32 @@ void euc_balance_step_ramp_down(struct euc_balance_state *state)
     state->command = command;
 }
 
+/*
+ * Actuator boundary, both profiles. A deliberate difference from the stock firmware, also in compat: the
+ * command the current loop reads is always finite and within +-limit, and a non-finite command becomes 0.
+ * (Comparisons are false for NaN, so a plain `if (limit < command)` clamp lets a NaN through, and
+ * `if (!(command <= limit)) command = limit` would turn it into full power.) Finite values within the limit,
+ * the only ones the stock code produces in normal operation, pass unchanged, so lock-step is not affected.
+ */
+static float actuator_command(float command, float limit)
+{
+    if (!euc_f32_is_finite(command) || !euc_f32_is_finite(limit) || !(limit >= 0.0F)) {
+        return 0.0F;
+    }
+    if (!(command <= limit)) {
+        return limit;
+    }
+    if (!(command >= -limit)) {
+        return -limit;
+    }
+    return command;
+}
+
 void euc_balance_step_output(struct euc_balance_state *state)
 {
+    if (!EUC_QUIRK(NAN_FAIL_OPEN) && !euc_f32_is_finite(state->command)) {
+        balance_numeric_fault(state);
+    }
     float command = state->command;
     const float previous = state->command_prev;
     if (euc_f32_sub(previous, command) > COMMAND_SLEW_PER_TICK) {
@@ -149,4 +182,5 @@ void euc_balance_step_output(struct euc_balance_state *state)
     }
     state->command = command;
     state->command_prev = command;
+    state->motor_command = actuator_command(command, limit);
 }

@@ -142,9 +142,16 @@ static enum euc_cmd_action_kind w_single_digit_action(enum euc_cmd_w_sub sub)
     }
 }
 
-/* A digit for an armed sub-command. Returns true when the parser used it. */
+/*
+ * A digit for an armed sub-command. Returns true when the parser used it.
+ *
+ * Ride settings over BLE (SETTINGS_WHILE_MOVING): the stock firmware applies the single-digit settings at any
+ * speed, and the BLE link has no pairing, so anyone in range can change them mid-ride. Clean applies them
+ * only below the settings speed limit and answers "stop first" otherwise. The beeper volume ('W' 'B') stays
+ * allowed.
+ */
 static bool w_digit(struct euc_cmd_state *state, enum euc_cmd_w_sub sub, uint8_t digit,
-                    struct euc_cmd_out *out)
+                    bool settings_speed_ok, struct euc_cmd_out *out)
 {
     uint8_t value = 0U;
     if (sub == EUC_CMD_W_Y) {
@@ -165,6 +172,11 @@ static bool w_digit(struct euc_cmd_state *state, enum euc_cmd_w_sub sub, uint8_t
     }
     if (state->wy_digit_count != 0U) {
         return false; /* a WY entry in progress takes the digits */
+    }
+    if ((sub != EUC_CMD_W_B) && !settings_speed_ok && !EUC_QUIRK(SETTINGS_WHILE_MOVING)) {
+        out->reply = EUC_CMD_REPLY_STOP_FIRST;
+        w_finish(state, sub);
+        return true;
     }
     value = digit;
     if ((sub == EUC_CMD_W_M) && (value > WM_MAX_VALUE)) {
@@ -197,7 +209,7 @@ static bool w_parse(struct euc_cmd_state *state, const struct euc_cmd_in *in, ui
             w_arm(state, sub);
             used = true;
         } else if (is_digit(byte) && state->w_armed[sub]) {
-            used = w_digit(state, sub, (uint8_t)(byte - (uint8_t)'0'), out) || used;
+            used = w_digit(state, sub, (uint8_t)(byte - (uint8_t)'0'), settings_speed_ok, out) || used;
         } else {
             /* not for this sub-command */
         }
@@ -233,8 +245,15 @@ static void sequences_parse(struct euc_cmd_state *state, const struct euc_cmd_in
 
 /* Single-byte actions applied at once ------------------------------------------------------------------ */
 
-static void direct_action(uint8_t byte, struct euc_cmd_out *out)
+static void direct_action(const struct euc_cmd_in *in, uint8_t byte, struct euc_cmd_out *out)
 {
+    const bool ride_setting = (byte == (uint8_t)'>') || (byte == (uint8_t)'=') || (byte == (uint8_t)'<') ||
+                              (byte == (uint8_t)'e') || (byte == (uint8_t)'x');
+    if (ride_setting && !EUC_QUIRK(SETTINGS_WHILE_MOVING) &&
+        !speed_at_most(in, SETTINGS_SPEED_LIMIT_CM_PER_S)) {
+        out->reply = EUC_CMD_REPLY_STOP_FIRST; /* clean: roll cut-off and PWM tiltback only at standstill */
+        return;
+    }
     switch (byte) {
     case (uint8_t)'E':
         out_add_action(out, EUC_CMD_LIGHTS, 0U);
@@ -408,7 +427,7 @@ void euc_cmd_receive_byte(struct euc_cmd_state *state, const struct euc_cmd_in *
         state->telemetry_holdoff_groups = TELEMETRY_HOLDOFF_GROUPS;
     }
 
-    direct_action(byte, out);
+    direct_action(in, byte, out);
 }
 
 void euc_cmd_tick(struct euc_cmd_state *state, const struct euc_cmd_in *in, struct euc_cmd_out *out)

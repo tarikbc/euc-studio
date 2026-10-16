@@ -21,6 +21,10 @@ Facts without a tag are confirmed.
 > **Safety.** Three two-byte sequences stop the motor and change the wheel: `+` `-`, `c` `y` and `!` `@`
 > (see [Safety classes](#safety-classes)). An app must never send them, and a rider must never be on the wheel
 > when they are sent. EUC Studio's BLE layer refuses to send these bytes at all.
+>
+> **No authentication.** The BLE module accepts any central without pairing, and the firmware trusts every
+> byte. Anyone in radio range can send commands, also while someone rides. The stock firmware applies several
+> ride settings at any speed (see [Safety classes](#safety-classes)); our clean profile does not.
 
 ## Link
 
@@ -216,9 +220,9 @@ the wheel has stood still long enough) (**inferred** for the waiting).
 | `i` | speed alarms: level 2 off (mode 2) | speed-alarm | tick | text: "level 2 speed alarm off" |
 | `I` | speed alarms: level 3 off (mode 3) — hidden | speed-alarm | tick | text: "level 3 speed alarm off" |
 | `o` `u` `i` while moving | no change | | tick | text: "stop the wheel first" (`I`: no reply) |
-| `>` / `=` / `<` | roll cut-off angle 50° / 58° / 66° (mode 0 / 1 / 2) | none | at once | |
+| `>` / `=` / `<` | roll cut-off angle 50° / 58° / 66° (mode 0 / 1 / 2) | none (stock) | at once | |
 | `g` / `m` | units km / miles | none | at once | |
-| `e` / `x` | PWM tiltback on / off — hidden | none | at once | |
+| `e` / `x` | PWM tiltback on / off — hidden | none (stock) | at once | |
 | `"` | tiltback off (speed 200) | settings; waits while moving | tick | |
 | `V` | firmware banner | | group time | `GW1825020` (9 bytes, no line end) |
 | `N` | model name | | group time | `NAME:EXTREME` CR LF |
@@ -242,11 +246,11 @@ PWM tiltback (`e`): when the motor command exceeds about 0.95 × the `W P` thres
 | `W` `Y` d d | tiltback speed, km/h | 00..99, no clamp | settings, on every byte | applies on the second digit; `b` after it is only a beep |
 | `W` `P` d d | PWM alarm threshold, % — hidden | clamped to 50..90 | settings | |
 | `W` `B` d | beeper volume | 0..9 | none | 0 gives full volume (a vendor quirk) |
-| `W` `M` d | unknown setting | 0 or 1; other digits store 0 | none | also toggled by every third light-button press |
-| `W` `R` d | turn compensation gain — hidden | 0..9 | none | removes centripetal acceleration from the tilt estimate; default 3 |
-| `W` `U` d | pedal angle trim — hidden | 0..9 | none | (d − 4) × 1.2 slewed into the balance angle (**inferred**) |
-| `W` `C` d | stored, saved and echoed in frame `07` — hidden | 0..9 | none | no effect in this build; beeps |
-| `W` `X` d | angle limit 40 + 5·d degrees — hidden | 0..9 | none | beeps (**inferred** meaning) |
+| `W` `M` d | unknown setting | 0 or 1; other digits store 0 | none (stock) | also toggled by every third light-button press |
+| `W` `R` d | turn compensation gain — hidden | 0..9 | none (stock) | removes centripetal acceleration from the tilt estimate; default 3 |
+| `W` `U` d | pedal angle trim — hidden | 0..9 | none (stock) | (d − 4) × 1.2 slewed into the balance angle (**inferred**) |
+| `W` `C` d | stored, saved and echoed in frame `07` — hidden | 0..9 | none (stock) | no effect in this build; beeps |
+| `W` `X` d | angle limit 40 + 5·d degrees — hidden | 0..9 | none (stock) | beeps (**inferred** meaning) |
 
 How the stock parser reads them (**inferred** in detail):
 
@@ -280,13 +284,20 @@ Rules:
 | Class | Bytes | Rule for apps |
 |---|---|---|
 | read | `V`, `N` | safe; send alone, wait 1 s for the reply |
-| comfort | `b`, `Q`, `E`, `T`, `g`, `m`, `W` `B`, `W` `M` | safe while riding |
-| ride setting | `h` `f` `s`, `o` `u` `i` `I`, `<` `=` `>`, `e` `x`, `"`, `W` `Y`, `W` `P`, `W` `R`, `W` `U`, `W` `C`, `W` `X` | change how the wheel behaves; send at standstill only, and confirm with the frames |
+| comfort | `b`, `Q`, `E`, `T`, `g`, `m`, `W` `B` | safe while riding |
+| ride setting | `h` `f` `s`, `o` `u` `i` `I`, `<` `=` `>`, `e` `x`, `"`, `W` `Y`, `W` `P`, `W` `R`, `W` `U`, `W` `C`, `W` `X`, `W` `M` | change how the wheel behaves; send at standstill only, and confirm with the frames |
 | debug | `k` | hidden; prints text that interrupts telemetry; not for apps |
 | **never send** | `+` `-`, `c` `y`, `!` `@` | stop the motor; `+` `-` also powers off; `!` `@` leaves the wheel in its bootloader. Only a dedicated, gated tool (EUC Studio's flasher) may send `!` `@`, never with a rider on board |
 
 App guidance: one byte per BLE write, at least 20 ms apart; at least 200 ms around service bytes; expect a
 0.6 s telemetry gap after every byte.
+
+**Ride settings while moving (stock weakness).** The stock firmware checks the speed for `h` `f` `s`,
+`o` `u` `i` `I`, `"`, `W` `Y` and `W` `P` only. It applies the roll cut-off modes (`<` `=` `>`), PWM tiltback
+(`e` `x`) and `W` `R`, `W` `U`, `W` `X`, `W` `C`, `W` `M` at any speed. Together with the missing BLE
+authentication, anyone in range can change the roll cut-off, the turn compensation or the pedal angle under a
+moving rider. Our clean profile applies every ride setting only below 0.5 m/s and answers "stop first"
+otherwise (quirk `SETTINGS_WHILE_MOVING`). `W` `M` is gated too because its meaning is unknown.
 
 ### Text replies
 
@@ -339,6 +350,7 @@ changes only these behaviours (`firmware/docs/quirks.md`):
 | `TLM_HOLDOFF` | each byte pauses telemetry for two groups; a text reply replaces a group | no pause; the reply goes out before the group |
 | `W_ARM_STICKY` | `W` arms every sub-command until each completes | strict: `W`, one letter, its digits; any other byte ends the sequence |
 | `DEFERRED_TILTBACK_OFF` | `"` while moving waits and applies when the wheel slows | `"` while moving is dropped |
+| `SETTINGS_WHILE_MOVING` | `<` `=` `>`, `e` `x`, `W` `R` / `U` / `X` / `C` / `M` apply at any speed | applied only below 0.5 m/s, otherwise "stop first" |
 
 In clean, a speed-alarm command that arrives before the wheel has stood still for 0.2 s gets the "stop first"
 reply instead of waiting.

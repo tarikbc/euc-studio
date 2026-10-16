@@ -15,7 +15,7 @@
  * two-byte service sequences |v| <= 9.
  *
  * Compat behaviours (config/quirks.def): CMD_LAST_BYTE_WINS, TLM_HOLDOFF, W_ARM_STICKY,
- * DEFERRED_TILTBACK_OFF.
+ * DEFERRED_TILTBACK_OFF, SETTINGS_WHILE_MOVING.
  */
 #ifndef EUC_PROTOCOL_COMMANDS_H
 #define EUC_PROTOCOL_COMMANDS_H
@@ -59,7 +59,7 @@ enum euc_cmd_reply {
     EUC_CMD_REPLY_LEVEL1_ALARM_OFF, /* 'u' accepted */
     EUC_CMD_REPLY_LEVEL2_ALARM_OFF, /* 'i' accepted */
     EUC_CMD_REPLY_LEVEL3_ALARM_OFF, /* 'I' accepted */
-    EUC_CMD_REPLY_STOP_FIRST,       /* 'o', 'u' or 'i' refused while moving */
+    EUC_CMD_REPLY_STOP_FIRST,       /* a setting refused while moving */
     EUC_CMD_REPLY_DEBUG_DUMP        /* second 'k': IMU and angle debug text */
 };
 

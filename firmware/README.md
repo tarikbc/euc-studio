@@ -91,6 +91,24 @@ if (EUC_QUIRK(ASIN_ACCEL)) { /* stock behaviour */ } else { /* clean behaviour *
 Neither profile changes telemetry frame bytes, command letters, the `!@` update entry, the flash map or
 USART1. After editing the list, run `cmake --build --preset <any> --target quirks-doc`.
 
+## Fail-closed rules
+
+Lock-step fidelity never outranks a safe actuator. The balance task follows these rules
+(`tests/unit/test_failsafe.c` injects NaN and infinity at every stage):
+
+- **Actuator boundary, both profiles.** The motor command the current loop reads (`motor_command`) is always
+  finite and within the soft-start limit; a NaN or infinity is published as 0. This is a deliberate difference
+  from the stock firmware, also in compat. Finite commands pass unchanged, so normal-path lock-step stays
+  bit-exact; the lock-step harness reports NaN events separately instead of comparing them.
+- **Clean profile (quirk `NAN_FAIL_OPEN` off).** A NaN or infinity in the attitude filter, the law, the
+  ramp-down or the output stage sets the command to 0 at once, resets the attitude filter, keeps the motor off
+  until power-off (no automatic recovery) and latches `numeric_fault` for the alarm task and telemetry. The
+  pitch sine is clamped to ±1 before `asin`.
+- **Clamps.** NaN compares false, so `if (limit < x) x = limit` lets a NaN through and
+  `if (!(x <= limit)) x = limit` turns it into full power. Check finiteness first, then clamp.
+- **Ride settings over BLE.** Clean applies settings that change riding behaviour only at standstill
+  (quirk `SETTINGS_WHILE_MOVING`); the stock BLE link has no authentication.
+
 ## Size budget
 
 After each target link, `tools/size_report.py` reads the map file, charges every input section to its

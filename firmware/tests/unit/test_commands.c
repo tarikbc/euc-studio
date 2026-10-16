@@ -154,6 +154,22 @@ static const struct script_case cases[] = {
     {"units", COMPAT, "m g", "units=1 units=0"},
     {"pwm tiltback", COMPAT, "speed:900 e x", "pwm_tiltback=1 pwm_tiltback=0"},
 
+    /* Ride settings while moving (SETTINGS_WHILE_MOVING): stock applies them, clean only at standstill */
+    {"roll mode while moving", COMPAT, "speed:300 >", "roll_cutoff_mode=0"},
+    {"roll modes refused while moving", CLEAN, "speed:300 > = <",
+     "reply=stop_first reply=stop_first reply=stop_first"},
+    {"roll mode at the speed limit", CLEAN, "speed:-49 <", "roll_cutoff_mode=2"},
+    {"pwm tiltback refused while moving", CLEAN, "speed:50 e x", "reply=stop_first reply=stop_first"},
+    {"pwm tiltback at standstill", CLEAN, "e x", "pwm_tiltback=1 pwm_tiltback=0"},
+    {"W settings while moving", COMPAT, "speed:300 W R 3 W U 5 W X 2 W C 1 W M 1",
+     "turn_compensation=3 pedal_trim=5 roll_limit_step=2 wc=1 wm=1"},
+    {"W settings refused while moving", CLEAN, "speed:300 W R 3 W U 5 W X 2 W C 1 W M 1",
+     "reply=stop_first reply=stop_first reply=stop_first reply=stop_first reply=stop_first"},
+    {"W settings at standstill", CLEAN, "W R 3 W U 5 W X 2 W C 1 W M 1",
+     "turn_compensation=3 pedal_trim=5 roll_limit_step=2 wc=1 wm=1"},
+    {"volume, lights, units and horn while moving", CLEAN, "speed:900 W B 4 Q g b tick:1",
+     "beeper_volume=4 lights=1 units=0 horn=0"},
+
     /* Pending commands, handled at the next tick */
     {"horn", COMPAT, "b tick:1", "horn=0"},
     {"horn while moving", COMPAT, "speed:900 b tick:1", "horn=0"},

@@ -164,6 +164,9 @@ static void running_tick(struct euc_balance_state *state, const struct euc_balan
 {
     struct euc_attitude_out attitude_out;
     euc_attitude_update(&state->attitude, attitude_in, &attitude_out);
+    if (!attitude_out.valid) {
+        balance_numeric_fault(state); /* clean only: the attitude filter has been reset */
+    }
     state->error_deg = attitude_out.pitch_deg;
 
     euc_balance_step_tiltbacks(state, in);
@@ -216,9 +219,10 @@ void euc_balance_tick(struct euc_balance_state *state, const struct euc_balance_
         state->motor_disabled = true;
     }
 
-    out->motor_command = state->command;
+    out->motor_command = state->motor_command;
     out->pitch_deg = state->attitude.pitch_deg;
     out->roll_deg = state->attitude.roll_deg;
     out->speed_cm_per_s = state->speed_cm_per_s;
     out->motor_disabled = state->motor_disabled;
+    out->numeric_fault = state->numeric_fault;
 }

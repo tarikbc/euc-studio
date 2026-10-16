@@ -46,6 +46,8 @@ EUC_QUIRK_DEF(WC_DEAD, 1, 1, "0x080086A8 cmd_WC_digit",
               "'W' 'C' d is stored, saved and echoed in frame 07, but nothing uses it; clean keeps it.")
 EUC_QUIRK_DEF(DEBUG_PRINTF, 0, 0, "printf on USART1 (boot, speed-alarm replies, k dump)",
               "Stock prints GBK debug text between the frames; our firmware sends none, in both profiles.")
+EUC_QUIRK_DEF(SETTINGS_WHILE_MOVING, 1, 0, "0x08009A94 usart1_isr_body, W command parsers",
+              "Roll modes, 'e'/'x' and W R/U/X/C/M apply at any speed, from any unpaired BLE client.")
 EUC_QUIRK_DEF(DEFERRED_TILTBACK_OFF, 1, 0, "0x08007498 cmd_tiltback_off",
               "'\"' sent while moving stays pending and turns tiltback off later, when the wheel slows.")
 
@@ -54,6 +56,8 @@ EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 0, "0x08007C04 phase current check",
               "Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off.")
 EUC_QUIRK_DEF(PHASE_SAT_SWAPPED, 1, 0, "0x08007B4C phase current read",
               "Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale).")
+EUC_QUIRK_DEF(NAN_FAIL_OPEN, 1, 0, "0x0800678C balance task, 0x08006B24 output limit",
+              "A NaN or infinity passes the float clamps of the balance task (NaN compares false).")
 
 /* Alarms and user interface */
 EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",

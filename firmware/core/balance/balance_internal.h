@@ -21,6 +21,19 @@ static inline float balance_fade_offset(float offset_deg)
     return 0.0F;
 }
 
+/*
+ * Clean profile (NAN_FAIL_OPEN off): a NaN or infinity stops the drive. Command 0 at once, motor off until
+ * power-off (no automatic recovery), fault latched for the alarm task and telemetry.
+ */
+static inline void balance_numeric_fault(struct euc_balance_state *state)
+{
+    state->command = 0.0F;
+    state->command_prev = 0.0F;
+    state->motor_disabled = true;
+    state->fallen = false;
+    state->numeric_fault = true;
+}
+
 static inline void balance_request_beep(struct euc_balance_out *out, uint8_t ticks)
 {
     if (out->beep_count < EUC_BALANCE_MAX_BEEPS) {

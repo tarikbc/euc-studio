@@ -63,6 +63,37 @@ void euc_attitude_init(struct euc_attitude_state *state)
     state->pitch_rate_alpha = RATE_ALPHA_SLOW;
 }
 
+/* True when every float the filter carries to the next tick is finite. */
+static bool filter_finite(const struct euc_attitude_state *state)
+{
+    const float values[] = {state->quaternion[0], state->quaternion[1],    state->quaternion[2],
+                            state->quaternion[3], state->accel_x_lpf,      state->accel_y_lpf,
+                            state->accel_z_lpf,   state->pitch_rate_alpha, state->pitch_rate_lpf_rad_per_s,
+                            state->pitch_deg,     state->roll_deg};
+    for (size_t index = 0U; index < (sizeof(values) / sizeof(values[0])); index++) {
+        if (!euc_f32_is_finite(values[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Clean: back to the power-on filter, keeping the accelerometer-only tilt and the free-fall detector. */
+static void filter_reset(struct euc_attitude_state *state)
+{
+    state->quaternion[0] = 1.0F;
+    state->quaternion[1] = 0.0F;
+    state->quaternion[2] = 0.0F;
+    state->quaternion[3] = 0.0F;
+    state->accel_x_lpf = 0.0F;
+    state->accel_y_lpf = 0.0F;
+    state->accel_z_lpf = 0.0F;
+    state->pitch_rate_alpha = RATE_ALPHA_SLOW;
+    state->pitch_rate_lpf_rad_per_s = 0.0F;
+    state->pitch_deg = 0.0F;
+    state->roll_deg = 0.0F;
+}
+
 int16_t euc_imu_correct(int16_t raw, int16_t offset)
 {
     const int32_t corrected = (int32_t)raw - (int32_t)offset;
@@ -289,14 +320,28 @@ void euc_attitude_update(struct euc_attitude_state *state, const struct euc_atti
     /* pitch = asin(2 (q0 q2 - q1 q3)), roll = atan2(2 (q2 q3 + q0 q1), 1 - 2 (q1^2 + q2^2)), in degrees */
     const float twice_q0 = euc_f32_mul(q[0], 2.0F);
     const float twice_q2 = euc_f32_mul(q[2], 2.0F);
-    const float pitch_sine =
-        euc_f32_add(euc_f32_mul(euc_f32_mul(q[1], -2.0F), q[3]), euc_f32_mul(twice_q0, q[2]));
+    float pitch_sine = euc_f32_add(euc_f32_mul(euc_f32_mul(q[1], -2.0F), q[3]), euc_f32_mul(twice_q0, q[2]));
+    if (!EUC_QUIRK(NAN_FAIL_OPEN)) {
+        /* Rounding can push the sine just past +-1, where asin is NaN. The stock code does not clamp. */
+        if (pitch_sine > 1.0F) {
+            pitch_sine = 1.0F;
+        } else if (pitch_sine < -1.0F) {
+            pitch_sine = -1.0F;
+        } else {
+            /* in range (or NaN, caught below) */
+        }
+    }
     state->pitch_deg = euc_f32_from_f64(euc_asin((double)pitch_sine) * RADIANS_TO_DEGREES);
     const float roll_cos = euc_f32_add(
         euc_f32_sub(euc_f32_mul(euc_f32_mul(q[1], -2.0F), q[1]), euc_f32_mul(twice_q2, q[2])), 1.0F);
     const float roll_sin = euc_f32_add(euc_f32_mul(twice_q2, q[3]), euc_f32_mul(twice_q0, q[1]));
     state->roll_deg = euc_f32_from_f64(euc_atan2((double)roll_sin, (double)roll_cos) * RADIANS_TO_DEGREES);
 
+    out->valid = true;
+    if (!EUC_QUIRK(NAN_FAIL_OPEN) && !filter_finite(state)) {
+        filter_reset(state);
+        out->valid = false;
+    }
     out->pitch_deg = state->pitch_deg;
     out->roll_deg = state->roll_deg;
     out->pitch_rate_rad_per_s = state->pitch_rate_lpf_rad_per_s;

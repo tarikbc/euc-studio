@@ -9,7 +9,8 @@
  *
  * The filter follows the stock firmware step for step (float or double per step, rounding through
  * euc/math/float_ops.h). Compat behaviours (config/quirks.def): ASIN_ACCEL, SEQ_QUAT_UPDATE, FAST_INV_SQRT,
- * KEIL_FTZ, DT_500HZ.
+ * KEIL_FTZ, DT_500HZ, NAN_FAIL_OPEN. In the clean profile a NaN or infinity anywhere in the filter resets it
+ * and reports out.valid = false.
  *
  * Axes are the sensor's; pitch is rotation about +y and roll about +x. How the board is mounted in the wheel
  * is not known yet; with x forward, positive pitch is nose down (inferred).
@@ -56,6 +57,7 @@ struct euc_attitude_out {
     float pitch_deg;
     float roll_deg;
     float pitch_rate_rad_per_s;
+    bool valid; /* false: a non-finite value appeared and the filter was reset (clean, NAN_FAIL_OPEN off) */
 };
 
 /* Power-on state: level quaternion, pitch-rate filter at its low-speed setting. */

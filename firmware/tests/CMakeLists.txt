@@ -54,3 +54,7 @@ euc_add_unit_test(test_attitude
 euc_add_unit_test(test_balance
     SOURCES unit/test_balance.c
     LIBRARIES euc_port_sim)
+
+euc_add_unit_test(test_failsafe
+    SOURCES unit/test_failsafe.c
+    LIBRARIES euc_port_sim)
