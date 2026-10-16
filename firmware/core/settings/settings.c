@@ -27,6 +27,17 @@
 #define DEFAULT_PWM_ALARM_PERCENT 80U
 #define MAX_DIGIT_SETTING         9U
 #define MAX_WM_VALUE              1U
+
+/* Clean range check on load (RECORD_FIELDS_UNCHECKED). */
+#define MAX_PEDAL_MODE            2U
+#define DEFAULT_PEDAL_MODE        1U
+#define MAX_SPEED_ALARM_MODE      3U
+#define MAX_TILTBACK_KMH          99U  /* 'W' 'Y' d d */
+#define TILTBACK_OFF_KMH          200U /* '"' */
+#define MAX_ROLL_CUTOFF_MODE      2U
+#define MAX_FLAG                  1U
+#define LOCK_UNLOCKED             1U
+#define MAX_PWM_ALARM_PERCENT     99U     /* 'W' 'P' d d */
 #define DEFAULT_PEDAL_MODE_RECORD 0x1000U /* pedal mode 1 (medium) */
 #define DEFAULT_TURN_COMP_RECORD  0x0300U /* 'W' 'R' 3 */
 #define DEFAULT_VOLUME_RECORD     0x0006U /* 'W' 'B' 6 */
@@ -114,6 +125,50 @@ static uint8_t high_byte(uint16_t word)
     return (uint8_t)(word >> 8U);
 }
 
+/* Clean: a field outside the values the commands can set takes its default, so a stock record, the backup
+ * registers or a damaged slot cannot bring in, for example, a slow roll cut-off at 115 deg. */
+static void check_ranges(struct euc_settings *settings)
+{
+    if (settings->pedal_mode > MAX_PEDAL_MODE) {
+        settings->pedal_mode = DEFAULT_PEDAL_MODE;
+    }
+    if (settings->speed_alarm_mode > MAX_SPEED_ALARM_MODE) {
+        settings->speed_alarm_mode = 0U;
+    }
+    if ((settings->tiltback_speed_kmh > MAX_TILTBACK_KMH) &&
+        (settings->tiltback_speed_kmh != TILTBACK_OFF_KMH)) {
+        settings->tiltback_speed_kmh = DEFAULT_TILTBACK_KMH;
+    }
+    if (settings->roll_limit_step > MAX_DIGIT_SETTING) {
+        settings->roll_limit_step = 0U;
+    }
+    if (settings->wc_value > MAX_DIGIT_SETTING) {
+        settings->wc_value = 0U;
+    }
+    if (settings->roll_cutoff_mode > MAX_ROLL_CUTOFF_MODE) {
+        settings->roll_cutoff_mode = 0U;
+    }
+    if (settings->pwm_tiltback > MAX_FLAG) {
+        settings->pwm_tiltback = 0U;
+    }
+    if (settings->drive_mode > MAX_FLAG) {
+        settings->drive_mode = 0U; /* the stock default; never guess a drive mode (SAFETY.md rule 6) */
+    }
+    if ((settings->lock_state != 0U) && (settings->lock_state != LOCK_UNLOCKED) &&
+        (settings->lock_state != EUC_SETTINGS_LOCKED)) {
+        settings->lock_state = 0U;
+    }
+    if (settings->imu_fault > MAX_FLAG) {
+        settings->imu_fault = 0U;
+    }
+    if (settings->units_miles > MAX_FLAG) {
+        settings->units_miles = 0U;
+    }
+    if (settings->pwm_alarm_percent > MAX_PWM_ALARM_PERCENT) {
+        settings->pwm_alarm_percent = DEFAULT_PWM_ALARM_PERCENT;
+    }
+}
+
 void euc_settings_unpack(const uint16_t record[EUC_SETTINGS_RECORD_HALFWORDS], struct euc_settings *settings)
 {
     settings->odometer_low = record[0];
@@ -157,6 +212,9 @@ void euc_settings_unpack(const uint16_t record[EUC_SETTINGS_RECORD_HALFWORDS], s
     }
     if (settings->beeper_volume > MAX_DIGIT_SETTING) {
         settings->beeper_volume = MAX_DIGIT_SETTING;
+    }
+    if (!EUC_QUIRK(RECORD_FIELDS_UNCHECKED)) {
+        check_ranges(settings);
     }
 }
 

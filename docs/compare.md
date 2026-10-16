@@ -12,7 +12,10 @@ cargo run --release -p euc-cli --features unicorn -- sim compare \
 ```
 
 `--a` and `--b` take `stock` (the pinned official build, fetched if needed), `compat` or `clean` (our
-builds in `firmware/build/target-*/`, found in the current folder or above it), or a `.bin` file.
+builds in `firmware/build/target-*/`, found in the current folder or above it), a `.bin` file (its
+`.elf` next to it names our variables), or an `.elf` file (flattened at its load address; its symbol
+table names our variables). `euc sim run --firmware` and `euc sim serve --firmware` take the same, so
+scenario checks that read firmware variables work on our builds too.
 `--settings` overrides the scenario's preset for both runs. `--json` prints the report as JSON; `--out`
 writes the same JSON to a file and still prints the table.
 

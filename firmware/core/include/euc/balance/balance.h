@@ -33,7 +33,7 @@
 
 #define EUC_BALANCE_COMMAND_LIMIT  1050.0F /* duty units: full modulation */
 #define EUC_BALANCE_MAX_BEEPS      3U
-#define EUC_BALANCE_LIMP_SPEED_KMH 10U /* speed tiltback with a lost hall line */
+#define EUC_BALANCE_LIMP_SPEED_KMH 10U /* speed tiltback in limp mode */
 
 /* Rider settings the balance reads every tick (from the settings store and the BLE commands). */
 struct euc_balance_settings {
@@ -64,8 +64,8 @@ struct euc_balance_in {
     bool pwm_alarm_active;           /* alarm task: PWM above the 'W' 'P' threshold */
     bool hard_inhibit;               /* hard fault or lock: no automatic recovery */
     bool hall_fault;                 /* hall sensor fault: no automatic recovery */
-    bool hall_degraded;   /* one hall line lost (clean check): speed tiltback at the limp speed at most, no
-                           * automatic recovery */
+    bool limp;            /* clean, degraded drive (lost hall line, stalled main loop): speed tiltback at
+                           * the limp speed at most, no automatic recovery */
     bool disable_request; /* soft disable from commands or faults; takes effect after this tick */
 };
 

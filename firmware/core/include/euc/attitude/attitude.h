@@ -1,5 +1,6 @@
 /*
- * Attitude estimation from the MPU6500 (accelerometer +-4 g, gyro +-500 deg/s), once per RTC tick.
+ * Attitude estimation from the MPU6500 (accelerometer +-4 g, gyro +-500 deg/s in compat, +-2000 deg/s in
+ * clean), once per RTC tick.
  *
  * Three parts, in the order the balance task calls them:
  *   euc_imu_correct()           calibration offset, saturating, per raw sample
@@ -12,6 +13,16 @@
  * KEIL_FTZ, DT_500HZ, NAN_FAIL_OPEN. In the clean profile a NaN or infinity anywhere in the filter resets it
  * and reports out.valid = false.
  *
+ * Gyro range (quirk GYRO_500DPS_CLIP). The stock firmware sets +-500 deg/s; a pothole edge can turn the shell
+ * faster, the gyro then clips and the filter loses the excess: it can believe the wheel is level while it is
+ * 24 deg nose down, and the accelerometer correction (0.2..0.6 rad/s per rad) takes seconds to find out.
+ * Clean sets +-2000 deg/s (16.4 counts per deg/s): a count is 0.061 deg/s instead of 0.015, which the balance
+ * law does not see (its D term is filtered and the filter's bias error stays below 0.1 deg). Calibration
+ * offsets stay in +-500 deg/s counts on flash, so either firmware reads the other's page
+ * (euc_imu_gyro_offset_from_page / _to_page). If a gyro axis still reaches its rail, clean re-anchors once
+ * the rail is left: when the accelerometer reads 1 g within 15 %, it re-seeds the low-passed accelerometer
+ * and raises the correction gain 10 x (at most 3 rad/s per rad) for 1 s.
+ *
  * Axes are the sensor's; pitch is rotation about +y and roll about +x. How the board is mounted in the wheel
  * is not known yet; with x forward, positive pitch is nose down (inferred).
  */
@@ -21,18 +32,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define EUC_IMU_ACCEL_COUNTS_PER_G 8192 /* MPU6500 at +-4 g */
+#define EUC_IMU_ACCEL_COUNTS_PER_G 8192  /* MPU6500 at +-4 g */
+#define EUC_IMU_GYRO_DPS_500       0x08U /* GYRO_CONFIG values */
+#define EUC_IMU_GYRO_DPS_2000      0x18U
 #define EUC_IMU_AXES               3U
 
 struct euc_attitude_in {
     int16_t accel[EUC_IMU_AXES]; /* offset-corrected, 8192 counts per g */
-    int16_t gyro[EUC_IMU_AXES];  /* offset-corrected, 65.5 counts per deg/s */
+    int16_t gyro[EUC_IMU_AXES];  /* offset-corrected; 65.5 counts per deg/s (compat), 16.4 (clean) */
     float accel_gain;            /* Mahony gain on the accelerometer error (from the pedal mode) */
     uint8_t turn_compensation;   /* 'W' 'R' d, 0..9: share of centripetal acceleration removed */
     int16_t speed_dm_per_s;      /* wheel speed, 0.1 m/s */
     int16_t speed_mm_per_s;      /* wheel speed, mm/s; above 15 km/h the pitch-rate filter opens up */
     bool motor_disabled;         /* soft disable: the free-fall gravity override stops */
     bool hard_inhibit;           /* hard fault or lock: same */
+    bool gyro_at_rail;           /* a raw gyro axis reads its limit this tick (clean re-anchors afterwards) */
 };
 
 struct euc_attitude_state {
@@ -51,6 +65,9 @@ struct euc_attitude_state {
     bool low_g_seen;
     bool free_fall;           /* while set, z reads 1 g so the filter keeps its gravity reference */
     uint16_t last_jump_ticks; /* length of the last free fall (stock debug value "L9") */
+    /* Clean: after the gyro left its rail */
+    bool reanchor_pending;   /* waiting for a 1 g accelerometer reading to re-seed the low-passes */
+    uint16_t reanchor_ticks; /* ticks left with the raised correction gain */
 };
 
 struct euc_attitude_out {
@@ -62,6 +79,14 @@ struct euc_attitude_out {
 
 /* Power-on state: level quaternion, pitch-rate filter at its low-speed setting. */
 void euc_attitude_init(struct euc_attitude_state *state);
+
+/* GYRO_CONFIG value for this profile: +-500 deg/s (compat) or +-2000 deg/s (clean). */
+uint8_t euc_imu_gyro_config(void);
+
+/* Gyro calibration offsets: flash keeps +-500 deg/s counts; these convert to and from this profile's range.
+ */
+int16_t euc_imu_gyro_offset_from_page(int16_t stored);
+int16_t euc_imu_gyro_offset_to_page(int16_t offset);
 
 /* raw - offset, saturated to +-32767. */
 int16_t euc_imu_correct(int16_t raw, int16_t offset);

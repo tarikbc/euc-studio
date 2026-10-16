@@ -269,7 +269,10 @@ impl Side {
         // SAFETY: both buffers are boxed, live next to the CPU in this struct, and are only
         // written between runs.
         let cpu: Box<dyn Cpu> = if unicorn {
-            Box::new(unsafe { UnicornCpu::with_quantum(&regions, Quantum::Exact) }.unwrap())
+            let mut cpu = unsafe { UnicornCpu::with_quantum(&regions, Quantum::Exact) }.unwrap();
+            // Random code can loop inside an IT block, where Unicorn never stops.
+            cpu.set_timeout(Some(std::time::Duration::from_secs(2)));
+            Box::new(cpu)
         } else {
             Box::new(unsafe { Armv7m::new(&regions) }.unwrap())
         };

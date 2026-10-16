@@ -100,6 +100,7 @@ struct Ids {
     accel: usize,
     gyro: usize,
     stand: usize,
+    on_pedals: usize,
 }
 
 /// The shell's attitude and motion, from the free joint.
@@ -127,6 +128,8 @@ pub struct Physics {
     motor_torque: f64,
     ankle_torque: f64,
     push_n: f64,
+    /// The rider has stepped off: no ankle, push, drag or roll aid any more.
+    rider_off: bool,
 }
 
 impl std::fmt::Debug for Physics {
@@ -170,6 +173,7 @@ impl Physics {
             accel: sensor(names::IMU_ACCEL)?,
             gyro: sensor(names::IMU_GYRO)?,
             stand: id(MjtObj::mjOBJ_EQUALITY, names::STAND)?,
+            on_pedals: id(MjtObj::mjOBJ_EQUALITY, names::ON_PEDALS)?,
         };
         let total_mass = model.body_mass().iter().sum();
         let data = MjData::new(Box::new(model));
@@ -184,6 +188,7 @@ impl Physics {
             motor_torque: 0.0,
             ankle_torque: 0.0,
             push_n: 0.0,
+            rider_off: false,
         };
         // The stand and the tire are soft constraints: let them take the load before time starts,
         // so the first IMU sample already reads a wheel at rest.
@@ -217,6 +222,18 @@ impl Physics {
         self.push_n = newtons;
     }
 
+    /// The rider steps off: the feet weld lets go, the rider's body falls free beside the wheel, and
+    /// the ankle torque, the rider's pushes and drag and the roll aid stop. It cannot be undone.
+    pub fn step_off(&mut self) {
+        self.data.eq_active_mut()[self.ids.on_pedals] = false;
+        self.rider_off = true;
+    }
+
+    /// The rider has stepped off.
+    pub const fn rider_off(&self) -> bool {
+        self.rider_off
+    }
+
     /// Holds the wheel upright and still on a stand, or lets it go.
     pub fn set_held(&mut self, held: bool) {
         self.data.eq_active_mut()[self.ids.stand] = held;
@@ -248,17 +265,18 @@ impl Physics {
             drag,
             gravity: setup.gravity,
             held: self.held(),
+            pitch_up: att.pitch,
         };
-        self.ankle_torque = self.rider.ankle_torque(&sense);
+        self.ankle_torque = if self.rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
         self.motor_torque = motor_torque_nm;
 
-        let assist = self.setup.assist;
+        let assist = if self.rider_off { Assist { roll_stiffness: 0.0, roll_damping: 0.0 } } else { self.setup.assist };
         let roll_torque = -(assist.roll_stiffness * att.roll + assist.roll_damping * att.roll_rate);
         let [hx, hy] = att.heading;
         self.data.ctrl_mut()[ids.ankle] = self.ankle_torque;
         self.data.qfrc_applied_mut()[ids.axle_dof] = motor_torque_nm;
         self.data.xfrc_applied_mut()[ids.shell] = [0.0, 0.0, 0.0, roll_torque * hx, roll_torque * hy, 0.0];
-        let along = self.push_n - aero;
+        let along = if self.rider_off { 0.0 } else { self.push_n - aero };
         self.data.xfrc_applied_mut()[ids.rider] = [along * hx, along * hy, 0.0, 0.0, 0.0, 0.0];
         self.data.step2();
         self.distance_m += att.speed * TIMESTEP_S;

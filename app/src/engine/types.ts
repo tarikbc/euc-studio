@@ -223,6 +223,8 @@ export interface EngineClient {
   readonly display: DisplayLayout | null;
   /** The tail light's layout; null when the wheel has none (or for the demo). */
   readonly lights: LightsLayout | null;
+  /** The ground's height along the path, `[x, z]` m (physics frame); null on flat ground. */
+  readonly terrain: [number, number][] | null;
   /** Times the buzzer started sounding in this run. */
   readonly beeps: number;
   /** Buzzer changes as they arrive, at their simulated times (live engine only). */

@@ -8,6 +8,7 @@ use std::time::Instant;
 use anyhow::{Context as _, bail};
 use euc_fwsource::{FetchOptions, UreqClient};
 use euc_profile::{Channel, FirmwareSource, Sha256, WheelProfile};
+use euc_sim::config::StockMap;
 use euc_sim::cpu::Backend;
 use euc_sim::recording::{Header, Recorder};
 use euc_sim::scenario::{self, Outcome, Scenario};
@@ -142,10 +143,8 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let source = ctx.profiles();
     let files = WheelFiles::load(&source, &wheel_id)?;
     let wheel = &files.profile;
-    let (image, label) = firmware(ctx, wheel, &args.firmware)?;
-    let sha256 = Sha256::digest(&image);
-    // Stock-map addresses only mean something in the build they were taken from.
-    let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
+    let fw = load_firmware(ctx, &files, &args.firmware)?;
+    let (image, label, sha256, stock) = (&fw.image, fw.label.clone(), fw.sha256, fw.stock);
     let mut injections =
         args.injections.iter().enumerate().map(|(i, spec)| injection(spec, i)).collect::<anyhow::Result<Vec<_>>>()?;
     if let Some(scenario) = &scenario {
@@ -160,7 +159,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let config = MachineConfig {
         board: &board,
         stockmap: stock.then_some(&files.stockmap),
-        image: &image,
+        image,
         load_addr: wheel.board.app.base,
         hclk,
         plant: PlantState {
@@ -179,7 +178,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     if let Some(scenario) = scenario {
         let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
         let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu)?, live)?;
-        let session = Session::new(machine, stock.then_some(&files.stockmap), args.sample_hz);
+        let session = Session::new(machine, fw.map.as_ref(), args.sample_hz);
         return ride(ctx, &args, &files, &scenario, session, firmware_out, cpu);
     }
     let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu)?)?;
@@ -392,6 +391,86 @@ pub(crate) fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyho
     }
     let path = cache.verified(&current.sha256).with_context(|| format!("{} is not in the cache", current.label))?;
     Ok((fs::read(&path)?, current.label.clone()))
+}
+
+/// A firmware image to run, and what names its RAM variables.
+pub(crate) struct Firmware {
+    /// Flash bytes from the app base up.
+    pub(crate) image: Vec<u8>,
+    /// For people: the stock build's label, or the file name.
+    pub(crate) label: String,
+    /// Of `image`.
+    pub(crate) sha256: Sha256,
+    /// The pinned stock build the stock map describes.
+    pub(crate) stock: bool,
+    /// Names of its RAM variables: the stock map for the stock build, our probes resolved against
+    /// the ELF for our builds; `None` when neither applies.
+    pub(crate) map: Option<StockMap>,
+}
+
+/// Loads `spec`: `stock` (the current pinned build, fetched if needed), `compat` or `clean` (our
+/// builds in `firmware/build/target-*/`, here or above), a `.bin` (its `.elf` next to it names our
+/// variables) or an `.elf` (flattened; its symbols name our variables).
+pub(crate) fn load_firmware(ctx: &Context, files: &WheelFiles, spec: &str) -> anyhow::Result<Firmware> {
+    let wheel = &files.profile;
+    let (bytes, label, path) = match spec {
+        "stock" => {
+            let (bytes, label) = firmware(ctx, wheel, spec)?;
+            (bytes, label, None)
+        }
+        "compat" | "clean" => {
+            let path = our_build(spec, &wheel.id)?;
+            let (bytes, label) = firmware(ctx, wheel, &path.display().to_string())?;
+            (bytes, format!("{spec} ({label})"), Some(path))
+        }
+        _ => {
+            let (bytes, label) = firmware(ctx, wheel, spec)?;
+            (bytes, label, Some(PathBuf::from(spec)))
+        }
+    };
+    let (image, elf) = if bytes.starts_with(b"\x7fELF") {
+        let flat = euc_image::Image::from_bytes(&bytes).map_err(|e| anyhow::anyhow!("{label}: {e}"))?;
+        if flat.load_addr() != Some(wheel.board.app.base) {
+            bail!(
+                "{label} loads at 0x{:08X}, but {} runs apps from 0x{:08X}",
+                flat.load_addr().unwrap_or(0),
+                wheel.id,
+                wheel.board.app.base
+            );
+        }
+        (flat.bytes().to_vec(), Some(bytes))
+    } else {
+        let sibling = path.map(|p| p.with_extension("elf")).filter(|p| p.is_file());
+        let elf = sibling.map(|p| fs::read(&p).with_context(|| format!("cannot read {}", ui::path(&p)))).transpose()?;
+        (bytes, elf)
+    };
+    let sha256 = Sha256::digest(&image);
+    // Stock-map addresses only mean something in the build they were taken from.
+    let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
+    let map = if stock {
+        Some(files.stockmap.clone())
+    } else {
+        match (&elf, &files.probes) {
+            (Some(elf), Some(probes)) => {
+                Some(probes.resolve(elf, &label).map_err(|why| anyhow::anyhow!("probes.toml with {label}: {why}"))?)
+            }
+            _ => None,
+        }
+    };
+    Ok(Firmware { image, label, sha256, stock, map })
+}
+
+/// Our firmware build `profile` (`compat` or `clean`) for `wheel`, from `firmware/build/` in the
+/// current folder or one above it.
+fn our_build(profile: &str, wheel: &str) -> anyhow::Result<PathBuf> {
+    let relative = PathBuf::from(format!("firmware/build/target-{profile}/euc-fw-{wheel}.bin"));
+    let cwd = std::env::current_dir()?;
+    cwd.ancestors().map(|dir| dir.join(&relative)).find(|p| p.is_file()).with_context(|| {
+        format!(
+            "no {} here or above; build it with `(cd firmware && cmake --workflow --preset target-{profile})`",
+            relative.display()
+        )
+    })
 }
 
 /// The board file with settings preset `preset` seeded (`None` or `blank`: an empty journal).

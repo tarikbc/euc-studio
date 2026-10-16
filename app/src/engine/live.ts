@@ -53,6 +53,7 @@ type Message =
   | { type: "display"; layout: DisplayLayout | null }
   | { type: "lights"; layout: LightsLayout | null }
   | { type: "buzzer"; tones: Tone[] }
+  | { type: "terrain"; profile: [number, number][] | null }
   | { type: "events"; events: TelemetryEvent[] }
   | { type: "frames"; frames: PhoneFrame[] }
   | { type: "outputs"; outputs: Outputs };
@@ -124,6 +125,7 @@ export class LiveEngine implements EngineClient {
   outputs: Outputs | null = null;
   display: DisplayLayout | null = null;
   lights: LightsLayout | null = null;
+  terrain: [number, number][] | null = null;
   beeps = 0;
   status: EngineStatus = { state: "starting", message: "Connecting to the engine", backend: "…" };
   playing = true;
@@ -251,6 +253,9 @@ export class LiveEngine implements EngineClient {
         break;
       case "lights":
         this.lights = m.layout;
+        break;
+      case "terrain":
+        this.terrain = m.profile;
         break;
       case "buzzer":
         for (const t of m.tones) {

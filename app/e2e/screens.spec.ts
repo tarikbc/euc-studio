@@ -142,6 +142,18 @@ test("the event list fills again after a restart", async ({ page }, info) => {
   await shot(page, "events-after-restart", info.project.name);
 });
 
+test("the ride HUD keeps its width from standstill to cruise", async ({ page }) => {
+  await openRide(page, { scene: false });
+  const hud = page.getByTestId("hud-ride");
+  const width = async () => Math.round((await hud.boundingBox())?.width ?? 0);
+  // preroll leaves the demo cruising near 20 km/h; a restart brings it back to 0.0.
+  const cruising = await width();
+  expect(cruising).toBeGreaterThan(200);
+  await page.keyboard.press("r");
+  await expect(page.getByText("0.0", { exact: true }).first()).toBeVisible();
+  expect(await width()).toBe(cruising);
+});
+
 test("play, pause and the real-time factor", async ({ page }) => {
   await openRide(page, { scene: false });
   await page.getByRole("button", { name: "Pause simulation" }).click();

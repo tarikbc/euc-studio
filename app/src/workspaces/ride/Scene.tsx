@@ -11,6 +11,7 @@ import { setLowPower } from "../../lib/power.ts";
 import { EucModel } from "./EucModel.tsx";
 import { LiveBodies } from "./LiveBodies.tsx";
 import { wheelPosition } from "./poses.ts";
+import { TerrainStrip } from "./TerrainStrip.tsx";
 import { LOW_FPS, type Quality, chooseQuality, qualityOverride, rendererName } from "./quality.ts";
 
 const TARGET = new THREE.Vector3(0.02, 0.34, 0);
@@ -296,7 +297,9 @@ export function Scene({ active, onReady, onFirstFrame }: SceneProps) {
       frameloop={!active ? "never" : high ? "always" : "demand"}
       camera={{ position: FOLLOW_OFFSET.toArray(), fov: 30, near: 0.05, far: 60 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
-      onCreated={({ gl }) => {
+      onCreated={({ gl, get }) => {
+        // Dev builds: scripts and agents reach the scene (camera, controls) without clicks.
+        if (import.meta.env.DEV) Object.assign(window, { __eucScene: get });
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.05;
         const renderer = rendererName(gl.getContext());
@@ -312,6 +315,12 @@ export function Scene({ active, onReady, onFirstFrame }: SceneProps) {
       <Suspense fallback={null}>
         <Lights />
         <Floor />
+        {engine.terrain && (
+          // The physics world (z up) in three.js (y up), as the live bodies.
+          <group rotation={[-Math.PI / 2, 0, 0]}>
+            <TerrainStrip profile={engine.terrain} />
+          </group>
+        )}
         {engine.kind === "live" ? (
           <LiveBodies accent={accents[accent].accent} />
         ) : (

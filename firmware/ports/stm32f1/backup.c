@@ -178,3 +178,10 @@ void stm32f1_watchdog_reload(void)
 {
     IWDG->KR = IWDG_KEY_RELOAD;
 }
+
+bool stm32f1_reset_was_watchdog(void)
+{
+    const bool watchdog = (RCC->CSR & RCC_CSR_IWDGRSTF) != 0U;
+    RCC->CSR |= RCC_CSR_RMVF;
+    return watchdog;
+}

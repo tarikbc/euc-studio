@@ -41,7 +41,6 @@
 #define INIT_READING_GAP_MS   10U
 #define ADC_DATA_TO_RAW       3U
 #define BOOT_BEEP_TICKS       100U
-#define WATCHDOG_MS           250U
 
 #define CALIBRATION_ROUNDS        5U
 #define CALIBRATION_ROUND_POLLS   110U
@@ -169,7 +168,8 @@ static void imu_offsets_load(void)
 {
     for (uint32_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
         app.balance_in.accel_offset[axis] = (int16_t)ld_imu_offsets_page[axis];
-        app.balance_in.gyro_offset[axis] = (int16_t)ld_imu_offsets_page[axis + EUC_IMU_AXES];
+        app.balance_in.gyro_offset[axis] =
+            euc_imu_gyro_offset_from_page((int16_t)ld_imu_offsets_page[axis + EUC_IMU_AXES]);
     }
     app.balance_in.accel_offset[2] = (int16_t)(app.balance_in.accel_offset[2] - ONE_G_COUNTS);
 }
@@ -199,6 +199,10 @@ static void imu_calibrate(void)
     for (uint32_t i = 0U; i < 6U; i++) {
         const float mean = euc_f32_div(sums[i], CALIBRATION_SAMPLES);
         signed_means[i] = (int16_t)(int32_t)mean;
+        if (i >= EUC_IMU_AXES) {
+            signed_means[i] =
+                euc_imu_gyro_offset_to_page(signed_means[i]); /* flash keeps +-500 deg/s counts */
+        }
         means[i] = (uint16_t)signed_means[i];
     }
     static const uint16_t marker[2] = {0x0055U, 0x00AAU};
@@ -230,6 +234,12 @@ static void init(void)
     }
 
     stm32f1_backup_init();
+    if (!EUC_QUIRK(NO_WATCHDOG) && stm32f1_reset_was_watchdog()) {
+        /* The tick or the FOC died on the last run, so the drive state is unknown: the bridge stays off until
+         * the next power-on, and the hard-cut reminder beeps. */
+        app.foc_hard_cut_request = true;
+        app.disable_request = true;
+    }
     euc_lights_init(&app.lights, stm32f1_backup_read(BKP_LIGHT_MODE), 0U);
     euc_strip_init(&app.strip);
     const uint16_t boot_count = (uint16_t)(stm32f1_backup_read(BKP_BOOT_COUNT) + 1U);
@@ -251,6 +261,7 @@ static void init(void)
     euc_bms_init(&app.bms);
     euc_sensors_init(&app.sensors);
     euc_service_init(&app.service);
+    euc_supervisor_init(&app.supervisor);
     if (app.settings.lock_state == EUC_SETTINGS_LOCKED) {
         app.foc_hard_cut_request = true;
         app.disable_request = true;
@@ -272,7 +283,7 @@ static void init(void)
 
     stm32f1_imu_bus_init();
     stm32f1_delay_ms(OFFSET_SETTLE_MS);
-    if (!stm32f1_imu_init()) {
+    if (!stm32f1_imu_init(euc_imu_gyro_config())) {
         app.foc_hard_cut_request = true;
         app.disable_request = true;
         app.raise_alerts |= EUC_ALERT_IMU_FAULT;
@@ -296,20 +307,7 @@ static void init(void)
 int main(void)
 {
     init();
-    bool watchdog_running = false;
-    uint32_t watched_ticks = 0U;
     for (;;) {
         app_main_loop_pass();
-        /* Clean: the watchdog starts with the first 496 Hz tick and is fed only while the tick keeps running
-         * and the main loop keeps passing. */
-        const uint32_t ticks = app.rtc_ticks;
-        if ((!EUC_QUIRK(NO_WATCHDOG)) && (ticks != watched_ticks)) {
-            if (!watchdog_running) {
-                stm32f1_watchdog_start(WATCHDOG_MS);
-                watchdog_running = true;
-            }
-            watched_ticks = ticks;
-            stm32f1_watchdog_reload();
-        }
     }
 }

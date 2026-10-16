@@ -2,7 +2,7 @@
 //! differ?
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Context as _;
@@ -12,7 +12,7 @@ use euc_sim::scenario::{Outcome, Ride, Scenario};
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use serde::Serialize;
 
-use crate::sim::{board_with, cpu_factory, firmware, injection, load_scenario};
+use crate::sim::{board_with, cpu_factory, injection, load_firmware, load_scenario};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
 
@@ -154,32 +154,8 @@ impl Run {
     ) -> anyhow::Result<Self> {
         let cpu = cpu_factory(cpu)?;
         let wheel = &files.profile;
-        let (image, label, elf) = match spec {
-            "compat" | "clean" => {
-                let path = our_build(spec, &wheel.id)?;
-                let (image, label) = firmware(ctx, wheel, &path.display().to_string())?;
-                (image, format!("{spec} ({label})"), Some(path.with_extension("elf")))
-            }
-            _ => {
-                let (image, label) = firmware(ctx, wheel, spec)?;
-                let elf = (spec != "stock").then(|| Path::new(spec).with_extension("elf"));
-                (image, label, elf)
-            }
-        };
-        let sha256 = Sha256::digest(&image);
-        let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
-        // Variable names: the stock map for the pinned build, our probes for an image with an .elf.
-        let map = if stock {
-            Some(files.stockmap.clone())
-        } else {
-            match (elf.filter(|p| p.is_file()), &files.probes) {
-                (Some(path), Some(probes)) => {
-                    let bytes = fs::read(&path).with_context(|| format!("cannot read {}", ui::path(&path)))?;
-                    Some(probes.resolve(&bytes, &label).map_err(|why| anyhow::anyhow!("probes.toml: {why}"))?)
-                }
-                _ => None,
-            }
-        };
+        let fw = load_firmware(ctx, files, spec)?;
+        let (image, label, sha256, stock, map) = (fw.image, fw.label, fw.sha256, fw.stock, fw.map);
         let injections = scenario
             .inject
             .iter()
@@ -255,17 +231,38 @@ impl Run {
     }
 }
 
-/// Our firmware build `profile` (`compat` or `clean`) for `wheel`, from `firmware/build/` in the
-/// current folder or one above it.
-fn our_build(profile: &str, wheel: &str) -> anyhow::Result<PathBuf> {
-    let relative = PathBuf::from(format!("firmware/build/target-{profile}/euc-fw-{wheel}.bin"));
-    let cwd = std::env::current_dir()?;
-    cwd.ancestors().map(|dir| dir.join(&relative)).find(|p| p.is_file()).with_context(|| {
-        format!(
-            "no {} here or above; build it with `(cd firmware && cmake --workflow --preset target-{profile})`",
-            relative.display()
-        )
-    })
+/// The channels and variables that differ (or are judged), one row each.
+fn print_series(c: &Comparison) {
+    let differing: Vec<&SeriesDiff> =
+        c.channels.iter().chain(&c.vars).filter(|s| s.max_abs > 0.0 || s.tolerance.is_some()).collect();
+    if differing.is_empty() {
+        ui::row(
+            GOOD,
+            "channels",
+            format!("all {} channels and {} variables identical", c.channels.len(), c.vars.len()),
+        );
+    } else {
+        ui::detail(format!(
+            "{:<20} {:>12} {:>12} {:>9} {:>10} {:>10}",
+            "channel / variable", "max |A-B|", "rms", "at s", "first s", "limit"
+        ));
+        for s in differing {
+            let line = format!(
+                "{:<20} {:>12.6} {:>12.6} {:>9.2} {:>10} {:>10}",
+                s.name,
+                s.max_abs,
+                s.rms,
+                s.at_max_s,
+                s.first_s.map_or_else(|| "-".to_owned(), |t| format!("{t:.2}")),
+                match (s.tolerance, s.rms_tolerance) {
+                    (Some(t), _) => format!("{t}"),
+                    (None, Some(t)) => format!("rms {t}"),
+                    (None, None) => "-".to_owned(),
+                },
+            );
+            ui::row(if s.within { DIM } else { BAD }, if s.within { "" } else { "OVER" }, line);
+        }
+    }
 }
 
 fn print(output: &CompareOutput<'_>) {
@@ -307,36 +304,7 @@ fn print(output: &CompareOutput<'_>) {
         }
         None => ui::row(GOOD, "first", "no divergence"),
     }
-    let differing: Vec<&SeriesDiff> =
-        c.channels.iter().chain(&c.vars).filter(|s| s.max_abs > 0.0 || s.tolerance.is_some()).collect();
-    if differing.is_empty() {
-        ui::row(
-            GOOD,
-            "channels",
-            format!("all {} channels and {} variables identical", c.channels.len(), c.vars.len()),
-        );
-    } else {
-        ui::detail(format!(
-            "{:<20} {:>12} {:>12} {:>9} {:>10} {:>10}",
-            "channel / variable", "max |A-B|", "rms", "at s", "first s", "limit"
-        ));
-        for s in differing {
-            let line = format!(
-                "{:<20} {:>12.6} {:>12.6} {:>9.2} {:>10} {:>10}",
-                s.name,
-                s.max_abs,
-                s.rms,
-                s.at_max_s,
-                s.first_s.map_or_else(|| "-".to_owned(), |t| format!("{t:.2}")),
-                match (s.tolerance, s.rms_tolerance) {
-                    (Some(t), _) => format!("{t}"),
-                    (None, Some(t)) => format!("rms {t}"),
-                    (None, None) => "-".to_owned(),
-                },
-            );
-            ui::row(if s.within { DIM } else { BAD }, if s.within { "" } else { "OVER" }, line);
-        }
-    }
+    print_series(c);
     if !c.vars_unpaired.is_empty() {
         ui::row(DIM, "unpaired", c.vars_unpaired.join(", "));
     }

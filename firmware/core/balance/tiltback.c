@@ -3,8 +3,8 @@
  * the balance hold the frame nose-up by that angle: the pedals tilt back and the rider slows down.
  *
  *   battery / temperature   voltage outside 99.20..137.60 V or board above about 80 degC
- *   speed                   above the tiltback speed (setting 'W' 'Y', or 200 = off; with a lost hall line
- *                           at most EUC_BALANCE_LIMP_SPEED_KMH)
+ *   speed                   above the tiltback speed (setting 'W' 'Y', or 200 = off; in limp mode at most
+ *                           EUC_BALANCE_LIMP_SPEED_KMH)
  *   PWM                     PWM alarm active and PWM tiltback on ('e'), clamped at +-12 deg
  *   pedal trim              setting 'W' 'U': slews toward (d - 4) x 1.2 deg
  *   restart offset          set at recovery, fades to zero
@@ -111,7 +111,7 @@ static float pedal_trim(float offset_deg, uint8_t setting)
 void euc_balance_step_tiltbacks(struct euc_balance_state *state, const struct euc_balance_in *in)
 {
     uint16_t tiltback_speed_kmh = in->settings.tiltback_speed_kmh;
-    if (in->hall_degraded && (tiltback_speed_kmh > EUC_BALANCE_LIMP_SPEED_KMH)) {
+    if (in->limp && (tiltback_speed_kmh > EUC_BALANCE_LIMP_SPEED_KMH)) {
         tiltback_speed_kmh = EUC_BALANCE_LIMP_SPEED_KMH; /* limp: slow the rider down */
     }
     const float threshold_m_per_s = speed_threshold_m_per_s(tiltback_speed_kmh);

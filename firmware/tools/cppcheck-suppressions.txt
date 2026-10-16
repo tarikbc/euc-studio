@@ -59,6 +59,13 @@ misra-c2012-10.8:*/core/math/libm.c
 # 8.7 (advisory): the balance steps are public so a lock-step harness can compare each with its stock function.
 misra-c2012-8.7:*/core/balance/*
 
+# Attitude. 8.7 (advisory): the gyro range and calibration-offset helpers are called by the app only.
+misra-c2012-8.7:*/core/attitude/*
+
+# Watchdog supervisor. 2.5 and 8.7 (advisory): its constants and entry points are used by the app only.
+misra-c2012-2.5:*/core/include/euc/safety/*
+misra-c2012-8.7:*/core/safety/*
+
 # Motor drive. 2.5 (advisory, unused macro): the headers define constants for the app and the ports (error
 # bits, sample counts). 8.7 (advisory, external linkage used in one unit): the module entry points are called
 # by the app, the SIL port and tests; no app calls the motor modules yet (F5 wires them).

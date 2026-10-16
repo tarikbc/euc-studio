@@ -38,6 +38,18 @@ impl Drag {
     }
 }
 
+/// The speed the rider aims for: `wanted`, unless the pedals tip back while the rider wants to go
+/// forward and is not already slowing down. Then the rider eases off, the more the steeper the
+/// tiltback, as a rider does when the wheel pushes the toes up: down to a stop, never backwards,
+/// and a stopped rider waits for the pedals to level before setting off again.
+fn eased(wanted: f64, s: &Sense, c: &RiderControl) -> f64 {
+    let tilt = (s.pitch_up - c.tiltback_feel_deg.to_radians()).max(0.0).to_degrees();
+    if tilt <= 0.0 || c.tiltback_ease_kmh_per_deg <= 0.0 || wanted <= 0.0 || wanted < s.speed {
+        return wanted;
+    }
+    wanted.min(s.speed - c.tiltback_ease_kmh_per_deg * tilt / 3.6).max(0.0)
+}
+
 /// What the rider senses in one step.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sense {
@@ -55,6 +67,8 @@ pub(crate) struct Sense {
     pub gravity: f64,
     /// The stand holds the wheel: the rider stands still and does not wind up.
     pub held: bool,
+    /// The pedals' pitch, radians, nose up positive (tiltback lifts the nose).
+    pub pitch_up: f64,
 }
 
 /// The rider's controller.
@@ -94,11 +108,13 @@ impl RiderController {
         let max_lean = c.lean_max_deg.to_radians();
         let target = match self.intent {
             Intent::Lean(lean) => lean,
-            Intent::Speed(speed) => {
+            Intent::Speed(wanted) => {
+                let speed = eased(wanted, s, &c);
+                let brake_max = if speed < wanted { c.brake_max.min(c.tiltback_ease_brake) } else { c.brake_max };
                 let error = speed - s.speed;
                 let accel = c.speed_kp * error + c.speed_ki * self.integral;
-                let limited = accel.clamp(-c.brake_max, c.accel_max);
-                let saturated = accel > c.accel_max || accel < -c.brake_max;
+                let limited = accel.clamp(-brake_max, c.accel_max);
+                let saturated = accel > c.accel_max || accel < -brake_max;
                 // Integrate only near the target and while the request is not saturated, so the
                 // integral trims the steady speed and never winds up on the way there.
                 if !s.held && !saturated && error.abs() < INTEGRAL_BAND_MPS {
@@ -122,7 +138,16 @@ mod tests {
     use super::*;
 
     fn sense(speed: f64) -> Sense {
-        Sense { dt: 0.001, speed, lean: 0.0, lean_rate: 0.0, drag: Drag::default(), gravity: 9.81, held: false }
+        Sense {
+            dt: 0.001,
+            speed,
+            lean: 0.0,
+            lean_rate: 0.0,
+            drag: Drag::default(),
+            gravity: 9.81,
+            held: false,
+            pitch_up: 0.0,
+        }
     }
 
     #[test]
@@ -152,6 +177,22 @@ mod tests {
             rider.ankle_torque(&sense(5.0));
         }
         assert!((rider.lean_command() - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn eases_off_when_the_pedals_tip_back() {
+        let c = RiderControl::default();
+        let riding = |pitch_up_deg: f64| Sense { pitch_up: f64::to_radians(pitch_up_deg), ..sense(10.0) };
+        assert_eq!(eased(12.0, &riding(1.0), &c), 12.0, "a little tilt is fine");
+        let eased_speed = eased(12.0, &riding(6.0), &c);
+        assert!((eased_speed - (10.0 - 1.5 * 4.0 / 3.6)).abs() < 1e-9, "4° beyond the feel: {eased_speed}");
+        assert_eq!(eased(5.0, &riding(6.0), &c), 5.0, "already braking: no change");
+        assert_eq!(eased(12.0, &riding(30.0), &c), 0.0, "a steep tiltback stops the rider, never reverses");
+        let stopped = Sense { pitch_up: f64::to_radians(6.0), ..sense(-0.1) };
+        assert_eq!(eased(12.0, &stopped, &c), 0.0, "stopped: waits for the pedals to level");
+        assert_eq!(eased(-2.0, &stopped, &c), -2.0, "riding backwards: no change");
+        let none = RiderControl { tiltback_ease_kmh_per_deg: 0.0, ..c };
+        assert_eq!(eased(12.0, &riding(6.0), &none), 12.0, "ignoring it rides through");
     }
 
     #[test]

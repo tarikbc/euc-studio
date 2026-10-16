@@ -143,6 +143,97 @@ static void test_unpack_applies_the_stock_load_rules(void)
     TEST_ASSERT_EQUAL_UINT8(9U, settings.beeper_volume);
 }
 
+/* Out-of-range fields (RECORD_FIELDS_UNCHECKED): compat keeps them as stock does, clean takes the defaults.
+ * One record holds a bad value in every field; each test checks one class of fields. */
+static const uint16_t bad_record[RECORD] = {
+    0U,      0U, 0x7F96U, /* pedal 7, speed alarm 15, tiltback 150 km/h */
+    0x0004U,              /* pedal trim 4 */
+    0xFC05U,              /* roll step 15, WC 12, WM 0, roll mode 5 */
+    0x0339U,              /* turn compensation 3, PWM tiltback 3, drive mode 9 */
+    0x0957U,              /* lock 9, IMU fault 5, units 7 */
+    0xB403U,              /* PWM alarm 180 %, volume 3 */
+};
+/* Every field at the edge of what the commands can set. */
+static const uint16_t edge_record[RECORD] = {0U, 0U, 0x23C8U, 0x0009U, 0x9902U, 0x0911U, 0x0311U, 0x6309U};
+
+static struct euc_settings unpack_in(uint32_t profile, const uint16_t record[RECORD])
+{
+    use_profile(profile);
+    struct euc_settings settings;
+    euc_settings_unpack(record, &settings);
+    return settings;
+}
+
+static void test_range_check_modes(void)
+{
+    const struct euc_settings compat = unpack_in(EUC_SIL_PROFILE_COMPAT, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(7U, compat.pedal_mode);
+    TEST_ASSERT_EQUAL_UINT8(9U, compat.drive_mode);
+    const struct euc_settings clean = unpack_in(EUC_SIL_PROFILE_CLEAN, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(1U, clean.pedal_mode);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.speed_alarm_mode);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.roll_cutoff_mode);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.drive_mode); /* never guess a drive mode */
+    const struct euc_settings edge = unpack_in(EUC_SIL_PROFILE_CLEAN, edge_record);
+    TEST_ASSERT_EQUAL_UINT8(2U, edge.pedal_mode);
+    TEST_ASSERT_EQUAL_UINT8(3U, edge.speed_alarm_mode);
+    TEST_ASSERT_EQUAL_UINT8(2U, edge.roll_cutoff_mode);
+    TEST_ASSERT_EQUAL_UINT8(1U, edge.drive_mode);
+}
+
+static void test_range_check_digits(void)
+{
+    const struct euc_settings compat = unpack_in(EUC_SIL_PROFILE_COMPAT, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(15U, compat.roll_limit_step); /* slow roll cut-off at 115 deg */
+    const struct euc_settings clean = unpack_in(EUC_SIL_PROFILE_CLEAN, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.roll_limit_step);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.wc_value);
+    TEST_ASSERT_EQUAL_UINT8(4U, clean.pedal_trim);
+    TEST_ASSERT_EQUAL_UINT8(3U, clean.turn_compensation);
+    TEST_ASSERT_EQUAL_UINT8(3U, clean.beeper_volume);
+    const struct euc_settings edge = unpack_in(EUC_SIL_PROFILE_CLEAN, edge_record);
+    TEST_ASSERT_EQUAL_UINT8(9U, edge.roll_limit_step);
+    TEST_ASSERT_EQUAL_UINT8(9U, edge.wc_value);
+    TEST_ASSERT_EQUAL_UINT8(9U, edge.pedal_trim);
+}
+
+static void test_range_check_flags(void)
+{
+    const struct euc_settings compat = unpack_in(EUC_SIL_PROFILE_COMPAT, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(3U, compat.pwm_tiltback);
+    const struct euc_settings clean = unpack_in(EUC_SIL_PROFILE_CLEAN, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.pwm_tiltback);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.imu_fault);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.units_miles);
+    const struct euc_settings edge = unpack_in(EUC_SIL_PROFILE_CLEAN, edge_record);
+    TEST_ASSERT_EQUAL_UINT8(1U, edge.pwm_tiltback);
+    TEST_ASSERT_EQUAL_UINT8(1U, edge.imu_fault);
+    TEST_ASSERT_EQUAL_UINT8(1U, edge.units_miles);
+}
+
+static void test_range_check_two_digit_values(void)
+{
+    const struct euc_settings compat = unpack_in(EUC_SIL_PROFILE_COMPAT, bad_record);
+    TEST_ASSERT_EQUAL_UINT16(150U, compat.tiltback_speed_kmh);
+    TEST_ASSERT_EQUAL_UINT8(180U, compat.pwm_alarm_percent);
+    const struct euc_settings clean = unpack_in(EUC_SIL_PROFILE_CLEAN, bad_record);
+    TEST_ASSERT_EQUAL_UINT16(20U, clean.tiltback_speed_kmh);
+    TEST_ASSERT_EQUAL_UINT8(80U, clean.pwm_alarm_percent);
+    const struct euc_settings edge = unpack_in(EUC_SIL_PROFILE_CLEAN, edge_record);
+    TEST_ASSERT_EQUAL_UINT16(200U, edge.tiltback_speed_kmh); /* '"': tiltback off */
+    TEST_ASSERT_EQUAL_UINT8(99U, edge.pwm_alarm_percent);
+}
+
+static void test_range_check_lock_state(void)
+{
+    const struct euc_settings compat = unpack_in(EUC_SIL_PROFILE_COMPAT, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(9U, compat.lock_state);
+    const struct euc_settings clean = unpack_in(EUC_SIL_PROFILE_CLEAN, bad_record);
+    TEST_ASSERT_EQUAL_UINT8(0U, clean.lock_state);
+    const struct euc_settings edge = unpack_in(EUC_SIL_PROFILE_CLEAN, edge_record);
+    TEST_ASSERT_EQUAL_UINT8(EUC_SETTINGS_LOCKED, edge.lock_state);
+}
+
 static void test_odometer_carry_per_profile(void)
 {
     const uint32_t profiles[2] = {EUC_SIL_PROFILE_COMPAT, EUC_SIL_PROFILE_CLEAN};
@@ -307,6 +398,23 @@ static void test_clean_backup_wins_only_with_a_valid_crc(void)
     TEST_ASSERT_EQUAL_UINT16(0x5678U, loaded.odometer_low);
 }
 
+/* The backup registers go through the same range check: a valid CRC does not make a value usable. */
+static void test_clean_backup_record_is_range_checked(void)
+{
+    use_profile(EUC_SIL_PROFILE_CLEAN);
+    struct euc_settings settings = sample_settings();
+    settings.roll_limit_step = 15U;
+    settings.drive_mode = 9U;
+    euc_settings_pack(&settings, backup);
+
+    struct euc_storage_state state;
+    struct euc_storage_write write;
+    struct euc_settings loaded;
+    euc_storage_load(&state, page, backup, &loaded, &write);
+    TEST_ASSERT_EQUAL_UINT8(0U, loaded.roll_limit_step);
+    TEST_ASSERT_EQUAL_UINT8(0U, loaded.drive_mode);
+}
+
 static void test_clean_tick_mirrors_and_saves_at_standstill(void)
 {
     use_profile(EUC_SIL_PROFILE_CLEAN);
@@ -381,6 +489,11 @@ int main(void)
     RUN_TEST(test_pack_layout_compat);
     RUN_TEST(test_pack_unpack_round_trip);
     RUN_TEST(test_unpack_applies_the_stock_load_rules);
+    RUN_TEST(test_range_check_modes);
+    RUN_TEST(test_range_check_digits);
+    RUN_TEST(test_range_check_flags);
+    RUN_TEST(test_range_check_two_digit_values);
+    RUN_TEST(test_range_check_lock_state);
     RUN_TEST(test_odometer_carry_per_profile);
     RUN_TEST(test_empty_journal_loads_defaults);
     RUN_TEST(test_compat_load_takes_the_last_slot_then_backup);
@@ -389,6 +502,7 @@ int main(void)
     RUN_TEST(test_clean_load_skips_torn_and_bad_slots);
     RUN_TEST(test_clean_reads_stock_records);
     RUN_TEST(test_clean_backup_wins_only_with_a_valid_crc);
+    RUN_TEST(test_clean_backup_record_is_range_checked);
     RUN_TEST(test_clean_tick_mirrors_and_saves_at_standstill);
     RUN_TEST(test_clean_full_page_waits_for_a_safe_erase);
     return UNITY_END();

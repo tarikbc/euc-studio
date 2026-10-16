@@ -195,9 +195,12 @@ void euc_balance_tick(struct euc_balance_state *state, const struct euc_balance_
     *out = (struct euc_balance_out){0};
 
     struct euc_attitude_in attitude_in;
+    attitude_in.gyro_at_rail = false;
     for (size_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
         attitude_in.accel[axis] = euc_imu_correct(in->accel_raw[axis], in->accel_offset[axis]);
         attitude_in.gyro[axis] = euc_imu_correct(in->gyro_raw[axis], in->gyro_offset[axis]);
+        attitude_in.gyro_at_rail = attitude_in.gyro_at_rail || (in->gyro_raw[axis] == INT16_MAX) ||
+                                   (in->gyro_raw[axis] == INT16_MIN);
     }
     euc_attitude_update_tilt(&state->attitude, attitude_in.accel);
     euc_balance_step_gains(state, &in->settings);

@@ -1,0 +1,57 @@
+# The rider steps off at 15 km/h: the feet leave the pedals, the body lands beside the wheel, and
+# the wheel goes on alone, light and with nothing to hold it upright. Without the rider's weight
+# the balance loop drives the shell past its angle limit, and the firmware must cut the drive, so
+# the wheel does not run away. A regression guard for the cut-offs (firmware/docs/cutoffs.md,
+# "Acceptance: what must still cut"): every profile, stock, compat and clean, must cut within
+# about 0.5 s and end standing still.
+#
+# Rider: the default rider, on the maintainer's settings, until it steps off at 15 s.
+schema = 1
+name = "rider-steps-off-15kmh"
+description = "The rider steps off at 15 km/h: the firmware must cut within 0.5 s and the wheel must not run away."
+wheel = "begode-extreme"
+seconds = 22.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [10, 15]]
+settings = "tarik-2026-10-15"
+step_off_s = 15.0
+
+[[expect]]
+check = "cutoff"
+from_s = 15.0
+within_s = 0.5
+flag = "balance_disabled"
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_cutoff"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "at_cutoff"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "max"
+from_s = 15.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "max"
+from_s = 16.0
+
+[[expect]]
+check = "record"
+signal = "torque_nm"
+stat = "min"
+from_s = 16.0
+
+[[expect]]
+check = "stopped_at_end"
+max_abs_kmh = 1.0

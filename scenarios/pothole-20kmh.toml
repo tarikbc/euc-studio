@@ -1,3 +1,6 @@
+# PRELIMINARY: the body is rigid and has no suspension yet (the Extreme has a rear shock), so the
+# impact reaches the shell harder than on the real wheel. Do not tune this run to pass.
+#
 # A pothole at 20 km/h: 2 cm deep, 50 cm long, with steep edges, on the maintainer's settings.
 # The wheel drops in and hits the far edge; the impact takes about a fifth of the wheel's speed
 # in 20 ms, the shell pitches nose down past 45° (so `upright` fails), and the firmware answers
@@ -17,6 +20,7 @@ seconds = 23.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [11, 20]]
 settings = "tarik-2026-10-15"
+# Rider: the default rider (it eases off when the pedals tip back).
 
 [terrain]
 length_m = 120.0

@@ -75,3 +75,27 @@ fn a_balanced_wheel_carries_the_rider_to_speed_and_back() {
     assert!(stopped.distance_m > 30.0, "went somewhere: {stopped:?}");
     assert!(stopped.roll_rad.abs() < 0.01, "the roll spring keeps it upright: {stopped:?}");
 }
+
+#[test]
+fn a_rider_who_steps_off_lands_beside_the_wheel() {
+    // How upright the rider's body is: the z component of its z axis (1 standing, 0 lying).
+    let upright = |physics: &Physics| {
+        let [_, x, y, _] = physics.poses()[2].quat;
+        1.0 - 2.0 * (x * x + y * y)
+    };
+    let mut physics = Physics::new(Setup::new(extreme())).unwrap();
+    run(&mut physics, 0.5);
+    physics.set_held(false);
+    run(&mut physics, 2.0);
+    assert!(upright(&physics) > 0.99 && !physics.rider_off(), "the rider stands on the pedals");
+    physics.step_off();
+    // No motor torque: the wheel is left to itself.
+    for _ in 0..(3.0 / TIMESTEP_S) as usize {
+        physics.step(0.0);
+    }
+    assert!(physics.rider_off());
+    assert_eq!(physics.state().ankle_torque_nm, 0.0);
+    // The ankles drop from the pedals (0.31 m) to just above the ground: the rider stands on it.
+    let ankles = physics.poses()[2].pos[2];
+    assert!((0.05..0.15).contains(&ankles), "the rider stands on the ground: ankles {ankles} m up");
+}

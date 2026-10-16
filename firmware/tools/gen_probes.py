@@ -40,11 +40,17 @@ PROBES = [
      "1 while the balance output is disabled (fall detectors, handle cut, lock); the output ramps to 0"),
     ("drive_fault", "motor.hard_cut", "u8", "cutoff", "hard cut: bridge off until a power cycle"),
     ("hall_fault", "motor.hall.fault", "u8", "cutoff", "hall fault latched: bridge off until a power cycle"),
+    ("attitude_pitch_deg", "balance.attitude.pitch_deg", "f32", None,
+     "the firmware's own pitch estimate (Mahony filter), degrees, positive nose down"),
     # Our own names: quantities the stock map does not name.
-    ("pitch_deg", "balance_out.pitch_deg", "f32", None, "the balance's pitch, degrees"),
-    ("roll_deg", "balance_out.roll_deg", "f32", None, "the balance's roll, degrees"),
+    ("attitude_roll_deg", "balance.attitude.roll_deg", "f32", None, "the firmware's own roll estimate, degrees"),
     ("hall_line_fault", "motor.hall.line_fault", "u8", None,
      "clean: one hall line found stuck; the state is rebuilt from the other two"),
+    # Tail light (core/lights/strip.c), for the app's state label.
+    ("strip_mode", "lights.strip_pattern", "u8", None, "LED mode: 0 red comets, 1 colour wheel ('W' 'M')"),
+    ("strip_brake_count", "strip.brake_count", "u8", None, "brake flash while 4 or more (40 after a 3 km/h drop)"),
+    ("strip_standstill", "strip.standstill", "u8", None, "1 breathing (standing), 3 moving, 0 at power-on"),
+    ("strip_breath", "strip.breath", "u8", None, "breathing brightness, 0..131"),
 ]
 
 SIZES = {"u8": 1, "s8": 1, "u16": 2, "s16": 2, "u32": 4, "s32": 4, "f32": 4}

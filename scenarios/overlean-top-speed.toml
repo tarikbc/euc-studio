@@ -7,15 +7,20 @@
 # The `record` checks always pass: they note when each warning came and what the wheel was doing
 # when it fell. `upright` is the safety verdict: it fails on the stock firmware. The speed where
 # it happens depends on the motor's inductance and flux, which are defaults until measured
-# (docs/models/electrical.md); docs/models/scenarios.md has the numbers.
+# (docs/models/electrical.md), and when it happens on the pedal height (an estimate, ±15 mm);
+# docs/models/scenarios.md has the numbers.
 schema = 1
 name = "overlean-top-speed"
 description = "Accelerate past the motor's limit on a full battery: when do the warnings come, and does the stock firmware hold?"
 wheel = "begode-extreme"
-seconds = 32.0
+seconds = 40.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
+
+# The overleaning rider ignores the tiltback and keeps leaning: that is the danger this run shows.
+[rider.control]
+tiltback_feel_deg = 90.0      # never eases off, whatever the tiltback
 
 [[expect]]
 check = "record"
@@ -40,7 +45,7 @@ threshold = 100.0
 [[expect]]
 check = "record"
 signal = "speed_kmh"
-stat = "at_fall"
+stat = "at_cutoff"
 
 [[expect]]
 check = "record"

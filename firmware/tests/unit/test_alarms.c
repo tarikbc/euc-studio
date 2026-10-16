@@ -207,6 +207,16 @@ static void test_hard_cut_reminder_and_hall_beeps(void)
     TEST_ASSERT_EQUAL_HEX8(EUC_ALERT_HALL_SENSOR, state.alerts & EUC_ALERT_HALL_SENSOR); /* latched */
 }
 
+static void test_main_loop_stall_beeps(void)
+{
+    struct euc_alarm_state state;
+    struct euc_alarm_in in = quiet_input();
+    euc_alarm_init(&state);
+    TEST_ASSERT_EQUAL_UINT32(0U, count_beeps(&state, &in, 1000U, 20U));
+    in.main_loop_stalled = true;
+    TEST_ASSERT_EQUAL_UINT32(6U, count_beeps(&state, &in, 1000U, 20U)); /* 3 beeps every 500 ticks */
+}
+
 static void test_transport_lock_bit(void)
 {
     struct euc_alarm_state state;
@@ -233,6 +243,7 @@ int main(void)
     RUN_TEST(test_speed_alarms_by_mode);
     RUN_TEST(test_horn_and_handle_double_beep);
     RUN_TEST(test_hard_cut_reminder_and_hall_beeps);
+    RUN_TEST(test_main_loop_stall_beeps);
     RUN_TEST(test_transport_lock_bit);
     return UNITY_END();
 }

@@ -181,6 +181,15 @@ pub struct RiderControl {
     pub lean_max_deg: f64,
     /// Fastest change of the lean, degrees per second.
     pub lean_rate_deg_s: f64,
+    /// Tiltback the rider tolerates before easing off: pedals tipped back (nose up) by more than
+    /// this, degrees, while riding forward.
+    pub tiltback_feel_deg: f64,
+    /// How much speed the rider gives up per degree of tiltback beyond `tiltback_feel_deg`, km/h
+    /// (0: the rider ignores tiltback).
+    pub tiltback_ease_kmh_per_deg: f64,
+    /// Strongest braking while easing off for tiltback, m/s²: the rider stops pushing and lets
+    /// the wheel slow, without braking hard.
+    pub tiltback_ease_brake: f64,
 }
 
 impl Default for RiderControl {
@@ -195,6 +204,9 @@ impl Default for RiderControl {
             brake_max: 2.5,
             lean_max_deg: 15.0,
             lean_rate_deg_s: 12.0,
+            tiltback_feel_deg: 2.0,
+            tiltback_ease_kmh_per_deg: 1.5,
+            tiltback_ease_brake: 1.0,
         }
     }
 }

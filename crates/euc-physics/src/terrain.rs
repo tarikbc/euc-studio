@@ -33,7 +33,8 @@ const HALF_WIDTH_M: f64 = 1.5;
 /// Thickness of the heightfield below its lowest point, metres.
 const BASE_M: f64 = 0.5;
 /// The floor of flat ground (the MJCF line every model had before terrain).
-const FLOOR_PLANE: &str = r#"    <geom name="floor" type="plane" size="0 0 1" friction="0.5 0 0" condim="3"/>"#;
+const FLOOR_PLANE: &str =
+    r#"    <geom name="floor" type="plane" size="0 0 1" friction="0.5 0 0" condim="3" conaffinity="3"/>"#;
 
 /// The ground (`[terrain]` in a scenario).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -181,7 +182,7 @@ impl Terrain {
         }
         let grid = self.grid();
         format!(
-            r#"    <geom name="floor" type="hfield" hfield="terrain" pos="{} 0 {}" friction="0.5 0 0" condim="3"/>"#,
+            r#"    <geom name="floor" type="hfield" hfield="terrain" pos="{} 0 {}" friction="0.5 0 0" condim="3" conaffinity="3"/>"#,
             grid.centre, grid.low
         )
     }

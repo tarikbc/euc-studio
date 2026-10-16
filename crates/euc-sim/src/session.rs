@@ -127,6 +127,14 @@ impl Session {
         self.live_mut().physics_mut().set_held(held);
     }
 
+    /// The rider steps off the pedals (see `euc_physics::Physics::step_off`).
+    pub fn step_off(&mut self) {
+        if !self.live().physics().rider_off() {
+            self.push(EventKind::Scenario, "rider steps off".to_owned());
+            self.live_mut().physics_mut().step_off();
+        }
+    }
+
     /// Records a scenario step on the timeline.
     pub fn note(&mut self, text: impl Into<String>) {
         self.push(EventKind::Scenario, text.into());

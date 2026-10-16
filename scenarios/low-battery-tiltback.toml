@@ -12,6 +12,8 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [10, 15]]
 # Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
 settings = "neutral"
+# Rider: the default rider, who eases off when the pedals tip back: the tiltback slows them, as it
+# should.
 
 [[timeline]]
 at_s = 0.0

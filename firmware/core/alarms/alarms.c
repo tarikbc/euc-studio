@@ -274,6 +274,10 @@ void euc_alarm_tick(struct euc_alarm_state *state, const struct euc_alarm_in *in
             euc_beeper_beep(&state->beeper, BEEP_FAULT_TICKS);
         }
     }
+    if (in->main_loop_stalled && (phase_is(time_base, 500U, 3U) || phase_is(time_base, 500U, 63U) ||
+                                  phase_is(time_base, 500U, 123U))) {
+        euc_beeper_beep(&state->beeper, BEEP_FAULT_TICKS);
+    }
     state->beeper.volume_compare = euc_beeper_volume_compare(in->beeper_volume);
 
     hard_cut_reminder(state, in, time_base);

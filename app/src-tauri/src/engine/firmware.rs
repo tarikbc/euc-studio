@@ -63,7 +63,18 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
-    match files.live(scenario.rider, scenario.assist) {
+    // The ground the scenario rides on, as points for the web view to draw (none when flat).
+    let terrain = (!scenario.terrain.is_flat()).then(|| {
+        let step = 0.05;
+        let end = scenario.terrain.length_m;
+        (0..=((end + 5.0) / step) as usize)
+            .map(|i| {
+                let x = -5.0 + i as f64 * step;
+                [x as f32, scenario.terrain.height(x.max(0.0)) as f32]
+            })
+            .collect::<Vec<_>>()
+    });
+    match files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()) {
         Ok(live) => {
             let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
             let session = Session::new(machine, stock.then_some(&files.stockmap), SAMPLE_HZ);
@@ -74,6 +85,7 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 note,
                 display,
                 lights,
+                terrain,
             })
         }
         // Without a body model the firmware still runs, on a wheel that stands still.
@@ -89,6 +101,7 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
                 }),
                 display,
                 lights,
+                terrain: None,
             })
         }
     }

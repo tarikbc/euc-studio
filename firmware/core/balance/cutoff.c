@@ -163,7 +163,7 @@ void euc_balance_step_recovery(struct euc_balance_state *state, const struct euc
         state->handle_presses = 0U;
         state->fallen = false;
         state->recovery_ticks = RECOVERY_TICKS;
-        if (!in->hall_fault && !in->hall_degraded && !in->hard_inhibit && !state->numeric_fault) {
+        if (!in->hall_fault && !in->limp && !in->hard_inhibit && !state->numeric_fault) {
             state->motor_disabled = false;
             balance_request_beep(out, RECOVERY_BEEP_TICKS);
         } else {

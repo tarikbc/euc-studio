@@ -66,6 +66,9 @@ pub struct Scenario {
     /// The ground: a slope, bumps, potholes (`euc_physics::Terrain`); flat by default.
     #[serde(default)]
     pub terrain: Terrain,
+    /// When the rider steps off the pedals, seconds (the wheel goes on alone).
+    #[serde(default)]
+    pub step_off_s: Option<f64>,
     /// BLE commands to send.
     #[serde(default)]
     pub inject: Vec<Inject>,
@@ -289,6 +292,8 @@ pub enum Stat {
     FirstBelow,
     /// The value when the wheel first falls over.
     AtFall,
+    /// The value when the firmware first cuts the motor (any cutoff flag).
+    AtCutoff,
 }
 
 impl Expect {
@@ -366,6 +371,9 @@ impl Scenario {
         }
         if scenario.speed_kmh.is_empty() || scenario.speed_kmh.windows(2).any(|w| w[1][0] < w[0][0]) {
             return bad("speed_kmh needs at least one [s, km/h] point, in time order".into());
+        }
+        if scenario.step_off_s.is_some_and(|at| !(scenario.release_s..scenario.seconds).contains(&at)) {
+            return bad("step_off_s must fall between release_s and the end of the run".into());
         }
         if scenario.push.iter().any(|&[at, n, length]| !(at >= 0.0 && n.is_finite() && length > 0.0)) {
             return bad("push needs [start s, newtons, duration s] with a positive duration".into());
@@ -688,6 +696,13 @@ fn judge_record(
                 format!("{} {v:.2} at {t:.2} s", if stat == Stat::Max { "max" } else { "min" })
             }
             Stat::Mean => format!("mean {:.2}", points.iter().map(|p| p.1).sum::<f64>() / points.len() as f64),
+            Stat::AtCutoff => window(samples, from, by_s).find(|(s, _)| s.cutoff).map_or_else(
+                || "the firmware did not cut".to_owned(),
+                |(s, i)| match observed.get(i).and_then(|o| source.value(o)) {
+                    Some(v) => format!("{v:.2} when the firmware cut at {:.2} s", s.t_s),
+                    None => format!("not observed when the firmware cut at {:.2} s", s.t_s),
+                },
+            ),
             Stat::AtFall => match fall {
                 Some((t, Some(v))) => format!("{v:.2} when the wheel fell at {t:.2} s"),
                 Some((t, None)) => format!("not observed when the wheel fell at {t:.2} s"),
@@ -807,6 +822,9 @@ impl Ride {
         self.was_ramping = ramping;
         self.last_target = target;
         session.set_intent(Intent::Speed(target / 3.6));
+        if scenario.step_off_s.is_some_and(|at| t >= at) {
+            session.step_off();
+        }
         let push = scenario.push_n(t);
         if (push - self.last_push).abs() > f64::EPSILON {
             session.note(if push == 0.0 { "push ends".to_owned() } else { format!("push {push:.0} N") });
@@ -1067,6 +1085,7 @@ kmh = 19.0
         };
         assert_eq!(measured(record(Some("speed_kmh"), None, Stat::Max, None)), "max 30.00 at 2.00 s");
         assert_eq!(measured(record(Some("speed_kmh"), None, Stat::Mean, None)), "mean 20.00");
+        assert_eq!(measured(record(Some("speed_kmh"), None, Stat::AtCutoff, None)), "the firmware did not cut");
         let pwm = record(None, Some("vq_active"), Stat::FirstAbove, Some(80.0));
         assert_eq!(measured(pwm), "first above 80 at 2.00 s (100.00)");
         assert_eq!(measured(record(None, Some("vq_active"), Stat::FirstBelow, Some(5.0))), "never below 5");

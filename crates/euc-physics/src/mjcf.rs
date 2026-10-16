@@ -4,7 +4,9 @@
 //! world ── floor (plane, or terrain)
 //!   └─ shell (free joint)     measured solids (or generic packs, handle, pedals), IMU site; origin at the axle
 //!        ├─ wheel (hinge "axle", y)   tire: a torus as a ring of capsules (or an ellipsoid)
-//!        └─ rider (hinge "lean", y)   rigid body hinged at the ankles, ankle motor "ankle"
+//!        └─ feet (hinge "lean", y)    hinged at the ankles, ankle motor "ankle"
+//!   └─ rider (free joint)     the rider's mass and shapes, welded to the feet ("on_pedals") until
+//!                             the rider steps off
 //! ```
 //!
 //! Axes: x forward, y left, z up. Both hinges turn about +y, so a positive wheel angle rolls
@@ -26,6 +28,9 @@ pub(crate) mod names {
     pub const IMU_ACCEL: &str = "imu_accel";
     pub const IMU_GYRO: &str = "imu_gyro";
     pub const STAND: &str = "stand";
+    pub const FEET: &str = "feet";
+    pub const RIDER_FREE: &str = "rider_free";
+    pub const ON_PEDALS: &str = "on_pedals";
 }
 
 /// Largest lean of the rider relative to the pedals, radians (the joint limit).
@@ -104,8 +109,9 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line(format!(r#"      <freejoint name="{}"/>"#, names::ROOT));
     shell(&mut x, setup, &layout);
     wheel(&mut x, setup);
-    rider(&mut x, setup, &layout);
+    feet(&mut x, setup);
     x.line("    </body>");
+    rider(&mut x, setup, &layout);
     x.line("  </worldbody>");
     x.line("  <actuator>");
     let max = setup.rider.control.ankle_max_nm;
@@ -117,6 +123,12 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line("  </sensor>");
     x.line("  <equality>");
     x.line(format!(r#"    <weld name="{}" body1="{}" solref="0.004 1"/>"#, names::STAND, names::SHELL));
+    x.line(format!(
+        r#"    <weld name="{}" body1="{}" body2="{}" solref="0.002 1"/>"#,
+        names::ON_PEDALS,
+        names::RIDER,
+        names::FEET
+    ));
     x.line("  </equality>");
     x.line("</mujoco>");
     x.0
@@ -217,32 +229,56 @@ fn wheel(x: &mut Xml, setup: &Setup) {
 }
 
 /// The rigid rider, hinged at the ankles; its shapes are for drawing and never collide.
-fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
-    let rider = setup.rider;
-    let ankle = rider.ankle_above_pedals_m;
-    let pitch = rider.mass_kg * rider.gyration_m * rider.gyration_m;
-    let yaw = rider.mass_kg * 0.15 * 0.15;
-    // Body landmarks as fractions of standing height, measured from the ankle joint.
-    let h = rider.height_m;
-    let (hip, shoulder, head) = (0.53 * h - ankle, 0.82 * h - ankle, 0.93 * h - ankle);
-    let ghost = r#"contype="0" conaffinity="0""#;
-    x.line(format!(
-        r#"      <body name="{}" pos="0 0 {}">"#,
-        names::RIDER,
-        -setup.wheel.shell.pedal_below_axle_m + ankle
-    ));
+/// Mass of the feet: the part of the rider that stays on the ankle hinge when the rest steps off.
+const FEET_KG: f64 = 2.0;
+
+/// Height of the ankle joint above the axle.
+fn ankle_above_axle(setup: &Setup) -> f64 {
+    -setup.wheel.shell.pedal_below_axle_m + setup.rider.ankle_above_pedals_m
+}
+
+/// The feet on the ankle hinge (inside the shell body): light, they carry the ankle motor; the
+/// rider's mass hangs on them through the `on_pedals` weld.
+fn feet(x: &mut Xml, setup: &Setup) {
+    x.line(format!(r#"      <body name="{}" pos="0 0 {}">"#, names::FEET, ankle_above_axle(setup)));
     x.line(format!(
         r#"        <joint name="{}" type="hinge" axis="0 1 0" range="-{LEAN_LIMIT_RAD} {LEAN_LIMIT_RAD}"/>"#,
         names::LEAN
     ));
+    // Enough inertia that the ankle motor turns the feet together with the welded body, not ahead
+    // of it (0.5 kg·m², against the rider's 70 or so about the ankles).
+    x.line(format!(r#"        <inertial pos="0 0 0" mass="{FEET_KG}" diaginertia="0.5 0.5 0.5"/>"#));
+    x.line("      </body>");
+}
+
+/// The rider's body (in the world, welded to the feet): mass, inertia and shapes. Only the torso
+/// touches the ground, and only once the rider has stepped off and falls.
+fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
+    let rider = setup.rider;
+    let ankle = rider.ankle_above_pedals_m;
+    let mass = rider.mass_kg - FEET_KG;
+    let pitch = mass * rider.gyration_m * rider.gyration_m;
+    let yaw = mass * 0.15 * 0.15;
+    // Body landmarks as fractions of standing height, measured from the ankle joint.
+    let h = rider.height_m;
+    let (hip, shoulder, head) = (0.53 * h - ankle, 0.82 * h - ankle, 0.93 * h - ankle);
+    let ghost = r#"contype="0" conaffinity="0""#;
+    // The feet and the torso touch the ground (group 2 meets the floor only, never the wheel or the
+    // shell): once off the pedals the rider stands, or lies, beside the wheel.
+    let ground_only = r#"contype="2" conaffinity="2""#;
     x.line(format!(
-        r#"        <inertial pos="0 0 {}" mass="{}" diaginertia="{pitch} {pitch} {yaw}"/>"#,
+        r#"    <body name="{}" pos="0 0 {}">"#,
+        names::RIDER,
+        setup.wheel.tire.radius_m + ankle_above_axle(setup)
+    ));
+    x.line(format!(r#"      <freejoint name="{}"/>"#, names::RIDER_FREE));
+    x.line(format!(
+        r#"        <inertial pos="0 0 {}" mass="{mass}" diaginertia="{pitch} {pitch} {yaw}"/>"#,
         rider.com_above_pedals_m - ankle,
-        rider.mass_kg
     ));
     for (side, y) in [("left", layout.pedal_y), ("right", -layout.pedal_y)] {
         x.line(format!(
-            r#"        <geom name="foot_{side}" type="box" size="0.12 0.045 0.03" pos="0.03 {y} {}" {ghost}/>"#,
+            r#"        <geom name="foot_{side}" type="box" size="0.12 0.045 0.03" pos="0.03 {y} {}" {ground_only}/>"#,
             0.03 - ankle
         ));
         x.line(format!(
@@ -255,8 +291,8 @@ fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
         ));
     }
     x.line(format!(
-        r#"        <geom name="torso" type="capsule" fromto="0 0 {hip} 0 0 {shoulder}" size="0.15" {ghost}/>"#
+        r#"        <geom name="torso" type="capsule" fromto="0 0 {hip} 0 0 {shoulder}" size="0.15" {ground_only}/>"#
     ));
     x.line(format!(r#"        <geom name="head" type="sphere" size="0.1" pos="0 0 {head}" {ghost}/>"#));
-    x.line("      </body>");
+    x.line("    </body>");
 }

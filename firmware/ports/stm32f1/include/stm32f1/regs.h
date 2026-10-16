@@ -64,6 +64,9 @@ struct stm32f1_rcc {
 #define RCC_BDCR_RTCSEL_HSE  0x00000300U /* HSE / 128 */
 #define RCC_BDCR_RTCEN       0x00008000U
 
+#define RCC_CSR_RMVF     0x01000000U /* clears the reset flags */
+#define RCC_CSR_IWDGRSTF 0x20000000U
+
 /* FLASH interface (RM0008 3.3.3, PM0075) -------------------------------------------------------------- */
 struct stm32f1_flash {
     volatile uint32_t ACR;

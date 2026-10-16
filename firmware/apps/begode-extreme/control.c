@@ -9,6 +9,7 @@
 #include "board.h"
 #include "euc/display/display.h"
 #include "euc/math/fixed.h"
+#include "euc/quirks.h"
 #include "stm32f1/device.h"
 #include "stm32f1/port.h"
 
@@ -68,6 +69,7 @@ void ADC1_2_IRQHandler(void)
     in.hard_cut_request = app.foc_hard_cut_request;
     struct euc_motor_foc_out out;
     euc_motor_foc_step(&app.motor, &in, &out);
+    app.foc_steps++;
 
     uint16_t compare[3];
     compare[BOARD_MOTOR_PHASE_A_TIM8_CHANNEL - 1U] = out.duty.a;
@@ -293,7 +295,7 @@ static void balance(void)
     in->pwm_alarm_active = app.alarm_out.pwm_alarm;
     in->hard_inhibit = app.motor.hard_cut || app.foc_hard_cut_request;
     in->hall_fault = app.motor.hall.fault;
-    in->hall_degraded = app.motor.hall.line_fault;
+    in->limp = app.motor.hall.line_fault || app.supervisor_out.main_loop_stalled;
     in->disable_request = app.disable_request;
     app.disable_request = false;
 
@@ -353,6 +355,7 @@ static void alarms(void)
         .hard_cut = app.motor.hard_cut || app.foc_hard_cut_request,
         .powering_off = app.power.powering_off,
         .hall_fault = app.motor.hall.fault,
+        .main_loop_stalled = app.supervisor_out.main_loop_stalled,
         .bms_fault = app.bms.fault,
         .horn_request = app.horn_request,
         .handle_double_beep = app.balance_out.handle_double_beep,
@@ -415,6 +418,24 @@ static void storage(void)
     }
 }
 
+/* Clean watchdog (euc/safety/supervisor.h): fed only by a tick in which the FOC ran and the balance published
+ * a valid command; a stalled main loop means limp mode and beeps, not a reset. */
+static void supervise(void)
+{
+    const struct euc_supervisor_in in = {app.main_loop_passes, app.foc_steps, app.balance_out.motor_command};
+    euc_supervisor_tick(&app.supervisor, &in, &app.supervisor_out);
+    if (EUC_QUIRK(NO_WATCHDOG)) {
+        return;
+    }
+    if (!app.watchdog_running) {
+        stm32f1_watchdog_start(EUC_SUPERVISOR_WATCHDOG_MS);
+        app.watchdog_running = true;
+    }
+    if (app.supervisor_out.feed_watchdog) {
+        stm32f1_watchdog_reload();
+    }
+}
+
 void app_rtc_tick(void)
 {
     app.rtc_ticks++;
@@ -437,6 +458,7 @@ void app_rtc_tick(void)
     storage();
     stm32f1_buzzer_set(app.alarms.beeper.compare);
     strip_render();
+    supervise();
 }
 
 /* Main loop
@@ -572,6 +594,7 @@ static void storage_write(const struct euc_storage_write *write)
 
 void app_main_loop_pass(void)
 {
+    app.main_loop_passes++;
     bms_link();
     telemetry();
 

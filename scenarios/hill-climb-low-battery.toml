@@ -16,6 +16,11 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [12, 25]]
 settings = "tarik-2026-10-15"
 
+# The rider keeps climbing at 25 km/h whatever the tiltback, so the run shows the firmware's
+# tiltback growing; the default rider eases off and then stalls on the slope (scenarios.md).
+[rider.control]
+tiltback_feel_deg = 90.0
+
 [terrain]
 slope_pct = 20.0
 slope_start_m = 40.0

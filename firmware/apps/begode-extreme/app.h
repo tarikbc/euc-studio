@@ -25,6 +25,7 @@
 #include "euc/power/power.h"
 #include "euc/protocol/commands.h"
 #include "euc/protocol/telemetry.h"
+#include "euc/safety/supervisor.h"
 #include "euc/sensors/sensors.h"
 #include "euc/service/service.h"
 #include "euc/settings/storage.h"
@@ -67,6 +68,13 @@ struct app {
     volatile bool erase_calibration_request;
     volatile bool storage_write_pending;
     volatile uint8_t service_reply; /* enum euc_service_reply, sent at the next telemetry group */
+
+    /* Clean watchdog (quirk NO_WATCHDOG): fed by the tick, which also watches the main loop and the FOC */
+    volatile uint32_t main_loop_passes; /* main loop -> tick */
+    volatile uint32_t foc_steps;        /* ADC interrupt -> tick */
+    struct euc_supervisor_state supervisor;
+    struct euc_supervisor_out supervisor_out;
+    bool watchdog_running;
     struct euc_storage_write storage_write;
 
     /* RTC tick -> FOC */

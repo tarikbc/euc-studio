@@ -245,7 +245,7 @@ static void test_lost_hall_line_lowers_the_speed_tiltback(void)
     state.speed_m_per_s = 5.0F; /* 18 km/h */
     euc_balance_step_tiltbacks(&state, &in);
     TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_speed_deg);
-    in.hall_degraded = true; /* limp: 10 km/h = 2.778 m/s */
+    in.limp = true; /* limp: 10 km/h = 2.778 m/s */
     for (unsigned tick = 0U; tick < 1000U; tick++) {
         euc_balance_step_tiltbacks(&state, &in);
     }
@@ -378,7 +378,7 @@ static void test_recovery_blocked_by_a_lost_hall_line(void)
     state.motor_disabled = true;
     state.fallen = true;
     state.attitude.tilt_centideg[2] = 8800;
-    in.hall_degraded = true;
+    in.limp = true;
     memset(&out, 0, sizeof(out));
     for (unsigned tick = 0U; tick < 101U; tick++) {
         euc_balance_step_recovery(&state, &in, &out);

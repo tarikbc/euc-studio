@@ -35,6 +35,75 @@ function mountRotation(layout: DisplayLayout): THREE.Euler {
   return new THREE.Euler().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, normal));
 }
 
+/** A display texture, the layout it was made for and the outputs it shows. */
+interface Painted {
+  layout: DisplayLayout;
+  texture: THREE.CanvasTexture;
+  outputs: Outputs | null | undefined;
+}
+
+function newTexture(layout: DisplayLayout, flipY: boolean): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = TEX_W;
+  canvas.height = Math.round(TEX_W / displayAspect(layout));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.flipY = flipY;
+  return texture;
+}
+
+/** Paints the board outputs into the texture when they changed since the last paint. */
+function repaint(p: Painted, layout: DisplayLayout) {
+  const o = engine.outputs;
+  if (p.outputs === o) return;
+  p.outputs = o;
+  const canvas = p.texture.image as HTMLCanvasElement;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const state = o
+    ? { grid: o.display_grid, on: o.display_on, brightness: o.display_brightness }
+    : { grid: [], on: false, brightness: 0 };
+  paintDisplay(ctx, layout, state, canvas.width, canvas.height);
+  p.texture.needsUpdate = true;
+}
+
+/**
+ * The live display on a scanned shell: painted onto the mesh of its `display_window` node, whose
+ * UVs span the LED panel (u right, v down, digit tops toward the front).
+ */
+export function DisplayOnScan({ body }: { body: THREE.Object3D }) {
+  useEngineVersion();
+  const layout = engine.kind === "live" ? engine.display : null;
+  if (!layout) return null;
+  return <PaintWindow layout={layout} body={body} />;
+}
+
+function PaintWindow({ layout, body }: { layout: DisplayLayout; body: THREE.Object3D }) {
+  const target = useRef(body);
+  const painted = useRef<Painted | null>(null);
+  useFrame(() => {
+    let p = painted.current;
+    if (p?.layout !== layout) {
+      let mesh: THREE.Mesh | null = null;
+      target.current.getObjectByName("display_window")?.traverse((o) => {
+        if (!mesh && o instanceof THREE.Mesh) mesh = o;
+      });
+      if (!mesh) return;
+      p?.texture.dispose();
+      const texture = newTexture(layout, false);
+      (mesh as THREE.Mesh).material = new THREE.MeshBasicMaterial({
+        map: texture,
+        toneMapped: false,
+      });
+      p = painted.current = { layout, texture, outputs: undefined };
+    }
+    repaint(p, layout);
+  });
+  useEffect(() => () => painted.current?.texture.dispose(), []);
+  return null;
+}
+
 /** The panel at `position` (its centre, shell frame), at `fit` of its real size. */
 export function DisplayDecal({
   position = STYLIZED.position,
@@ -60,12 +129,7 @@ function Decal({
   fit: number;
 }) {
   const material = useRef<THREE.MeshBasicMaterial>(null);
-  /** The texture, the layout it was made for and the outputs it shows. */
-  const painted = useRef<{
-    layout: DisplayLayout;
-    texture: THREE.CanvasTexture;
-    outputs: Outputs | null | undefined;
-  } | null>(null);
+  const painted = useRef<Painted | null>(null);
   const rotation = useMemo(() => mountRotation(layout), [layout]);
 
   useFrame(() => {
@@ -74,27 +138,12 @@ function Decal({
     let p = painted.current;
     if (p?.layout !== layout) {
       p?.texture.dispose();
-      const canvas = document.createElement("canvas");
-      canvas.width = TEX_W;
-      canvas.height = Math.round(TEX_W / displayAspect(layout));
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 4;
+      const texture = newTexture(layout, true);
       mat.map = texture;
       mat.needsUpdate = true;
       p = painted.current = { layout, texture, outputs: undefined };
     }
-    const o = engine.outputs;
-    if (p.outputs === o) return;
-    p.outputs = o;
-    const canvas = p.texture.image as HTMLCanvasElement;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const state = o
-      ? { grid: o.display_grid, on: o.display_on, brightness: o.display_brightness }
-      : { grid: [], on: false, brightness: 0 };
-    paintDisplay(ctx, layout, state, canvas.width, canvas.height);
-    p.texture.needsUpdate = true;
+    repaint(p, layout);
   });
   useEffect(() => () => painted.current?.texture.dispose(), []);
 

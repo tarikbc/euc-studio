@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "euc/motor/motor.h"
+#include "euc/quirks.h"
 #include "euc/sil.h"
 #include "unity.h"
 
@@ -142,12 +143,17 @@ static void test_raw_copies_wrap_or_saturate(void)
     }
 }
 
-static void test_over_current_counted_in_compat_tripped_in_clean(void)
+/* The trip is off in both profiles until the bench measures a level (NO_OVERCURRENT_TRIP on in clean too);
+ * the code stays tested with the quirk bit cleared. */
+static void test_over_current_counted_unless_the_trip_is_on(void)
 {
     /* b = 16 x 4048 - 32768 = 32000 > 31500. */
     const struct euc_current_sample high = {MID_SCALE_RAW, 4048U};
-    for (size_t p = 0U; p < 2U; p++) {
-        use_profile(profiles[p]);
+    const uint64_t clean = euc_sil_quirk_profile_mask(EUC_SIL_PROFILE_CLEAN);
+    const uint64_t masks[3] = {euc_sil_quirk_profile_mask(EUC_SIL_PROFILE_COMPAT), clean,
+                               clean & ~(UINT64_C(1) << EUC_QUIRK_ID_NO_OVERCURRENT_TRIP)};
+    for (size_t p = 0U; p < 3U; p++) {
+        euc_sil_quirk_set_mask(masks[p]);
         struct euc_current_state state;
         struct euc_current_out out;
         euc_current_init(&state);
@@ -160,7 +166,7 @@ static void test_over_current_counted_in_compat_tripped_in_clean(void)
         TEST_ASSERT_FALSE(state.overcurrent_trip);
         euc_current_read(&state, &board_config.current, high, &out);
         TEST_ASSERT_EQUAL_UINT16(2U, state.over_limit_readings);
-        TEST_ASSERT_EQUAL(profiles[p] == EUC_SIL_PROFILE_CLEAN, state.overcurrent_trip);
+        TEST_ASSERT_EQUAL(p == 2U, state.overcurrent_trip);
         euc_current_read(&state, &board_config.current,
                          (struct euc_current_sample){MID_SCALE_RAW, MID_SCALE_RAW}, &out);
         TEST_ASSERT_EQUAL_UINT16(0U, state.over_limit_readings);
@@ -446,10 +452,13 @@ static void test_start_check_stops_the_drive(void)
     TEST_ASSERT_TRUE(state.hard_cut);
 }
 
-static void test_over_current_trip_in_clean_only(void)
+static void test_over_current_trip_cuts_when_switched_on(void)
 {
-    for (size_t p = 0U; p < 2U; p++) {
-        use_profile(profiles[p]);
+    const uint64_t clean = euc_sil_quirk_profile_mask(EUC_SIL_PROFILE_CLEAN);
+    const uint64_t masks[3] = {euc_sil_quirk_profile_mask(EUC_SIL_PROFILE_COMPAT), clean,
+                               clean & ~(UINT64_C(1) << EUC_QUIRK_ID_NO_OVERCURRENT_TRIP)};
+    for (size_t p = 0U; p < 3U; p++) {
+        euc_sil_quirk_set_mask(masks[p]);
         struct euc_motor_state state;
         struct euc_motor_foc_out out;
         struct euc_motor_foc_in in = idle_input();
@@ -458,7 +467,7 @@ static void test_over_current_trip_in_clean_only(void)
         in.sample.phase_b_raw = 4048U; /* b = 32000 */
         euc_motor_foc_step(&state, &in, &out);
         euc_motor_foc_step(&state, &in, &out);
-        TEST_ASSERT_EQUAL(profiles[p] == EUC_SIL_PROFILE_COMPAT, out.outputs_enabled);
+        TEST_ASSERT_EQUAL(p != 2U, out.outputs_enabled); /* only with the trip switched on */
     }
 }
 
@@ -490,7 +499,7 @@ int main(void)
     RUN_TEST(test_current_signs);
     RUN_TEST(test_phase_a_saturation_per_profile);
     RUN_TEST(test_raw_copies_wrap_or_saturate);
-    RUN_TEST(test_over_current_counted_in_compat_tripped_in_clean);
+    RUN_TEST(test_over_current_counted_unless_the_trip_is_on);
     RUN_TEST(test_sensor_check_at_start);
     RUN_TEST(test_timing_per_mode);
     RUN_TEST(test_set_command_is_checked);
@@ -504,7 +513,7 @@ int main(void)
     RUN_TEST(test_hard_cut_is_latched);
     RUN_TEST(test_hall_fault_turns_the_bridge_off);
     RUN_TEST(test_start_check_stops_the_drive);
-    RUN_TEST(test_over_current_trip_in_clean_only);
+    RUN_TEST(test_over_current_trip_cuts_when_switched_on);
     RUN_TEST(test_iq_lpf_wraps_above_65_a_in_compat);
     return UNITY_END();
 }

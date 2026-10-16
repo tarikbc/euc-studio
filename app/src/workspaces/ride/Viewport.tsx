@@ -60,9 +60,18 @@ function EngineOverlay() {
   );
 }
 
-function HudCard({ children, className }: { children: React.ReactNode; className?: string }) {
+function HudCard({
+  children,
+  className,
+  testId,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  testId?: string;
+}) {
   return (
     <div
+      data-testid={testId}
       className={cx(
         "rounded-12 border border-hairline bg-card/75 backdrop-blur-[12px] backdrop-saturate-150",
         className,
@@ -236,7 +245,10 @@ export function Viewport({ active }: { active: boolean }) {
           </div>
         </div>
         <div className="flex items-end justify-between">
-          <HudCard className="pointer-events-auto flex items-stretch divide-x divide-hairline">
+          <HudCard
+            testId="hud-ride"
+            className="pointer-events-auto flex items-stretch divide-x divide-hairline"
+          >
             <Speed />
             <Pwm />
             <Battery />

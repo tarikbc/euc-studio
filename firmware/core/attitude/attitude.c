@@ -18,6 +18,19 @@
 #define ACCEL_G_PER_COUNT 0.000122
 /* Gyro counts to rad/s (the stock constant; 1/65.5 deg/s would be 0.000266462). */
 #define GYRO_RAD_PER_S_PER_COUNT 0.000266325
+/* Clean, +-2000 deg/s: 1/16.4 deg/s per count. */
+#define GYRO_2000_RAD_PER_S_PER_COUNT 0.0010642251
+/* +-2000 deg/s counts to +-500 deg/s counts: 65.5 / 16.4 (the turn compensation is tuned in those) */
+#define GYRO_2000_TO_500_NUM 655
+#define GYRO_2000_TO_500_DEN 164
+#define GYRO_PAGE_SCALE      4 /* flash offsets are +-500 deg/s counts */
+
+/* Clean re-anchoring after the gyro left its rail. */
+#define REANCHOR_TICKS       496U /* 1 s of raised gain */
+#define REANCHOR_GAIN_FACTOR 10.0F
+#define REANCHOR_GAIN_MAX    3.0F
+#define REANCHOR_ONE_G_LOW   6963U /* 0.85 g */
+#define REANCHOR_ONE_G_HIGH  9421U /* 1.15 g */
 
 /* Asin input limit for the accelerometer vector (ASIN_ACCEL). */
 #define ACCEL_ASIN_LIMIT 0.99F
@@ -94,6 +107,39 @@ static void filter_reset(struct euc_attitude_state *state)
     state->roll_deg = 0.0F;
 }
 
+uint8_t euc_imu_gyro_config(void)
+{
+    return EUC_QUIRK(GYRO_500DPS_CLIP) ? (uint8_t)EUC_IMU_GYRO_DPS_500 : (uint8_t)EUC_IMU_GYRO_DPS_2000;
+}
+
+int16_t euc_imu_gyro_offset_from_page(int16_t stored)
+{
+    if (EUC_QUIRK(GYRO_500DPS_CLIP)) {
+        return stored;
+    }
+    /* nearest +-2000 deg/s count */
+    const int32_t value = stored;
+    const int32_t half = GYRO_PAGE_SCALE / 2;
+    const int32_t rounded =
+        (value >= 0) ? ((value + half) / GYRO_PAGE_SCALE) : ((value - half) / GYRO_PAGE_SCALE);
+    return (int16_t)rounded;
+}
+
+int16_t euc_imu_gyro_offset_to_page(int16_t offset)
+{
+    if (EUC_QUIRK(GYRO_500DPS_CLIP)) {
+        return offset;
+    }
+    const int32_t scaled = (int32_t)offset * GYRO_PAGE_SCALE;
+    if (scaled > INT16_MAX) {
+        return INT16_MAX;
+    }
+    if (scaled < INT16_MIN) {
+        return INT16_MIN;
+    }
+    return (int16_t)scaled;
+}
+
 int16_t euc_imu_correct(int16_t raw, int16_t offset)
 {
     const int32_t corrected = (int32_t)raw - (int32_t)offset;
@@ -165,6 +211,9 @@ static void accel_vector(struct euc_attitude_state *state, const struct euc_atti
                          float vector[3])
 {
     int32_t gyro_z = in->gyro[2];
+    if (!EUC_QUIRK(GYRO_500DPS_CLIP)) {
+        gyro_z = (gyro_z * GYRO_2000_TO_500_NUM) / GYRO_2000_TO_500_DEN;
+    }
     if (gyro_z > TURN_GYRO_LIMIT_COUNTS) {
         gyro_z = TURN_GYRO_LIMIT_COUNTS;
     } else if (gyro_z < -TURN_GYRO_LIMIT_COUNTS) {
@@ -221,6 +270,49 @@ static void pitch_rate_update(struct euc_attitude_state *state, const struct euc
     const float one_minus_alpha = euc_f32_sub(1.0F, alpha);
     state->pitch_rate_lpf_rad_per_s = euc_f32_add(euc_f32_mul(state->pitch_rate_lpf_rad_per_s, alpha),
                                                   euc_f32_mul(gyro_y, one_minus_alpha));
+}
+
+static bool accel_near_one_g(const int16_t accel[EUC_IMU_AXES])
+{
+    uint32_t sum = 0U; /* at most 3 x 32768^2, below 2^32 */
+    for (size_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
+        const int32_t value = accel[axis];
+        const uint32_t magnitude = (uint32_t)((value < 0) ? -value : value);
+        sum += magnitude * magnitude;
+    }
+    return (sum >= (REANCHOR_ONE_G_LOW * REANCHOR_ONE_G_LOW)) &&
+           (sum <= (REANCHOR_ONE_G_HIGH * REANCHOR_ONE_G_HIGH));
+}
+
+/* Clean: the accelerometer correction gain for this tick. Once the gyro leaves its rail, the first 1 g
+ * reading re-seeds the low-passed accelerometer (the impact that clipped the gyro also shook it) and the gain
+ * rises 10 x for REANCHOR_TICKS. */
+static float correction_gain(struct euc_attitude_state *state, const struct euc_attitude_in *in)
+{
+    float gain = in->accel_gain;
+    if (in->gyro_at_rail) {
+        state->reanchor_pending = true;
+        state->reanchor_ticks = 0U;
+        return gain;
+    }
+    if (state->reanchor_pending && accel_near_one_g(in->accel)) {
+        state->reanchor_pending = false;
+        state->reanchor_ticks = REANCHOR_TICKS;
+        state->accel_x_lpf = (float)in->accel[0];
+        state->accel_y_lpf = (float)in->accel[1];
+        state->accel_z_lpf = (float)in->accel[2];
+    }
+    if (state->reanchor_ticks > 0U) {
+        state->reanchor_ticks--;
+        float raised = euc_f32_mul(gain, REANCHOR_GAIN_FACTOR);
+        if (raised > REANCHOR_GAIN_MAX) {
+            raised = REANCHOR_GAIN_MAX;
+        }
+        if (raised > gain) {
+            gain = raised;
+        }
+    }
+    return gain;
 }
 
 /* Integrates the corrected rates into the quaternion and normalises it. */
@@ -281,13 +373,16 @@ void euc_attitude_update(struct euc_attitude_state *state, const struct euc_atti
     const float q2q3 = euc_f32_mul(q[2], q[3]);
     const float q3q3 = euc_f32_mul(q[3], q[3]);
 
+    const float gain = EUC_QUIRK(GYRO_500DPS_CLIP) ? in->accel_gain : correction_gain(state, in);
     const int16_t accel_z = free_fall_update(state, in);
     float accel[3];
     accel_vector(state, in, accel_z, accel);
 
+    const double rad_per_count =
+        EUC_QUIRK(GYRO_500DPS_CLIP) ? GYRO_RAD_PER_S_PER_COUNT : GYRO_2000_RAD_PER_S_PER_COUNT;
     float gyro[3];
     for (size_t axis = 0U; axis < 3U; axis++) {
-        gyro[axis] = euc_f32_from_f64((double)in->gyro[axis] * GYRO_RAD_PER_S_PER_COUNT);
+        gyro[axis] = euc_f32_from_f64((double)in->gyro[axis] * rad_per_count);
     }
     pitch_rate_update(state, in, gyro[1]);
 
@@ -312,8 +407,8 @@ void euc_attitude_update(struct euc_attitude_state *state, const struct euc_atti
 
     float rate[3];
     for (size_t axis = 0U; axis < 3U; axis++) {
-        rate[axis] = euc_f32_add(euc_f32_add(euc_f32_mul(error[axis], in->accel_gain), gyro[axis]),
-                                 MAHONY_INTEGRAL_RAD_PER_S);
+        rate[axis] =
+            euc_f32_add(euc_f32_add(euc_f32_mul(error[axis], gain), gyro[axis]), MAHONY_INTEGRAL_RAD_PER_S);
     }
     quaternion_integrate(q, rate);
 

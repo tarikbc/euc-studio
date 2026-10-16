@@ -127,9 +127,18 @@ pub struct UnicornCpu {
     regs: CoreRegs,
     synced: CoreRegs,
     retired: u64,
+    /// Wall-clock limit of one run, in microseconds (0 = none).
+    timeout_us: u64,
 }
 
 impl UnicornCpu {
+    /// Limits each run to `timeout` of wall time (`None`, the default, for no limit). Unicorn
+    /// never stops inside an IT block, so random code (differential fuzzing) can loop forever;
+    /// a run that times out ends with [`Exit::Budget`] and its retired count as usual.
+    pub fn set_timeout(&mut self, timeout: Option<std::time::Duration>) {
+        self.timeout_us = timeout.map_or(0, |t| u64::try_from(t.as_micros()).unwrap_or(u64::MAX).max(1));
+    }
+
     /// A Cortex-M3 with `regions` mapped. Unicorn needs every region 4 KiB aligned in base and
     /// size.
     ///
@@ -172,7 +181,7 @@ impl UnicornCpu {
             uc.add_block_hook(1, 0, on_block).map_err(UnicornError)?;
         }
         let regs = read_regs(&uc);
-        Ok(Self { uc, quantum, regs: regs.clone(), synced: regs, retired: 0 })
+        Ok(Self { uc, quantum, regs: regs.clone(), synced: regs, retired: 0, timeout_us: 0 })
     }
 }
 
@@ -423,7 +432,7 @@ impl Cpu for UnicornCpu {
         shared.budget = u64::from(max_instr);
         shared.executed = 0;
         let count = if self.quantum == Quantum::Exact { max_instr as usize } else { 0 };
-        let result = self.uc.emu_start(u64::from(self.regs.pc | 1), 0, 0, count);
+        let result = self.uc.emu_start(u64::from(self.regs.pc | 1), 0, self.timeout_us, count);
         let shared = self.uc.get_data_mut();
         shared.bus = None;
         let exit = shared.exit.take();

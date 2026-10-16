@@ -161,6 +161,7 @@ export class DemoEngine implements EngineClient {
   readonly outputs = null;
   readonly display = null;
   readonly lights = null;
+  readonly terrain = null;
   readonly beeps = 0;
   subscribeTones(): () => void {
     return () => {};

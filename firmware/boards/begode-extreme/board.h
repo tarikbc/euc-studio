@@ -50,9 +50,10 @@
 #define BOARD_MOTOR_PHASE_C_TIM8_CHANNEL 2U
 
 /*
- * Phase over-current trip of the clean profile (core/motor/current.h).
- * PLACEHOLDER: 31500 counts is about 420 A on the stock scale, the level the stock code only counts. Set it
- * from the measured limits of the power stage (MOSFETs, current sensors) before a clean image drives a motor.
+ * Phase over-current trip (core/motor/current.h), OFF in both profiles until the level is measured on the
+ * bench (quirk NO_OVERCURRENT_TRIP is on in clean too; docs/watchdog-and-overcurrent.md). PLACEHOLDER: 31500
+ * counts is about 420 A on the stock scale, the level the stock code only counts. Set it from the measured
+ * limits of the power stage (MOSFETs, current sensors) before the trip is switched on.
  */
 #define BOARD_PHASE_OVERCURRENT_TRIP_Q15     31500
 #define BOARD_PHASE_OVERCURRENT_TRIP_SAMPLES 2U /* consecutive FOC readings: 167 us at 12 kHz */

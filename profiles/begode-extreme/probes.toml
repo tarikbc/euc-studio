@@ -14,7 +14,7 @@ schema = 1
 [[var]]
 name = "telemetry_pause"
 symbol = "app"
-offset = 654  # app.commands.telemetry_holdoff_groups
+offset = 658  # app.commands.telemetry_holdoff_groups
 size = 1
 kind = "u8"
 note = "telemetry groups still to skip after a received byte"
@@ -22,7 +22,7 @@ note = "telemetry groups still to skip after a received byte"
 [[var]]
 name = "alerts"
 symbol = "app"
-offset = 694  # app.alarms.alerts
+offset = 698  # app.alarms.alerts
 size = 1
 kind = "u8"
 note = "frame 04 byte 14; bit 2 = IMU fault, bit 6 = hall error"
@@ -30,7 +30,7 @@ note = "frame 04 byte 14; bit 2 = IMU fault, bit 6 = hall error"
 [[var]]
 name = "speed_cms"
 symbol = "app"
-offset = 248  # app.balance.speed_cm_per_s
+offset = 252  # app.balance.speed_cm_per_s
 size = 2
 kind = "s16"
 note = "the balance's speed estimate, cm/s, forward positive"
@@ -38,7 +38,7 @@ note = "the balance's speed estimate, cm/s, forward positive"
 [[var]]
 name = "vq_active"
 symbol = "app"
-offset = 632  # app.motor.vq_active
+offset = 636  # app.motor.vq_active
 size = 2
 kind = "s16"
 note = "the q voltage the FOC applies; 0 while the stop brake holds"
@@ -46,7 +46,7 @@ note = "the q voltage the FOC applies; 0 while the stop brake holds"
 [[var]]
 name = "pwm_alarm"
 symbol = "app"
-offset = 707  # app.alarm_out.pwm_alarm
+offset = 711  # app.alarm_out.pwm_alarm
 size = 1
 kind = "u8"
 note = "PWM above the 'W' 'P' threshold"
@@ -54,7 +54,7 @@ note = "PWM above the 'W' 'P' threshold"
 [[var]]
 name = "tiltback_speed_deg"
 symbol = "app"
-offset = 224  # app.balance.tiltback_speed_deg
+offset = 228  # app.balance.tiltback_speed_deg
 size = 4
 kind = "f32"
 note = "speed tiltback offset, degrees"
@@ -62,7 +62,7 @@ note = "speed tiltback offset, degrees"
 [[var]]
 name = "tiltback_battery_deg"
 symbol = "app"
-offset = 220  # app.balance.tiltback_battery_deg
+offset = 224  # app.balance.tiltback_battery_deg
 size = 4
 kind = "f32"
 note = "battery voltage and temperature tiltback offset, degrees"
@@ -70,7 +70,7 @@ note = "battery voltage and temperature tiltback offset, degrees"
 [[var]]
 name = "tiltback_pwm_deg"
 symbol = "app"
-offset = 228  # app.balance.tiltback_pwm_deg
+offset = 232  # app.balance.tiltback_pwm_deg
 size = 4
 kind = "f32"
 note = "PWM tiltback offset, degrees"
@@ -78,7 +78,7 @@ note = "PWM tiltback offset, degrees"
 [[var]]
 name = "drive_command"
 symbol = "app"
-offset = 292  # app.balance.motor_command
+offset = 296  # app.balance.motor_command
 size = 4
 kind = "f32"
 note = "balance command to the FOC, +-1050"
@@ -86,7 +86,7 @@ note = "balance command to the FOC, +-1050"
 [[var]]
 name = "balance_disabled"
 symbol = "app"
-offset = 206  # app.balance.motor_disabled
+offset = 210  # app.balance.motor_disabled
 size = 1
 kind = "u8"
 role = "cutoff"
@@ -95,7 +95,7 @@ note = "1 while the balance output is disabled (fall detectors, handle cut, lock
 [[var]]
 name = "drive_fault"
 symbol = "app"
-offset = 635  # app.motor.hard_cut
+offset = 639  # app.motor.hard_cut
 size = 1
 kind = "u8"
 role = "cutoff"
@@ -104,32 +104,64 @@ note = "hard cut: bridge off until a power cycle"
 [[var]]
 name = "hall_fault"
 symbol = "app"
-offset = 470  # app.motor.hall.fault
+offset = 474  # app.motor.hall.fault
 size = 1
 kind = "u8"
 role = "cutoff"
 note = "hall fault latched: bridge off until a power cycle"
 
 [[var]]
-name = "pitch_deg"
+name = "attitude_pitch_deg"
 symbol = "app"
-offset = 368  # app.balance_out.pitch_deg
+offset = 160  # app.balance.attitude.pitch_deg
 size = 4
 kind = "f32"
-note = "the balance's pitch, degrees"
+note = "the firmware's own pitch estimate (Mahony filter), degrees, positive nose down"
 
 [[var]]
-name = "roll_deg"
+name = "attitude_roll_deg"
 symbol = "app"
-offset = 372  # app.balance_out.roll_deg
+offset = 164  # app.balance.attitude.roll_deg
 size = 4
 kind = "f32"
-note = "the balance's roll, degrees"
+note = "the firmware's own roll estimate, degrees"
 
 [[var]]
 name = "hall_line_fault"
 symbol = "app"
-offset = 513  # app.motor.hall.line_fault
+offset = 517  # app.motor.hall.line_fault
 size = 1
 kind = "u8"
 note = "clean: one hall line found stuck; the state is rebuilt from the other two"
+
+[[var]]
+name = "strip_mode"
+symbol = "app"
+offset = 753  # app.lights.strip_pattern
+size = 1
+kind = "u8"
+note = "LED mode: 0 red comets, 1 colour wheel ('W' 'M')"
+
+[[var]]
+name = "strip_brake_count"
+symbol = "app"
+offset = 773  # app.strip.brake_count
+size = 1
+kind = "u8"
+note = "brake flash while 4 or more (40 after a 3 km/h drop)"
+
+[[var]]
+name = "strip_standstill"
+symbol = "app"
+offset = 775  # app.strip.standstill
+size = 1
+kind = "u8"
+note = "1 breathing (standing), 3 moving, 0 at power-on"
+
+[[var]]
+name = "strip_breath"
+symbol = "app"
+offset = 776  # app.strip.breath
+size = 1
+kind = "u8"
+note = "breathing brightness, 0..131"

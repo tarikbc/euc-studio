@@ -1,0 +1,46 @@
+# The BLE link has no pairing or authentication: any phone in range can send the stock firmware's
+# service sequences. A rider balances at a standstill (at a traffic light, say) and someone sends
+# "c", then "y" 0.3 s later: the IMU calibration request. The stock firmware accepts it whenever the
+# wheel is still, rider or not, and cuts the motor at once (quirk SERVICE_WITHOUT_CONFIRM; "!" "@"
+# and "+" "-" do the same). With the drive gone, the wheel and rider fall.
+#
+# The `record` checks note what happened; `cutoff` documents the stock behavior; `upright` is the
+# safety verdict and fails on the stock firmware. The clean profile only runs service sequences
+# with nobody riding and a press of the power button (SAFETY.md).
+schema = 1
+name = "ble-service-cut-standing"
+description = "A phone sends the calibration sequence while the rider stands on the wheel: the stock firmware cuts the motor."
+wheel = "begode-extreme"
+seconds = 14.0
+release_s = 2.5
+speed_kmh = [[0, 0]]
+settings = "tarik-2026-10-15"
+# Rider: the default rider, standing still.
+
+[[inject]]
+at_s = 10.0
+bytes = "c"
+
+[[inject]]
+at_s = 10.3
+bytes = "y"
+
+[[expect]]
+check = "cutoff"
+from_s = 10.3
+within_s = 0.2
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 10.3
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 10.3
+
+[[expect]]
+check = "upright"

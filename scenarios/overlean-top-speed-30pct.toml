@@ -10,6 +10,10 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
 
+# The overleaning rider ignores the tiltback and keeps leaning: that is the danger this run shows.
+[rider.control]
+tiltback_feel_deg = 90.0      # never eases off, whatever the tiltback
+
 [[timeline]]
 at_s = 0.0
 fault = "battery_soc"
@@ -38,7 +42,7 @@ threshold = 100.0
 [[expect]]
 check = "record"
 signal = "speed_kmh"
-stat = "at_fall"
+stat = "at_cutoff"
 
 [[expect]]
 check = "record"

@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { series } from "../../design/tokens.ts";
 import { engine } from "../../engine/index.ts";
-import { DisplayDecal } from "./DisplayDecal.tsx";
+import { DisplayDecal, DisplayOnScan } from "./DisplayDecal.tsx";
 import { TailLight3D } from "./TailLight3D.tsx";
 import { type WheelModel, useWheelModel } from "./wheelModel.ts";
 
@@ -198,7 +198,8 @@ export function ShellVisual({ accent }: { accent: string }) {
       </mesh>
       <DisplayDecal />
       {engine.lights && <TailLight3D layout={engine.lights} />}
-      {/* Headlight on the front of the fairing, tail light behind. */}
+      {/* Headlight on the front of the fairing; behind, a stand-in tail light for the demo (the
+          live engine draws the real one from lights.toml). */}
       <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
         <boxGeometry args={[0.004, 0.036, 0.1]} />
         <meshStandardMaterial
@@ -208,15 +209,17 @@ export function ShellVisual({ accent }: { accent: string }) {
           toneMapped={false}
         />
       </mesh>
-      <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
-        <boxGeometry args={[0.004, 0.024, 0.08]} />
-        <meshStandardMaterial
-          color={series.current}
-          emissive={series.current}
-          emissiveIntensity={1.1}
-          toneMapped={false}
-        />
-      </mesh>
+      {!engine.lights && (
+        <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
+          <boxGeometry args={[0.004, 0.024, 0.08]} />
+          <meshStandardMaterial
+            color={series.current}
+            emissive={series.current}
+            emissiveIntensity={1.1}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
       {/* Pedals: grip plate, edge and hinge bracket. */}
       {[1, -1].map((s) => (
         <group key={s} position={[0.01, -0.12, s * 0.17]}>
@@ -238,8 +241,6 @@ export function ShellVisual({ accent }: { accent: string }) {
   );
 }
 
-/** Centre of the scanned display window's LED panel, shell frame (geometry.toml [display]). */
-const SCAN_DISPLAY: [number, number, number] = [0.0833, 0.4391, 0.0011];
 /** Axle height of the scanned tire, unloaded. */
 const SCAN_AXLE_Y = 0.2296;
 
@@ -259,8 +260,8 @@ export function BodyPart({ model, accent }: { model: WheelModel | null; accent: 
   return (
     <>
       <primitive object={scanned} />
-      <DisplayDecal position={SCAN_DISPLAY} fit={1} />
-      {engine.lights && <TailLight3D layout={engine.lights} body={false} />}
+      <DisplayOnScan body={scanned} />
+      {engine.lights && <TailLight3D layout={engine.lights} scan={scanned} />}
     </>
   );
 }

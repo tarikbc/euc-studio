@@ -98,6 +98,12 @@ hinged at the ankles. The ankles are a motor driven by the rider controller:
 2. **Lean to ankle torque.** `τ = kp_lean·(lean_cmd − lean) − kd_lean·lean_rate`, limited to the
    strongest ankle torque. The pedals take the opposite torque; that is what the firmware's balance
    loop feels when the rider leans.
+3. **Tiltback eases the rider off.** When the firmware tips the pedals back (nose up) by more than
+   2° while the rider wants to go forward, and the rider is not already slowing down, the rider
+   aims 1.5 km/h below the present speed for every degree beyond 2°, braking at most 1 m/s² (it
+   stops pushing rather than brakes hard), down to a stop and never backwards, so a speed, battery or PWM tiltback (or a limp mode) slows the ride the way it slows
+   a real rider. A stopped rider waits for the pedals to come back within 2° before setting off
+   again. Set `[rider.control] tiltback_ease_kmh_per_deg = 0` to ride through tiltback.
 
 Leaning works on a real wheel the same way: the firmware keeps the pedals near its set angle, so a
 rider who shifts the centre of mass forward makes it accelerate to stay under them. In a steady
@@ -152,6 +158,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.speed_kp`, `speed_ki` | 0.6 /s, 0.03 /s² | |
 | `control.accel_max`, `brake_max` | 1.5, 2.5 m/s² | |
 | `control.lean_max_deg`, `lean_rate_deg_s` | 15°, 12°/s | |
+| `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | |
 
 ## Scenarios

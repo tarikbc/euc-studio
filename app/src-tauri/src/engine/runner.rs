@@ -68,6 +68,8 @@ pub struct Built {
     pub display: Option<DisplayLayout>,
     /// The tail light's LED layout, if the profile describes it.
     pub lights: Option<LightsLayout>,
+    /// The ground's height along the path, `[x, z]` metres, when it is not flat.
+    pub terrain: Option<Vec<[f32; 2]>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,6 +108,10 @@ pub enum Message {
     /// The tail light's LED layout (sent with the bodies; `null` when the wheel has none).
     Lights {
         layout: Option<LightsLayout>,
+    },
+    /// The ground's height along the path (sent with the bodies; `null` on flat ground).
+    Terrain {
+        profile: Option<Vec<[f32; 2]>>,
     },
     Events {
         events: Vec<Event>,
@@ -239,7 +245,11 @@ fn pump(outbox: &Mutex<Outbox>, sinks: &Mutex<Option<Sinks>>, stop: &AtomicBool)
         let (early, late): (Vec<_>, Vec<_>) = messages.into_iter().partition(|m| {
             matches!(
                 m,
-                Message::Reset { .. } | Message::Bodies { .. } | Message::Display { .. } | Message::Lights { .. }
+                Message::Reset { .. }
+                    | Message::Bodies { .. }
+                    | Message::Display { .. }
+                    | Message::Lights { .. }
+                    | Message::Terrain { .. }
             )
         });
         for m in early {
@@ -265,6 +275,7 @@ struct Sim {
     note: Option<String>,
     display: Option<DisplayLayout>,
     lights: Option<LightsLayout>,
+    terrain: Option<Vec<[f32; 2]>>,
     error: Option<String>,
     outputs: Option<Outputs>,
     outputs_at: Option<Instant>,
@@ -300,6 +311,7 @@ impl Sim {
             note: None,
             display: None,
             lights: None,
+            terrain: None,
             error: None,
             outputs: None,
             outputs_at: None,
@@ -395,12 +407,14 @@ impl Sim {
                     out.messages.push(Message::Bodies { bodies });
                     out.messages.push(Message::Display { layout: built.display.clone() });
                     out.messages.push(Message::Lights { layout: built.lights.clone() });
+                    out.messages.push(Message::Terrain { profile: built.terrain.clone() });
                 }
                 self.build = Some(built.build);
                 self.label = Some(built.label);
                 self.note = built.note;
                 self.display = built.display;
                 self.lights = built.lights;
+                self.terrain = built.terrain;
                 self.outputs = None;
                 self.host = Some(built.host);
                 self.phone = PhoneDecoder::default();
@@ -452,6 +466,7 @@ impl Sim {
                     self.post(Message::Bodies { bodies });
                     self.post(Message::Display { layout: self.display.clone() });
                     self.post(Message::Lights { layout: self.lights.clone() });
+                    self.post(Message::Terrain { profile: self.terrain.clone() });
                 }
                 self.outputs = None;
                 self.post_status();

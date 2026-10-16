@@ -14,6 +14,7 @@ seconds = 22.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [12, 30], [16, 30], [17, 0]]
 settings = "tarik-2026-10-15"
+# Rider: the default rider, set below to brake as hard as they dare.
 
 [rider.control]
 brake_max = 6.0           # m/s²: a rider braking as hard as they dare

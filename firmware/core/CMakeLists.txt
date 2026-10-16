@@ -43,6 +43,7 @@ add_library(euc_core STATIC
     protocol/commands.c
     protocol/telemetry.c
     sensors/sensors.c
+    safety/supervisor.c
     service/service.c
     settings/settings.c
     settings/storage.c

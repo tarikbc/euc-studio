@@ -18,6 +18,12 @@
  * The CRC lives in bits the stock firmware never sets and never reads, so each firmware can read the other's
  * records (quirk NO_RECORD_CRC; see euc/settings/storage.h).
  *
+ * Loading (euc_settings_unpack) applies the stock rules: tiltback 0 and PWM alarm 0 take their defaults (20
+ * km/h, 80 %), pedal trim and volume stop at 9, turn compensation above 9 and WM above 1 become 0. Stock uses
+ * every other field as stored; clean also sets any field the commands cannot produce to its default (pedal
+ * mode 1, tiltback 20 km/h unless it is 200 = off, PWM alarm 80 %, the rest 0; quirk
+ * RECORD_FIELDS_UNCHECKED).
+ *
  * Odometer unit: 118 hall steps (about 1 m). The trip counter (BKP DR1) counts the same units.
  */
 #ifndef EUC_SETTINGS_SETTINGS_H

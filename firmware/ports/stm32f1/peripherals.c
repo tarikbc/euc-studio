@@ -81,19 +81,19 @@ void stm32f1_imu_bus_init(void)
     imu_select(false);
 }
 
-bool stm32f1_imu_init(void)
+bool stm32f1_imu_init(uint8_t gyro_config)
 {
     /* MPU-6500 start-up, as the stock firmware writes it: register, value, wait in ms. */
-    static const struct imu_write imu_setup[] = {
-        {0x6BU, 0x80U, 200U}, /* PWR_MGMT_1: reset */
-        {0x68U, 0x07U, 100U}, /* SIGNAL_PATH_RESET */
-        {0x6BU, 0x01U, 20U},  /* PWR_MGMT_1: PLL clock */
-        {0x6AU, 0x10U, 20U},  /* USER_CTRL: I2C interface off */
-        {0x19U, 0x01U, 20U},  /* SMPLRT_DIV */
-        {0x1AU, 0x20U, 20U},  /* CONFIG */
-        {0x1BU, 0x08U, 20U},  /* GYRO_CONFIG: +-500 deg/s */
-        {0x1CU, 0x08U, 20U},  /* ACCEL_CONFIG: +-4 g */
-        {0x1DU, 0x00U, 20U},  /* ACCEL_CONFIG2 */
+    const struct imu_write imu_setup[] = {
+        {0x6BU, 0x80U, 200U},      /* PWR_MGMT_1: reset */
+        {0x68U, 0x07U, 100U},      /* SIGNAL_PATH_RESET */
+        {0x6BU, 0x01U, 20U},       /* PWR_MGMT_1: PLL clock */
+        {0x6AU, 0x10U, 20U},       /* USER_CTRL: I2C interface off */
+        {0x19U, 0x01U, 20U},       /* SMPLRT_DIV */
+        {0x1AU, 0x20U, 20U},       /* CONFIG */
+        {0x1BU, gyro_config, 20U}, /* GYRO_CONFIG: the stock firmware writes 0x08, +-500 deg/s */
+        {0x1CU, 0x08U, 20U},       /* ACCEL_CONFIG: +-4 g */
+        {0x1DU, 0x00U, 20U},       /* ACCEL_CONFIG2 */
     };
     for (uint32_t i = 0U; i < (sizeof(imu_setup) / sizeof(imu_setup[0])); i++) {
         imu_write(imu_setup[i].reg, imu_setup[i].value);

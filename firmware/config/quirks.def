@@ -35,6 +35,8 @@ EUC_QUIRK_DEF(KEIL_FTZ, 1, 0, "Keil soft-float library (every float and double o
               "Float and double results that would be denormal are flushed to zero, as in the Keil library.")
 EUC_QUIRK_DEF(DT_500HZ, 1, 0, "0x080037A8 ahrs_update",
               "The attitude filter integrates with a 2.000 ms step; the tick is 2.016 ms (rates 0.8 % low).")
+EUC_QUIRK_DEF(GYRO_500DPS_CLIP, 1, 0, "0x08006390 imu_init (GYRO_CONFIG 0x08)",
+              "The gyro range is +-500 deg/s: a pothole edge clips it and the attitude believes the wheel is level.")
 
 /* Commands and telemetry (USART1, BLE module) */
 EUC_QUIRK_DEF(CMD_LAST_BYTE_WINS, 1, 0, "0x08009A94 usart1_isr_body",
@@ -57,7 +59,7 @@ EUC_QUIRK_DEF(BOOT_TEXT_WAIT, 1, 0, "0x08003270 printf at boot",
               "Boot text on USART1 holds the CPU 3 ms; compat waits as long without sending it (DEBUG_PRINTF).")
 
 /* Motor drive and protection */
-EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 0, "0x08007C04 phase current check",
+EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 1, "0x08007C04 phase current check",
               "Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off.")
 EUC_QUIRK_DEF(PHASE_SAT_SWAPPED, 1, 0, "0x08007B4C phase current read",
               "Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale).")
@@ -109,6 +111,8 @@ EUC_QUIRK_DEF(NO_RECORD_CRC, 1, 0, "0x08004D48 settings_load",
               "Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid.")
 EUC_QUIRK_DEF(ODO_CARRY_EARLY, 1, 0, "0x080064A0 hall_step_count",
               "The odometer high word steps when the low word reaches 0xFFFF, one unit before the wrap.")
+EUC_QUIRK_DEF(RECORD_FIELDS_UNCHECKED, 1, 0, "0x08004D48 settings_load",
+              "Most loaded settings fields are used unchecked: a roll limit step of 15 moves the cut-off to 115 deg.")
 
 /* Platform */
 EUC_QUIRK_DEF(NO_WATCHDOG, 1, 0, "none: IWDG and WWDG are never started",

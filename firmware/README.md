@@ -86,7 +86,8 @@ configure time, the profile from the preset; the dev flag is set while images ar
 ## Profiles and quirks
 
 `config/quirks.def` lists every stock behaviour we reproduce only so our image can run in lock-step with the
-stock binary (the table is in [docs/quirks.md](docs/quirks.md)). Code tests one with:
+stock binary (the table is in [docs/quirks.md](docs/quirks.md); every cut-off and protection, stock and
+clean, is in [docs/cutoffs.md](docs/cutoffs.md)). Code tests one with:
 
 ```c
 if (EUC_QUIRK(ASIN_ACCEL)) { /* stock behaviour */ } else { /* clean behaviour */ }
@@ -122,21 +123,30 @@ covers the motor gates):
   (`euc_motor_set_command()`: finite, within ±1050). A hall fault, the start-up current-sensor check or a
   system hard cut turns the bridge off until reset, as in the stock firmware.
 - **Settings storage.** Clean records carry a CRC-16 in bits the stock firmware never uses, so a torn write
-  is skipped, and either firmware can still read the other's journal. Clean never erases the journal page
+  is skipped, and either firmware can still read the other's journal. A field that no command can produce
+  (a record from stock, the backup registers or a damaged slot) loads as its default
+  (`RECORD_FIELDS_UNCHECKED`). Clean never erases the journal page
   while the drive is enabled: a page erase stalls the CPU for tens of milliseconds.
 - **Faults and hangs.** Any exception without its own handler turns the bridge off (TIM8 main output enable)
   before it parks the core, in both profiles; the stock handler leaves the last PWM running. Clean starts
-  the independent watchdog (250 ms) with the first RTC tick and feeds it only while the tick and the main loop
-  run (quirk `NO_WATCHDOG`).
-- **Clean motor drive.** A phase over-current trips the bridge (quirk `NO_OVERCURRENT_TRIP`; the level and
-  sample count are `board.h` placeholders until the power stage is measured), out-of-range FOC values saturate
-  instead of wrapping (`INT16_WRAP`), and the angle holds while the hall state is invalid
-  (`HALL_INVALID_ANGLE_RUN`).
+  the independent watchdog (250 ms) with the first RTC tick and feeds it only from a tick in which the FOC
+  ran and the balance published a valid command; the boot after a watchdog reset keeps the bridge off. A
+  stalled main loop does not reset the wheel: it latches limp mode and beeps (quirk `NO_WATCHDOG`,
+  [docs/watchdog-and-overcurrent.md](docs/watchdog-and-overcurrent.md)).
+- **Clean motor drive.** Out-of-range FOC values saturate instead of wrapping (`INT16_WRAP`), and the angle
+  holds while the hall state is invalid (`HALL_INVALID_ANGLE_RUN`). The phase over-current trip exists but is
+  off in both profiles until its level is measured on the bench (`NO_OVERCURRENT_TRIP` is on in clean too;
+  a false trip mid-ride is a fall).
 - **One lost hall line.** The stock firmware never notices one stuck hall line: it rides on with a wrong
   angle in two sectors of six and a speed reading a third of the truth. Clean finds the silent line within
   three electrical turns, rebuilds the state from the other two lines, raises error bit 0x40 (fault beeps),
   lowers the speed tiltback to 10 km/h and allows no automatic restart after the next stop
   (`HALL_SINGLE_LINE_UNDETECTED`). The 62.5 ms invalid-state fault stays on the lines as read.
+- **Gyro range.** Stock sets the MPU-6500 gyro to +-500 deg/s; a pothole edge turns the shell faster, the gyro
+  clips and the attitude can read level while the shell is 24 deg nose down. Clean uses +-2000 deg/s (0.061
+  instead of 0.015 deg/s per count; calibration pages stay in +-500 deg/s counts) and, if an axis still reaches
+  its rail, re-seeds the low-passed accelerometer and raises the correction gain for 1 s
+  (`GYRO_500DPS_CLIP`).
 - **Service sequences.** `!@`, `cy` and `+-` come from an unpaired BLE link. Clean runs one only when nobody
   rides (the balance is not running) and the power button gets a short press within 10 s; it replies
   `SERVICE:CONFIRM`, `SERVICE:OK` or `SERVICE:DENIED` (`SERVICE_WITHOUT_CONFIRM`, docs/protocol/begode.md).

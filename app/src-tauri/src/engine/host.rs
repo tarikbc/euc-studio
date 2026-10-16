@@ -266,9 +266,6 @@ impl Host for RideHost {
     fn snapshot(&self, out: &mut Snapshot) {
         *out = self.session.snapshot();
         let s = &mut out.signals;
-        if let Some(live) = self.session.machine().plant().live_part() {
-            s.rider_lean_deg = live.physics().state().rider_lean_rad.to_degrees() as f32;
-        }
         s.target_speed_kmh = self.scenario.target_kmh(out.t_s) as f32;
     }
 

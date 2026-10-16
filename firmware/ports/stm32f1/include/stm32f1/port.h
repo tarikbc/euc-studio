@@ -94,6 +94,8 @@ void stm32f1_flash_rewrite(uint32_t address, const uint16_t *halfwords, uint32_t
 
 void stm32f1_watchdog_start(uint32_t timeout_ms);
 void stm32f1_watchdog_reload(void);
+/* True when the last reset came from the independent watchdog; clears the reset flags. */
+bool stm32f1_reset_was_watchdog(void);
 
 /* Serial ports ------------------------------------------------------------------------------------------- */
 
@@ -110,9 +112,10 @@ uint16_t stm32f1_bms_bytes_received(uint16_t reply_length);
 
 /* IMU, display, LED strip, buzzer ----------------------------------------------------------------------- */
 
-/* SPI3 (PB3..5, chip select PA15) and the MPU-6500 set-up; false when WHO_AM_I is wrong. */
+/* SPI3 (PB3..5, chip select PA15) and the MPU-6500 set-up with this GYRO_CONFIG value (0x08: +-500 deg/s,
+ * 0x18: +-2000 deg/s); false when WHO_AM_I is wrong. */
 void stm32f1_imu_bus_init(void);
-bool stm32f1_imu_init(void);
+bool stm32f1_imu_init(uint8_t gyro_config);
 /* accel x, y, z, temperature, gyro x, y, z (big-endian words swapped to host order) */
 void stm32f1_imu_read(int16_t words[7]);
 

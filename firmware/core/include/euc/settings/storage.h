@@ -12,10 +12,11 @@
  *
  * Saves (euc_storage_save: power-off paths and the drive-mode toggle; euc_storage_tick: clean only):
  *   stock  Every save goes to the slot found at boot, so a second save in one power cycle reprograms a used
- *          slot, which the port does as read-erase-rewrite of the whole page (quirk SAVE_SLOT_REUSE). Only
- * the power-off paths save (quirk SAVE_ONLY_POWEROFF). clean  Each save takes the next erased slot; a full
- * page is erased only by a save that is allowed to erase (power-off, or the drive is disabled). The backup
- * registers follow every change at once, and the journal saves a changed record after 1 s at standstill.
+ *          slot, which the port does as read-erase-rewrite of the whole page (quirk SAVE_SLOT_REUSE).
+ *          Only the power-off paths save (quirk SAVE_ONLY_POWEROFF).
+ *   clean  Each save takes the next erased slot; a full page is erased only by a save that is allowed to
+ *          erase (power-off, or the drive is disabled). The backup registers follow every change at once,
+ *          and the journal saves a changed record after 1 s at standstill.
  */
 #ifndef EUC_SETTINGS_STORAGE_H
 #define EUC_SETTINGS_STORAGE_H

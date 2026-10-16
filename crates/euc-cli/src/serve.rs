@@ -17,7 +17,7 @@ use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use euc_telemetry::EventKind;
 
 use crate::ble::{BleArgs, WheelLink};
-use crate::sim::{BLANK, board_with, cpu_factory, firmware, injection, load_scenario};
+use crate::sim::{BLANK, board_with, cpu_factory, injection, load_firmware, load_scenario};
 use crate::tcp::{Client, address};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
@@ -173,9 +173,8 @@ impl Server {
         };
         let files = WheelFiles::load(&ctx.profiles(), &wheel_id)?;
         let wheel = &files.profile;
-        let (image, label) = firmware(ctx, wheel, &args.firmware)?;
-        let sha256 = euc_profile::Sha256::digest(&image);
-        let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
+        let fw = load_firmware(ctx, &files, &args.firmware)?;
+        let (image, label, stock) = (&fw.image, fw.label.clone(), fw.stock);
         let injections = scenario
             .iter()
             .flat_map(|s| &s.inject)
@@ -191,7 +190,7 @@ impl Server {
         let config = MachineConfig {
             board: &board,
             stockmap: stock.then_some(&files.stockmap),
-            image: &image,
+            image,
             load_addr: wheel.board.app.base,
             hclk: files.hclk(),
             plant: PlantState::default(),
@@ -205,7 +204,7 @@ impl Server {
             .as_ref()
             .map_or((Rider::default(), Assist::default(), Terrain::flat()), |s| (s.rider, s.assist, s.terrain.clone()));
         let machine = Machine::new_live(&config, &euc_sim::registry(), cpu, files.live_on(rider, assist, terrain)?)?;
-        let mut session = Session::new(machine, stock.then_some(&files.stockmap), SAMPLE_HZ);
+        let mut session = Session::new(machine, fw.map.as_ref(), SAMPLE_HZ);
         let driver = match scenario {
             Some(scenario) => {
                 let ride = Ride::new(&scenario, &mut session)?;
