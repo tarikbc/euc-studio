@@ -41,7 +41,7 @@ pub enum Segment {
 /// let Some(Segment::Frame(frame)) = assembler.next_segment() else { panic!("expected a frame") };
 /// assert_eq!(frame.kind(), 0x04);
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Assembler {
     /// Bytes pushed but not yet classified.
     pending: VecDeque<u8>,

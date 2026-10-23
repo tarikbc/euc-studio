@@ -30,6 +30,7 @@
 use euc_devices::{DeviceFault, Mpu6500, SmartBms};
 use euc_physics::{Assist, Intent, Rider, Terrain};
 use euc_plant::fault::PlantFault;
+use euc_proto_begode::{Assembler, Segment, Telemetry};
 use euc_telemetry::{CHANNELS, EventKind, Signals, Snapshot};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -60,7 +61,8 @@ pub struct Scenario {
     /// Start of measured-speed lean phases; defaults to release time.
     #[serde(default)]
     pub phase_start_s: Option<f64>,
-    /// Optional bounded lean commands, advanced by measured ground-speed crossings.
+    /// Optional bounded lean commands, advanced by measured speed crossings (the ground speed,
+    /// or the speed the wheel shows: [`GateSpeed`]).
     #[serde(default, rename = "phase")]
     pub phases: Vec<Phase>,
     /// The rider (defaults for anything not given).
@@ -248,15 +250,33 @@ pub struct Phase {
     pub name: String,
     /// Desired lean from vertical, forward positive, subject to the rider's existing limits.
     pub lean_deg: f64,
-    /// Signed forward ground speed at which to advance, km/h.
+    /// Signed forward speed at which to advance, km/h: the ground speed, or what the wheel shows
+    /// (see [`speed`](Self::speed)).
     pub until_speed_kmh: f64,
     /// Direction of the measured threshold crossing.
     pub crossing: Crossing,
+    /// Which speed the gate reads (default: the ground speed).
+    #[serde(default)]
+    pub speed: GateSpeed,
     /// Maximum simulated time in this phase, seconds.
     pub timeout_s: f64,
 }
 
-/// Direction of a signed ground-speed crossing.
+/// Which speed a phase's gate reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateSpeed {
+    /// The true ground speed.
+    #[default]
+    Ground,
+    /// The speed the wheel shows: its telemetry frame 00, what the app and a rider see (about
+    /// 3 Hz). It differs from the ground speed by the firmware's own scale (the hall count and the
+    /// wheel's pole pairs), so a gate a rider judges by the display, next to a firmware speed
+    /// threshold, keeps its meaning through any plant calibration.
+    Shown,
+}
+
+/// Direction of a signed speed crossing.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Crossing {
@@ -718,7 +738,7 @@ pub enum PhaseStatus {
     NotStarted,
     /// The phase is still active (internal progress only).
     Running,
-    /// Healthy measured ground speed crossed the threshold.
+    /// The gate's speed (ground or shown) crossed the threshold while the ride was healthy.
     Reached,
     /// The gate did not complete before a timeout, interruption, or run end.
     TargetUnreachable,
@@ -835,6 +855,10 @@ struct PhaseRun {
     results: Vec<PhaseResult>,
     index: usize,
     previous_speed: f64,
+    /// The shown speed at the last observation (NaN before the first frame 00).
+    previous_shown: f64,
+    /// The wheel has shown a speed at least once.
+    shown_seen: bool,
     terminal_s: Option<f64>,
 }
 
@@ -844,6 +868,8 @@ impl PhaseRun {
             results: phases.iter().map(PhaseResult::pending).collect(),
             index: 0,
             previous_speed: 0.0,
+            previous_shown: f64::NAN,
+            shown_seen: false,
             terminal_s: None,
         }
     }
@@ -866,7 +892,17 @@ impl PhaseRun {
         Some(Intent::Lean(scenario.phases[self.index].lean_deg.to_radians()))
     }
 
+    /// One sample without a shown speed (the tests of ground-speed gates).
+    #[cfg(test)]
     fn observe(&mut self, scenario: &Scenario, sample: Sample, signals: &Signals, halted: bool) {
+        self.observe_shown(scenario, sample, f64::NAN, signals, halted);
+    }
+
+    /// One sample: the ground speed in `sample`, the shown speed in `shown_kmh` (NaN before the
+    /// wheel's first frame 00).
+    fn observe_shown(&mut self, scenario: &Scenario, sample: Sample, shown_kmh: f64, signals: &Signals, halted: bool) {
+        let previous_shown = std::mem::replace(&mut self.previous_shown, shown_kmh);
+        self.shown_seen |= shown_kmh.is_finite();
         if self.results.is_empty() || self.terminal_s.is_some() {
             return;
         }
@@ -907,8 +943,23 @@ impl PhaseRun {
         } else {
             None
         };
-        let reached = failure.is_none() && phase.crossed(self.previous_speed, sample.speed_kmh);
+        let reached = failure.is_none()
+            && match phase.speed {
+                GateSpeed::Ground => phase.crossed(self.previous_speed, sample.speed_kmh),
+                // Before the wheel's first frame 00 nothing is shown: no crossing, and no failure.
+                GateSpeed::Shown => {
+                    previous_shown.is_finite() && shown_kmh.is_finite() && phase.crossed(previous_shown, shown_kmh)
+                }
+            };
         let failure = failure.or_else(|| (!reached && elapsed + 1e-9 >= phase.timeout_s).then_some("timeout"));
+        // A shown-speed gate that never saw the wheel show a speed says so, not just "timeout".
+        let failure = failure.map(|reason| {
+            if reason == "timeout" && phase.speed == GateSpeed::Shown && !self.shown_seen {
+                "no_shown_speed"
+            } else {
+                reason
+            }
+        });
         if let Some(reason) = failure {
             result.status = PhaseStatus::TargetUnreachable;
             result.reason = Some(reason.into());
@@ -1273,6 +1324,46 @@ pub struct Ride {
     phases: PhaseRun,
     /// The next `[world]` route waypoint.
     waypoint: usize,
+    /// What the wheel shows: its telemetry frames, decoded from its BLE bytes as they come.
+    shown: Shown,
+}
+
+/// The speed the wheel shows, from its telemetry frame 00.
+#[derive(Debug, Clone)]
+struct Shown {
+    /// BLE bytes read so far.
+    read: usize,
+    frames: Assembler,
+    /// The last frame 00's speed, km/h; NaN before the first.
+    kmh: f64,
+}
+
+impl Default for Shown {
+    fn default() -> Self {
+        Self { read: 0, frames: Assembler::new(), kmh: f64::NAN }
+    }
+}
+
+impl Shown {
+    /// Reads the bytes the firmware sent since the last call; the last frame 00 sets the speed.
+    fn update(&mut self, session: &Session) -> f64 {
+        let tx = &session.machine().board().ble_tx;
+        // A host that takes the bytes away (an app runner) leaves fewer than were read.
+        if tx.len() < self.read {
+            self.read = 0;
+        }
+        let bytes: Vec<u8> = tx[self.read..].iter().map(|&(_, byte)| byte).collect();
+        self.read = tx.len();
+        self.frames.push(&bytes);
+        while let Some(segment) = self.frames.next_segment() {
+            if let Segment::Frame(frame) = segment
+                && let Telemetry::Live(live) = Telemetry::decode(&frame)
+            {
+                self.kmh = live.speed_kmh();
+            }
+        }
+        self.kmh
+    }
 }
 
 impl Ride {
@@ -1308,6 +1399,7 @@ impl Ride {
             distance_m: 0.0,
             phases: PhaseRun::new(&scenario.phases),
             waypoint: 0,
+            shown: Shown::default(),
         })
     }
 
@@ -1410,9 +1502,10 @@ impl Ride {
                 .is_some_and(|(_, how)| how == euc_physics::Leaving::LostFooting),
         };
         self.samples.push(sample);
+        let shown = self.shown.update(session);
         let previous_index = self.phases.index;
         let was_terminal = self.phases.terminal_s.is_some();
-        self.phases.observe(scenario, sample, &snapshot.signals, session.machine().halted().is_some());
+        self.phases.observe_shown(scenario, sample, shown, &snapshot.signals, session.machine().halted().is_some());
         if (self.phases.index != previous_index || (!was_terminal && self.phases.terminal_s.is_some()))
             && let Some(result) = self.phases.results.get(previous_index)
         {
@@ -1625,6 +1718,41 @@ kmh = 19.0
 
     fn phase_sample(t_s: f64, speed_kmh: f64) -> Sample {
         Sample { t_s, speed_kmh, pitch_deg: 0.0, fallen: false, cutoff: false, off_pedals: false }
+    }
+
+    #[test]
+    fn a_phase_gate_reads_the_speed_the_wheel_shows_when_asked() {
+        let gate = |key: &str| {
+            Scenario::from_toml(&format!(
+                "{RIDE}\n[[phase]]\nname = \"accelerate\"\nlean_deg = 15.0\nuntil_speed_kmh = 70.0\n\
+                 crossing = \"above\"\ntimeout_s = 10.0\n{key}"
+            ))
+        };
+        assert_eq!(gate("").unwrap().phases[0].speed, GateSpeed::Ground, "the ground speed by default");
+        assert_eq!(gate("speed = \"ground\"\n").unwrap().phases[0].speed, GateSpeed::Ground);
+        assert!(gate("speed = \"displayed\"\n").is_err(), "only ground or shown");
+        let s = gate("speed = \"shown\"\n").unwrap();
+        assert_eq!(s.phases[0].speed, GateSpeed::Shown);
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 0.0, 0.0);
+        // Before the wheel's first frame 00 nothing is shown: no crossing and no failure.
+        run.observe_shown(&s, phase_sample(6.0, 60.0), f64::NAN, &phase_signals(60.0, 5.0), false);
+        run.observe_shown(&s, phase_sample(6.5, 63.0), f64::NAN, &phase_signals(63.0, 6.0), false);
+        assert_eq!((run.index, run.terminal_s), (0, None));
+        // The wheel shows 1.107 times the ground speed: its 70 km/h comes at 63.2 km/h on the ground.
+        run.observe_shown(&s, phase_sample(7.0, 63.0), 69.7, &phase_signals(63.0, 7.0), false);
+        assert_eq!(run.index, 0, "shown 69.7 km/h is below the gate");
+        run.observe_shown(&s, phase_sample(7.31, 63.3), 70.1, &phase_signals(63.3, 8.0), false);
+        assert_eq!(run.index, 1, "shown 70.1 km/h crosses it at 63.3 km/h on the ground");
+        assert_eq!(run.results[0].status, PhaseStatus::Reached);
+        assert_eq!(run.results[0].end_speed_kmh, Some(63.3), "results keep the ground speed");
+        // A wheel that never shows a speed: the gate times out and says why.
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 0.0, 0.0);
+        run.observe_shown(&s, phase_sample(6.0, 60.0), f64::NAN, &phase_signals(60.0, 5.0), false);
+        run.observe_shown(&s, phase_sample(15.1, 63.0), f64::NAN, &phase_signals(63.0, 9.0), false);
+        assert_eq!(run.results[0].status, PhaseStatus::TargetUnreachable);
+        assert_eq!(run.results[0].reason.as_deref(), Some("no_shown_speed"));
     }
 
     #[test]

@@ -63,12 +63,14 @@ world ── floor (plane, or the scenario's terrain)
   └─ shell (free joint)     scanned solids (packs, seat, handle, roller, shock, pedals), IMU site;
        │                    origin at the axle at full extension
        ├─ carriage (slide "suspension")   stator, axle clamps, slider blocks; spring, damper, end stops
-       │    └─ wheel (hinge "axle", y)    tire: a torus, as a ring of 48 capsules
+       │    └─ wheel (hinge "axle", y)    tire: a torus, as one convex mesh
        └─ feet (hinge "lean", y)    rigid rider only: hinged at the ankles, ankle motor "ankle"
   └─ rider (free joint)     articulated (default): upper body
        ├─ left_thigh (hinge "left_hip") ── left_shank ("left_knee") ── left_foot ("left_ankle")
        └─ right_thigh ...                  each foot welded to the shell ("on_<side>_pedal"), or for
                                            articulated_contact_v1 a sole-on-pedal pair "<side>_sole_on_pedal"
+          articulated_lateral_v1: each leg adds hip ab/adduction and rotation, the tibia's rotation
+          and ankle roll (14 joints), and knee, shin and calf geoms that rest on the side pads
      rigid: one body, welded to the feet ("on_pedals") until it steps off
 ```
 
@@ -76,16 +78,47 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
 
 `Physics::mjcf()` returns the generated MJCF for inspection.
 
-- **Tire.** A torus around the axle with the scanned crown radius (tube 0.058 m, from
-  `geometry.toml` `[collision]`), built as a ring of 48 capsules (the radius ripples by 0.4 mm). The
-  ring is sized so the tire stands on its loaded rolling radius `radius_m` (0.2251 m): MuJoCo's contact
-  barely sinks in, so the 4.5 mm the real tire flattens under a rider is taken off the scanned free
-  radius (0.2296 m) up front. At speed it rolls on 0.223 m (MuJoCo's soft friction creeps about 1 %),
-  so the firmware reads speeds about 1 % high. Without measured shapes the tire is an ellipsoid with
-  semi-axes (r, half width, r). Contact `condim = 6` gives sliding, torsional and rolling friction.
-  Rolling resistance is MuJoCo's rolling friction, a length: `crr · r`, so the resisting torque is
-  `crr · N · r`, the classic `crr · N` force at the contact. The contact time constant (`solref`) is
-  the tire's softness.
+- **Tire.** A torus around the axle with the scanned crown radius (tube 0.058 m at 0.1716 m, so
+  0.2296 m outside: the free tire, from `geometry.toml` `[collision]`), built as one convex mesh: the
+  tube's outer half, 360 points around and 13 across, within 9 µm of the torus around and 0.5 mm
+  across. (Until 2026-10 it was a ring of 48 capsules. The ring sat 0.36 mm low between capsules and
+  handed its contact from capsule to capsule, so at 15 km/h the shell shook at 145 Hz, 48 times the
+  wheel's turn rate: IMU accel x 0.67 m/s² RMS, the pedal welds ±17 N, and ±250 N and accel z
+  9.8 m/s² RMS on a wheel without suspension. Holding 15 km/h on stock firmware took 9.5 A instead
+  of 5.8 A. On the mesh: accel x 0.07 and z 0.02 m/s², welds 0.6 N.) Without measured shapes the
+  tire is an ellipsoid with semi-axes (r, half width, r).
+  The tire is rubber at the owner's 25 psi. It meets each ground geom (the floor, each curb, the
+  streaming world's window and pool) through its own MuJoCo pair, soft along the normal and stiff
+  along the ground; nothing else touches it.
+  - Give: a 3.00-12 tire at 25 psi is about 125 kN/m (membrane estimate 2π · p · √(R · r_crown) =
+    2π · 172 kPa · √(0.2296 m · 0.058 m)). The pairs' constant impedance (0.5) with
+    `contact_time_s` 0.022 s gives that: the loaded Extreme sinks 9.5 mm and its axle rides at
+    0.2201 m. At speed it rolls on 0.2247 m (30 km/h on stock firmware), within 0.2 % of the
+    firmware's 0.2251 m. (Until 2026-10 the contact was near rigid, 0.4 mm under the loaded wheel,
+    about 3 MN/m, and the tire was built 4.5 mm small to stand on the loaded radius.)
+  - Grip: `friction` 1.1, the owner's report for dry asphalt (about 1.0-1.2). MuJoCo softens a
+    contact's friction with its normal: on the soft contact alone the tread crept 20-30 % under
+    drive and brake torque. The pairs' grip reference is stiff (`solreffriction` 0.002 s), which
+    needs elliptic friction cones (the model's, for every contact): a full-effort launch and
+    `hard-braking-30kmh` slip under 1 %. No brake of the stock firmware slides the tire: it caps the
+    brake at about −168 N·m (`hard-braking-30kmh`, and the same with a rider asking 10 m/s²), a
+    friction use of about 0.62 under the loaded wheel. The owner reports a rare slide in a very hard
+    brake; this firmware cannot reproduce it, and it stays an open item.
+  - Rolling resistance: a torque on the wheel against the ground, each tire contact's normal force
+    times its rolling coefficient `crr · r` (which the streaming world scales per surface), faded out
+    below 0.3 m/s so it never turns a wheel at rest. It is `crr · N · r` exactly: holding 5 km/h
+    takes 3.45 N·m against 3.23 N·m for `crr · N · r` (the rest is air). MuJoCo's own rolling
+    friction (`condim 6`, until 2026-10) delivered about a third of that near 5 km/h and 90-100 %
+    at cruising speeds. `crr` 0.014 is INFERRED from the owner's ride log 2026-10-17 (light rider):
+    its steady stretches above 15 km/h, with the slope (GPS altitude over distance) and the
+    acceleration taken out, against steady flat cruises of the model with the same rider, per
+    5 km/h band of battery power. A fit of `crr` alone gives 0.030-0.038 and a residual that changes
+    sign with speed (+50 to +180 W below 40 km/h, −160 W at 52-60 km/h), so it is rejected. `crr`
+    with a constant power fits within ±150 W: `crr` 0.014 (±0.01) and 270-400 W at every speed,
+    which rolling resistance cannot make (an open item, electrical.md "To measure").
+  - Curbs: with the sagittal rider on stock firmware the tire takes 5, 8 and 10 cm curbs at 5, 10
+    and 20 km/h, square on and at 30°. From 12 cm the rider falls at the impact: the legs do not
+    absorb it yet. 20 cm is not climbed.
 - **Wheel.** The spinning part of the hub motor (rotor, magnets, rim, tire). The stator rides on the
   suspension carriage (in the shell without a suspension). The spin inertia is set directly; the other
   two axes are half of it (a ring).
@@ -223,7 +256,8 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   and in the 30° launch of the full-effort runs, while the riderless wheel stays up. Contact feet
   stay opt-in until the controller keeps within what the soles carry. The `rider_on_pedals`
   check, in every scenario without a step-off, fails when this happens.
-- **The roll aid holds the upper body too** (`articulated_contact_v1` only). The legs have no roll joints and
+- **The roll aid holds the upper body too** (`articulated_contact_v1`; the lateral rider's
+  upper-body spring leans the whole machine instead, see the lateral rider). The legs have no roll joints and
   contact feet do not hold the body to the shell, so the same roll spring that holds the shell also
   holds the upper body at the wheel's roll target; it stands in for the hip and ankle roll a person
   balances with. Its torque and work add to the reported roll aid. Without it a one-foot stance, or
@@ -250,8 +284,9 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   the turn is `manual_turn_lean_max_deg` (35°, 0.7 g: 1.4 rad/s at 5 m/s, 0.76 rad/s at 9 m/s). The
   lean into the turn changes at up to 60°/s, and the forward lean at 30°/s. Turn requests do not
   fade at walking pace: a stopped rider turns on the spot, through the twist aid (an external yaw
-  torque on the shell, at most 60 N·m) that already held the heading below walking pace. The legs
-  have no twist joint, and the welded rider turns with the wheel. The line never runs more than
+  torque on the shell, at most 60 N·m) that already held the heading below walking pace. The
+  sagittal legs have no twist joint, and the welded rider turns with the wheel (the lateral rider's
+  hips and tibiae twist, and its hips turn the body with the shell). The line never runs more than
   0.5 rad ahead of the wheel, so a wheel held back (a wall, the twist aid's cap) winds up no turn
   that would go on after the input stops. On the stock firmware (2026-10-22)
   a full turn input at a stop turned the wheel 3.75 rad in 1.5 s, and at 3.8-4.1 m/s it settled at
@@ -304,14 +339,14 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   "rider off: both feet off the pedals (the wheel stays up)".
 
 What no rider can do yet: balance sideways or twist without the external aids (the lateral
-rider's later stages), step, hop, use the hips to recover when the soles' centre of pressure
-reaches heel or toe, or brace the legs against the shell. The rigid rider also cannot bend its
-knees and hips.
+rider's later stages), step, hop, or use the hips to recover when the soles' centre of pressure
+reaches heel or toe. Only the lateral rider's legs touch the shell: they rest and press on the
+side pads (stages 2 and 3). The rigid rider also cannot bend its knees and hips.
 
 **A hop with welded feet (feasibility, 2026-10-22; not built).** A hop would be the rider's own
 motion: crouch, straighten the legs fast, then tuck so that the feet lift the wheel. Welded feet
-can pull the wheel up; a real rider does it with the calves against the side pads, which the model
-does not have. A private test rode the Extreme's body on the plain PD balance, without firmware. At
+can pull the wheel up; a real rider does it with the calves against the side pads, which only the
+lateral rider has (this study rode the sagittal rider). A private test rode the Extreme's body on the plain PD balance, without firmware. At
 the crouch rate (3 rad/s) the legs never threw the body up, and the wheel stayed down at every joint
 cap. Straightening as fast as the joint caps allow, the tire rose 1.2 cm at today's 180 N·m per hip
 and knee. It rose 2.4 cm at 300 N·m and 6.2 cm at 400 N·m, and in both the scripted tuck then
@@ -320,6 +355,53 @@ controller: a full-torque extension, a timed tuck and a landing that the lean co
 The second is a stronger, still estimated, jump torque. The third is a check of what the stock
 firmware does with a wheel in the air. The fourth is a choice between the welds' pull and a
 calf-pad contact. This is a study phase of its own, not a control setting.
+
+**The absorb (2026-10-23; task 61, part 1).** The owner rides straight into curbs of about 15 cm on
+soft knees that let the wheel come up under him. With legs that held their posture, a curb that
+stopped the wheel in 30 ms turned the welded rider and the shell as one rigid body about the axle
+(about 200 kg·m²/s of the body's momentum): the shell pitched nose-down at 150-300°/s, more than
+the firmware's 210 N·m stops, and the rider fell. Most of that moment went through the ankles: the
+lean task and the joints' damping held the body upright over feet that had stopped with the wheel.
+A welded rider (`articulated_sagittal_v1` and `articulated_lateral_v1`) now absorbs. When the
+axle's speed across the ground falls faster than `absorb_decel_mps2` (30 m/s², the speed and its
+fall each averaged over 10 ms), the absorb starts in full, and it fades out over `absorb_time_s`
+(0.3 s). In it the knees fold by up to `absorb_fold_rad` (0.6 rad, the hips by the crouch's share),
+the hips and knees hold their posture at 0.15 of `joint_kp`, every leg joint keeps 0.2 of
+`joint_kd`, and the ankles' lean task gives way. All are ESTIMATES. Two other triggers did not do:
+a sole's load (the sagittal rider's soles take peaks of over three times their share in a full
+manual turn) and the speed along the heading (it drops by a tenth for a few milliseconds whenever
+the shell's heading jumps in a hard turn). Riding to 15 km/h, braking hard to a stop and a full
+manual turn at 5 m/s do not start it; a 10 cm curb at 10 km/h does, and the knees fold by about 0.5
+rad. `RiderState::absorb` reports it. The absorb alone does not carry a rider over a 15 cm curb
+(stock firmware, the convex-mesh tire of bundle P1): the shell stays within −12° while the wheel
+climbs, but the body goes on 0.5 m ahead, leaning 0.5 rad, and the recovery overshoots: the brace
+(below) is needed too. In the shipped scenarios (stock firmware, the convex-mesh tire) it starts
+once each in `pothole-5cm-20kmh`, `world-pothole-15kmh`, `world-curb-up-30deg`,
+`world-curb-up-90deg` and `world-stairs-down-5kmh`, and never in `hard-braking-30kmh` or the
+full-effort, overlean and step-off runs.
+
+**The brace (2026-10-23; task 61, part 2).** A rider who sees a curb coming leans back a little and
+bends the knees. The scripted articulated rider looks ahead every 10 ms: from the ground just in
+front of the tire, at points at most 15 cm apart along the heading, out to `brace_lead_s` (0.55 s)
+at the speed now (`Physics::ground_ray_m`, the ground only: the strip and its curbs, or the city).
+While two neighbouring points rise by more than `brace_step_m` (7 cm), a step and not a slope (that
+slope would be steeper than any road), it braces: it leans back by `brace_lean_deg` (5.7°) on top
+of the lean its intent asks for, and its knees bend by `brace_crouch_rad` (0.3 rad, or the crouch
+asked for if deeper). Once the tire meets the step the ground in front of it is the step's top, the
+brace ends and the absorb takes over. 7 cm is a DEFAULT: the convex-mesh tire climbs 8 cm curbs at
+every speed and angle without help and 10 cm only at walking pace (posefix's curb table); the lean,
+the crouch and the lead are ESTIMATES from the K0 study. No brace below 1 m/s, for a step down, or
+by hand: in Free Ride the player braces, or not, as a rider does. `RiderState::brace_lean_rad`
+reports it. On the stock firmware with the convex-mesh tire, square on: with the absorb and the
+brace, the sagittal rider crosses a 15 cm curb at 10, 12 and 15 km/h (the shell within −17°, −16°
+and −21°), the lateral rider at 8, 10, 12 and 15 km/h (−14° to −24°); both cross 10 cm at 10 km/h
+(−3°), and 20 cm still throws them. At 8 km/h the sagittal rider's wheel gets only 7 cm up the face
+and rolls back: on this rigid mesh the wheel itself cannot climb 15 cm at 8 km/h with that rider.
+On posefix's soft 25 psi tire (bundle P1) both riders cross 15 cm at 8, 10 and 15 km/h (−4° to
+−15°), and 20 cm still throws them. In the shipped scenarios (stock firmware, the convex-mesh tire)
+the rider braces only in `world-curb-up-30deg` and `world-curb-up-90deg`, and with the absorb it
+now rides both (each fell without them); it does not brace up the 20 % climb of
+`hill-climb-low-battery` or the plaza ramp of `world-ramp-up-7kmh`, which are slopes.
 
 ### The lateral rider (opt-in)
 
@@ -419,12 +501,14 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
 - **Honest welded soles.** Both feet are welded to the pedals. A real sole rolls its pedal only as
   hard as its centre of pressure can move to the edge of the foot, so each ankle's roll motor is held
   to the sole's load times half its width (4.5 cm), within its strength. The load is the weld's
-  constraint force along the deck's normal, averaged over 20 ms. The tire's ring of 48 capsules
-  ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on the suspension-less test
-  wheel each weld's load swings by up to ±250 N (sagittal rider) and ±40 N (lateral rider) about
-  half the rider's weight, on the Extreme's profile with its suspension by about ±17 N. (Stage 1
-  took the swing for a ringing of the welds; the tire's ripple explains it, and it vanishes on an
-  ellipsoid tire.) `Physics::sole_loads()` reports each sole's load
+  constraint force along the deck's normal, averaged over 20 ms, which keeps a step's or a bump's
+  load and drops the fast part. (Until 2026-10 the tire was a ring of 48 capsules that rippled the
+  wheel at 48 times its turn rate, 144 Hz at 15 km/h: on the suspension-less test wheel each weld's
+  load swung by up to ±250 N (sagittal rider) and ±40 N (lateral rider) about half the rider's
+  weight, on the Extreme's profile with its suspension by about ±17 N. Stage 1 took the swing for a
+  ringing of the welds. On the convex-mesh tire a weld's load varies by 0.6 N RMS with the
+  suspension and 41 N without one, most of it the mesh's ripple near 1 kHz.)
+  `Physics::sole_loads()` reports each sole's load
   (negative: the foot pulls its pedal, which only a weld can), its ankle roll moment and the limit
   it was held to; `Physics::sole_pulls()` says whether a foot pulls. Riding at 15 km/h the soles
   carry the rider's weight within 1 % and no foot pulls.
@@ -438,7 +522,7 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   law, 5000 N·m/rad and 500 N·m·s/rad each, so 10000 and 1000 together, about the wheel's roll and
   roll rate) give a torque about the heading through the tire's contact, and each body of wheel
   and rider takes the force and moment of its own part of one rigid lean about that line (its
-  mass times its acceleration there, and its own inertia about the heading). The aid then loads no
+  mass times its acceleration there, and its inertia times its turn). The aid then loads no
   joint, pad or pedal: in free flight without gravity, with the legs holding their stance, 2000 N·m
   leans the machine 0.07 rad in 0.1 s and moves no joint by more than 0.001 rad beyond what the
   stance alone moves it; the same torque on the shell alone rolls the shell 0.8 rad and bends a
@@ -486,6 +570,9 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   5 m/s settles at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h
   straight with no roll. Stage 1 passed `ride-20kmh-stop` on the stock firmware at 2.45 times real
   time (sagittal 2.51 in the same session).
+- **Tests.** `cargo test -p euc-physics --test lateral` (the body, its joints and soft knees) and
+  `cargo test -p euc-sim --test lateral_pads` (the legs on the Extreme's pads, its turns); the curb
+  answer of both articulated riders in `--test absorb` and `--test brace` (euc-physics).
 
 ## Aids (M2)
 
@@ -493,7 +580,21 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   torque about the heading holds the shell upright: `τ = −k·roll − c·roll_rate`, k = 5000 N·m/rad,
   c = 500 N·m·s/rad, far stiffer than the toppling moment of wheel and rider (about 1200 N·m/rad).
   It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a
-  scenario to see the wheel fall over sideways.
+  scenario to see the wheel fall over sideways. Since 2026-10-23 the spring's torque leans wheel and
+  rider as one about the heading through the tire's contact for the rigid and welded riders too, as
+  for the lateral rider (each body takes its part of one rigid lean; contact feet keep a torque on
+  the shell). As a bare torque on the shell it also yawed the machine when the rider's mass lay far
+  behind the contact. In the hard brake of `full-effort-70kmh-stop-soc100` in the city (rider 31°
+  back, a small roll from the height field) that yaw made the heading loop ask for more lean: the
+  roll grew from 0.5° at 22.0 s to 9.7° at 23.5 s and the wheel fell at 15 km/h. Leaned as one, the
+  roll stays under 0.5° (rigid and sagittal riders). On the flat plane the roll stays at zero either
+  way. Leaned as one the aid turns the whole machine about the contact, so its gains are doubled
+  (10000 N·m/rad and 1000 N·m·s/rad, as the lateral rider's two springs together): with the single
+  gains the rigid rider's full manual turn at 3 m/s rolled in too slowly, overleaned and the
+  firmware cut out. Each body also takes the part of its own turning moment that lies off the heading: a body
+  tilted in the lean (a rider leaning back) needs it. With the part along the heading only, 2000 N·m
+  on a rigid rider leaning 29° back, in free flight without gravity, still yawed the machine at
+  1.5 rad/s after 0.1 s; with the whole moment at 0.003 rad/s (a bare torque on the shell: 17 rad/s).
 - **Upper-body roll aid** (`articulated_contact_v1` and `articulated_lateral_v1`). The same law,
   with the same gains, holds the articulated upper body. For contact feet it holds the body at the
   wheel's roll target, because contact feet do not hold the body to the shell and the legs cannot
@@ -517,12 +618,12 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 
 | Parameter | Value | Source |
 |---|---|---|
-| `tire.radius_m` | 0.2251 m | INFERRED: loaded rolling radius, 28 pole pairs × 0.0505 m (the firmware's distance per electrical turn) / 2π; the scanned 3.00-12 tire's free radius is 0.2296 m |
+| `tire.radius_m` | 0.2251 m | ESTIMATE: loaded rolling radius, 4.5 mm under the scanned 3.00-12 tire's free radius of 0.2296 m. The firmware's 0.0505 m per electrical turn with 31 pole pairs then shows 1.107 × the true speed, as the owner's ride log does (electrical.md) |
 | `tire.half_width_m` | 0.0407 m | MEASURED: 81.4 mm wide (used only without a torus) |
-| `geometry.toml` `tire_torus` | tube 0.058 m | MEASURED: crown lateral radius; the ring radius follows `radius_m` |
-| `tire.friction` | 0.9 | DEFAULT: rubber on dry asphalt |
-| `tire.crr` | 0.012 | DEFAULT: research sim.py |
-| `tire.contact_time_s` | 0.02 s | DEFAULT: about 200 kN/m |
+| `geometry.toml` `tire_torus` | tube 0.058 m at 0.1716 m | MEASURED: crown lateral radius; 0.2296 m outside, the free tire |
+| `tire.friction` | 1.1 | ESTIMATE: owner's report, dry asphalt about 1.0-1.2 |
+| `tire.crr` | 0.014 | INFERRED: owner's ride log 2026-10-17 (light rider), fit with a constant power term, ±0.01 |
+| `tire.contact_time_s` | 0.022 s | INFERRED: 25 psi (owner's report), about 125 kN/m with the pairs' impedance 0.5: 9.5 mm under the loaded wheel |
 | `wheel.mass_kg` | 16 kg | DEFAULT: rotor, rim and tire |
 | `wheel.spin_inertia_kgm2` | 0.487 kg·m² | DEFAULT: 0.6·m·r² |
 | `shell.mass_kg` | 20 kg | DEFAULT: 42 kg with the wheel and the carriage |
@@ -559,9 +660,9 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `articulation.foot_offset_m` | 0.015 m | DEFAULT: each foot this far outside its pedal's centre (`articulated_lateral_v1`) |
 | `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
+| `articulation.absorb_decel_mps2`, `absorb_time_s`, `absorb_fold_rad` | 30 m/s², 0.3 s, 0.6 rad | ESTIMATE: the absorb's trigger (the axle's fall in speed over 10 ms; `inf` turns it off), how long it lasts and how far the knees fold (`articulated_sagittal_v1` and `articulated_lateral_v1`) |
 | `articulation.turn_crouch`, `turn_spread`, `turn_press_n_per_rad` | 0.5, 1.3, 100 N | ESTIMATE from the owner's report: per radian of a turn's lean, the knees' deeper bend (rad), the inside knee's spread from its pad (rad) and the outside leg's harder rest on its pad (`articulated_lateral_v1`) |
-| `cda_m2` | 0.6 m² | air drag, upright |
-| `tuck_cda_m2` | 0.42 m² | ESTIMATE: air drag at a full crouch, by hand only (Free Ride): the drag area falls linearly with the knees' bend from `cda_m2`. 30 % under upright: a forward standing posture lowers a cyclist's drag area by 23-26 % (11 riders, 2019) and a full aero position by about 38 % |
+| `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |
 | `control.speed_kp`, `speed_ki` | 0.6 /s, 0.03 /s² | |
@@ -570,9 +671,10 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
 | `control.manual_turn_rate_max_rad_s`, `manual_turn_lean_max_deg`, `manual_turn_lean_rate_deg_s`, `manual_lean_rate_deg_s` | 2.5 rad/s, 35°, 60°/s, 30°/s | DEFAULT, riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, falling with speed to `g·tan(35°)/v`; scripted riding keeps 1.0 rad/s, 20°, 30°/s and 12°/s |
+| `control.brace_lead_s`, `brace_step_m`, `brace_lean_deg`, `brace_crouch_rad` | 0.55 s, 0.07 m, 5.7°, 0.3 rad | Scripted riding, articulated riders: how far ahead the rider looks for a step up (0: no brace), the smallest step it braces for (DEFAULT: the mesh tire climbs 8 cm alone), and how far it leans back and bends the knees then (ESTIMATES) |
 | `control.manual_drive_lean_max_deg`, `manual_drive_kp` | 22°, 1.2 /s | DEFAULT, manual drive only (`Intent::Accel`): the drive lean limit (stock follows up to 22° at low speed) and the reference-speed gain (tuned on stock at 40 km/h: holds speed, stops cleanly) |
 | `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
-| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body |
+| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body; for `articulated_lateral_v1` the shell's and the upper body's springs lean wheel and rider as one |
 
 ## Scenarios
 
@@ -606,6 +708,8 @@ bodies with their shapes, channel schema), the telemetry batches of `euc-telemet
 - IMU position and mounting signs: open the shell; check the signs with the wheel tilted.
 - Shell inertia: swing the wheel as a pendulum from the handle.
 - Rolling resistance: coast-down from 10 km/h with the motor off (free-wheel), log the speed.
+- Tire stiffness: the axle's height above the floor at 25 psi with and without the rider, the
+  suspension's own sag taken out.
 - Suspension: the shock's make, spring rate (stamped on the coil), stroke and preload; the axle
   travel from top-out to bottom-out (zip tie on a rail); the sag with the rider on (pedal height
   above the floor with and without the rider).

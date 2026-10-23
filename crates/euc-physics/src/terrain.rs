@@ -267,6 +267,13 @@ impl Terrain {
         ground
     }
 
+    /// The names of the ground geoms (`ground`): the floor, then a box per curb.
+    pub(crate) fn geom_names(&self) -> Vec<String> {
+        let curbs =
+            self.features.iter().enumerate().filter(|(_, f)| f.is_solid()).map(|(index, _)| format!("curb_{index}"));
+        std::iter::once("floor".to_owned()).chain(curbs).collect()
+    }
+
     /// The road's profile (`road`) sampled for the heightfield.
     fn grid(&self) -> Grid {
         let columns = ((self.length_m + BEHIND_M) / COLUMN_M).ceil() as usize + 1;

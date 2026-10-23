@@ -218,6 +218,9 @@ pub struct RiderController {
     turn_lean: f64,
     /// A person rides by hand (Free Ride, Ride's manual mode): the manual limits apply.
     manual: bool,
+    /// How far the rider leans back for a step up ahead now, radians; 0 without a brace (set by
+    /// the physics each look ahead).
+    brace_lean: f64,
     /// Manual drive: the reference speed the asks add up to, m/s.
     drive_speed: f64,
     /// Manual drive: a clean stop holds the reference at zero against an ask of this sign.
@@ -263,6 +266,7 @@ impl RiderController {
             applied_turn_rate: 0.0,
             turn_lean: 0.0,
             manual: false,
+            brace_lean: 0.0,
             drive_speed: 0.0,
             drive_stop: None,
             drive_peak: 0.0,
@@ -294,6 +298,18 @@ impl RiderController {
     /// Whether a person rides by hand ([`set_manual`](Self::set_manual)).
     pub const fn manual(&self) -> bool {
         self.manual
+    }
+
+    /// Braces for a step up ahead, or stops: leans back by `brace_lean_deg` on top of the lean the
+    /// intent asks for (the physics looks ahead, scripted riding only).
+    pub(crate) fn set_brace(&mut self, brace: bool) {
+        self.brace_lean = if brace { self.control.brace_lean_deg.to_radians() } else { 0.0 };
+    }
+
+    /// How far the rider leans back for a step up ahead now, radians; 0 without a brace
+    /// ([`set_brace`](Self::set_brace)).
+    pub const fn brace_lean(&self) -> f64 {
+        self.brace_lean
     }
 
     /// The largest manual turn rate at `speed` (m/s), rad/s: `manual_turn_rate_max_rad_s` at a
@@ -549,6 +565,7 @@ impl RiderController {
             }
             Intent::Accel(asked) => self.drive(asked, felt, s),
         };
+        let target = target - self.brace_lean;
         self.desired_lean = target;
         let target = target.clamp(-max_lean, max_lean);
         let rate = if self.manual { c.manual_lean_rate_deg_s } else { c.lean_rate_deg_s };

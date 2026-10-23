@@ -31,11 +31,12 @@ radius_free_m = 0.2296         # MEASURED: half the above = axle height when unl
 tread_base_radius_m = 0.2250   # MEASURED: between the knobs, +-0.5 mm
 width_m = 0.0814               # MEASURED: widest sidewall section (at radius 0.19 m), +-0.5 mm
 crown_radius_m = 0.058         # MEASURED: lateral curvature of the tread envelope, +-3 mm
-# Firmware: 0.0505 m per electrical turn. With 28 pole pairs that is a 1.414 m rolling
-# circumference, radius 0.2251 m = 4.5 mm under the free knob radius (load and knob squash).
-# 26 pole pairs (plant.toml) give 0.2090 m, 20.6 mm smaller than this tire. INFERRED
+# Loaded rolling radius 0.2251 m = 4.5 mm under the free knob radius (load and knob squash). The
+# firmware counts 0.0505 m per electrical turn; the owner's ride log (2026-10-17) has GPS at 0.905
+# of the displayed speed, so with this tire the motor has 31 pole pairs and the display reads
+# 1.107 x the true speed (docs/models/electrical.md). ESTIMATE (radius), INFERRED (pole pairs)
 rolling_radius_m = 0.2251
-pole_pairs = 28                # INFERRED from the line above; only 28 fits a 3.00-12 tire
+pole_pairs = 31                # INFERRED from the owner's ride log, as plant.toml
 
 [rim]
 bead_diameter_m = 0.3048       # MEASURED: the sidewall ends at radius 0.150-0.152 m (12 in nominal)
@@ -261,8 +262,8 @@ above_axle_m = 0.15
 # half sizes; capsules: end points and radius.
 [collision]
 # Tire as a torus: tube 0.058 at 0.1716 from the axle matches the knob tips and the crown within
-# 1.5 mm up to +-37 mm off the centre plane (about 40 deg of lean). In MuJoCo: a ring of 48
-# capsules (0.37 mm ripple), or the sdf torus plugin.
+# 1.5 mm up to +-37 mm off the centre plane (about 40 deg of lean). In MuJoCo: one convex mesh of
+# the tube's outer half (crates/euc-physics/src/mjcf.rs), or the sdf torus plugin.
 tire_torus = { major_m = 0.1716, minor_m = 0.058 }
 # Same outer diameter, true width, sharper crown (if the side reach matters more than the crown).
 tire_torus_width = { major_m = 0.1889, minor_m = 0.0407 }

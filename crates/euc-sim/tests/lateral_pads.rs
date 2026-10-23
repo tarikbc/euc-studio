@@ -140,8 +140,8 @@ fn in_a_moderate_turn_the_outside_leg_rests_harder_and_the_inside_knee_spreads()
 /// A hard turn (the full manual turn rate at 5 m/s, about 35° of lean) as the owner rides one:
 /// the knees bend deeper, the inside knee spreads off its pad, the outside leg rests on its pad
 /// and the inside sole carries more of the rider. The legs hold the body, so the aids lean the
-/// whole machine and turn the shell only: they do about the work they do for the sagittal
-/// rider, whose welded legs hold its body by construction.
+/// whole machine and turn the shell only: their roll work stays near the sagittal rider's, whose
+/// welded legs hold its body by construction, and their yaw work stays small.
 #[test]
 fn in_a_hard_turn_the_knees_bend_the_inside_knee_spreads_and_the_inside_sole_carries_more() {
     let mut sagittal = (0.0, 0.0);
@@ -184,7 +184,10 @@ fn in_a_hard_turn_the_knees_bend_the_inside_knee_spreads_and_the_inside_sole_car
             continue;
         }
         assert!(work.0 < 1.4 * sagittal.0, "{work:?} against {sagittal:?}");
-        assert!(work.1.abs() <= sagittal.1.abs(), "{work:?} against {sagittal:?}");
+        // The upper body's yaw aid is gone: in stage 2 it made this turn's yaw work about 200 J.
+        // The shell's own twist aid does a few joules to tens of joules, as the tire's spin
+        // friction asks of it, for either rider.
+        assert!(work.1.abs() < 30.0, "{work:?} against {sagittal:?}");
         // A left turn (positive rate) has the left leg (0) inside.
         let (inside, outside) = if rate > 0.0 { (0, 1) } else { (1, 0) };
         let bent = knees(&physics);

@@ -827,4 +827,33 @@ check = "no_cutoff"
         assert_eq!(text, &format!("{:05}.{}", metres / 1000, (metres / 100) % 10));
         assert_ne!(text, "00000.0", "the display must advance after 100 m");
     }
+
+    /// The stock firmware holds 15 km/h on the smooth tire with the torque its rolling resistance
+    /// and the air ask for. Over 12.5-15 s of `rider-steps-off-15kmh` the wheel torque averages
+    /// 9.4 N·m, 3.8 of it `crr · N · r` at crr 0.014. The ring of 48 capsules the first mesh
+    /// replaced took 10.3 N·m at a third of that rolling resistance (docs/models/body.md, "Tire");
+    /// a tire that drags again shows here. The torque, not the current, is the check: it does not
+    /// depend on the motor model.
+    #[test]
+    #[ignore = "needs the stock image in the local firmware cache"]
+    fn stock_firmware_holds_15_kmh_on_the_smooth_tire() {
+        let mut built = build_host("rider-steps-off-15kmh", "stock", &mut |_| {}).expect("host");
+        let mut rig = Rig::new(built.host.as_mut());
+        rig.run(12.5);
+        let mut snap = Snapshot::default();
+        let (mut speed, mut iq, mut torque) = (0.0, 0.0, 0.0);
+        let samples = 300;
+        for _ in 0..samples {
+            rig.run(1.0 / 120.0);
+            rig.host.snapshot(&mut snap);
+            speed += f64::from(snap.signals.speed_kmh);
+            iq += f64::from(snap.signals.iq_a);
+            torque += f64::from(snap.signals.torque_nm);
+        }
+        let [speed, iq, torque] = [speed, iq, torque].map(|sum| sum / f64::from(samples));
+        println!("12.5-15 s: {speed:.2} km/h on {torque:.2} N·m, iq {iq:.2} A");
+        assert!(rig.host.halted().is_none());
+        assert!((14.0..15.5).contains(&speed), "speed {speed}");
+        assert!(torque < 10.5, "{torque} N·m to hold {speed} km/h: the tire drags");
+    }
 }

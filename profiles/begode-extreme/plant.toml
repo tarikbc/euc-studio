@@ -8,11 +8,11 @@ grid_us = 5.0                 # integration step
 seed = 1                      # sensor and hall noise
 
 [motor]
-pole_pairs = 28               # INFERRED: firmware 0.0505 m per electrical turn on the measured 3.00-12 tire (rolling radius 0.2251 m)
+pole_pairs = 31               # INFERRED: owner's ride log 2026-10-17: GPS / displayed speed 0.905 over 54 steady rows; with the tire's 0.2251 m the firmware's 0.0505 m per electrical turn shows 1.107 x the true speed (electrical.md)
 resistance_ohm = 0.080        # DEFAULT: phase resistance of a 134 V hub motor
 ld_h = 0.000200               # DEFAULT: surface magnets, Ld = Lq
 lq_h = 0.000200               # DEFAULT
-flux_wb = 0.0205              # DEFAULT: 109 km/h no-load at 134.4 V (published), SVPWM limit Vbus/sqrt(3)
+flux_wb = 0.0180              # INFERRED: owner's ride log 2026-10-17: steady-state firmware PWM against speed, within 5 % at 40-74 km/h displayed
 direction = -1                # FIRMWARE: rolling forward lowers the electrical angle (negative hall count)
 angle_offset_deg = 0.0
 
@@ -65,11 +65,11 @@ motor = { heat_capacity_j_per_k = 3000.0, resistance_k_per_w = 0.3 }   # DEFAULT
 # The collision shapes (tire torus, shell solids) come from geometry.toml [collision]. Heights are
 # from the axle at full extension (as scanned), positive up.
 [body.tire]
-radius_m = 0.2251             # INFERRED: loaded rolling radius; 28 pole pairs x 0.0505 m / 2 pi (free radius 0.2296 MEASURED)
+radius_m = 0.2251             # ESTIMATE: loaded rolling radius, 4.5 mm under the MEASURED free radius 0.2296 m (load and knob squash; the owner puts about 5 mm of the sag in the tire)
 half_width_m = 0.0407         # MEASURED: 3.00-12 tire, 81.4 mm wide
-friction = 0.9                # DEFAULT: rubber on dry asphalt
-crr = 0.012                   # DEFAULT: rolling resistance coefficient
-contact_time_s = 0.02         # DEFAULT: tire softness, about 200 kN/m under the loaded wheel
+friction = 1.1                # ESTIMATE: owner's report, dry asphalt about 1.0-1.2
+crr = 0.014                   # INFERRED: owner's ride log 2026-10-17 (light rider), fit with a constant power term, +-0.01
+contact_time_s = 0.022        # INFERRED: 25 psi (owner's report), about 125 kN/m: 9.5 mm under the loaded wheel
 
 [body.wheel]
 mass_kg = 16.0                # DEFAULT: rotor, magnets, rim and tire (the stator rides on the suspension carriage)

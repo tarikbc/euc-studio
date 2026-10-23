@@ -25,13 +25,17 @@ cargo run --release -p euc-cli -- sim compare --scenario scenarios/<name>.toml -
 Useful options of `sim run`: `--settings <preset>` (or `blank`) overrides the scenario's settings,
 `--max-quantum <n>` sets the emulator's quantum (see "Robustness" below), `--record <file.eucrec>`
 writes a recording (see [recordings.md](../recordings.md): `euc rec info`, CSV export, replay in the
-studio, Python), and `--json` prints the result as JSON. `sim compare` takes
+studio, Python), `--sample-hz <n>` sets the samples per simulated second in the recording and the
+checks (100 by default), `--timing fixed|flash|flash-wN` picks the instruction timing (see
+[CPU timing](../models/cpu-timing.md)), `--firmware ours-sil` runs our firmware as the host SIL
+library with `--quirks <set>` (see [sil.md](../sil.md)), and `--json` prints the result as JSON. `sim compare` takes
 `--tolerance <file>` (see [compare.md](../compare.md)). Each check prints one line, `PASS` or `FAIL`,
 then `RESULT`.
 
 The studio lists scenarios in its run bar: a development build reads every `scenarios/*.toml` when the
-web view connects (a new file shows without a rebuild); a release build offers the two built-in ones,
-`ride-20kmh-stop` and `balance-60s`.
+web view connects (a new file shows without a rebuild); a release build embeds the 20 shipped
+scenarios (`app/src-tauri/src/engine/scenarios.rs`). The acceptance runs in `scenarios/world/` are not
+embedded: open them with Import.
 
 The CLI and studio use CPI 2.0 with exception overhead.
 For historical reference timing, `sim run` accepts `--cpi 1.25 --no-exception-timing`.
@@ -99,6 +103,7 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `articulation.foot_offset_m` | 0.015 | How far each foot stands outside its pedal's centre (m), for `articulated_lateral_v1`. |
 | `articulation.hip_adduction_max_nm`, `articulation.hip_rotation_max_nm`, `articulation.knee_rotation_max_nm`, `articulation.ankle_roll_max_nm` | 150, 50, 25, 35 | Strongest hip ab/adduction, hip rotation, tibial rotation and ankle roll per joint (N·m), for `articulated_lateral_v1`. |
 | `articulation.pad_friction`, `articulation.pad_contact_time_s`, `articulation.pad_preload_n` | 0.3, 0.03, 20 | A leg on a side pad: friction, contact softness (s), and how hard it rests there (N), for `articulated_lateral_v1`. |
+| `articulation.absorb_decel_mps2`, `articulation.absorb_time_s`, `articulation.absorb_fold_rad` | 30, 0.3, 0.6 | The absorb: a wheel that slows faster than this (m/s², over 10 ms; `inf`: off) makes the legs give way for this long (s), the knees folding this far (rad), for the welded riders. |
 | `articulation.turn_crouch`, `articulation.turn_spread`, `articulation.turn_press_n_per_rad` | 0.5, 1.3, 100 | Per radian of a turn's lean: how much deeper the knees bend (rad), how far the inside knee swings out from its pad (rad) and how much harder the outside leg rests on its pad (N), for `articulated_lateral_v1`. |
 | `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
 | `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. Contact feet carry less: about 70 N·m backward and 120 N·m forward for the default rider, while the centre of pressure stays under the soles. |
@@ -108,9 +113,18 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `control.tiltback_feel_deg` | 2 | Tiltback the rider tolerates before easing off; `90` means the rider ignores tiltback. |
 | `control.tiltback_ease_kmh_per_deg` | 1.5 | Speed given up per degree beyond that (`0`: ignores tiltback). |
 | `control.tiltback_ease_brake` | 1.0 | Strongest braking while easing off, m/s². |
-| `control.steer_kp`, `control.steer_kd`, `control.steer_max_nm` | 2000, 200, 60 | How the rider keeps the line (world +x). |
+| `control.heading_kp`, `control.turn_rate_max_rad_s` | 1.0, 1.0 | Turn rate asked per radian of heading error (1/s), and the fastest turn asked (rad/s). |
+| `control.turn_lean_max_deg`, `control.turn_lean_rate_deg_s` | 20, 30 | Largest lean into a turn (the cambered tire carves it) and how fast it changes. |
+| `control.twist_fade_mps` | 1.5 | Walking-speed scale (m/s): turn requests fade below it, and the heading twist spring fades with squared speed over it. |
+| `control.steer_kp`, `control.steer_kd`, `control.steer_max_nm` | 2000, 200, 60 | The external twist aid that keeps the heading: the start heading (`[world] start.heading_deg`; world +x without a world), then each `route` waypoint in turn. |
+| `control.command_delay_s`, `control.feedback_delay_s` | 0, 0 | Experimental: delay of the rider's commands and of what the rider senses, simulated seconds (0 to 0.30). |
 | `control.manual_turn_rate_max_rad_s`, `control.manual_turn_lean_max_deg`, `control.manual_turn_lean_rate_deg_s`, `control.manual_lean_rate_deg_s` | 2.5, 35, 60, 30 | Riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, the lean into turns and how fast the leans change. A scenario's own riding never uses them. |
+| `control.brace_lead_s`, `control.brace_step_m`, `control.brace_lean_deg`, `control.brace_crouch_rad` | 0.55, 0.07, 5.7, 0.3 | The articulated riders' brace for a step up ahead: how far ahead they look (s; 0: no brace), the smallest step (m), the lean back (degrees) and the knee bend (rad). Free Ride never braces for the player. |
 | `control.manual_drive_lean_max_deg`, `control.manual_drive_kp` | 22, 1.2 | Free Ride's drive mode only: the largest lean when asked for an acceleration, and how hard the rider holds the speed the asks add up to. A scenario's own riding never uses them. |
+
+`[rider.let_go]` says when the rider lets go of the pedals of a wheel that goes down: `enabled`
+(true), `after_cut_deg` (20: shell pitch or roll past which the rider lets go once the firmware has cut
+the drive), `fall_deg` (45: past which the rider lets go in any case) and `reaction_s` (0.1).
 
 For example, a rider who ignores tiltback and leans harder:
 
@@ -253,10 +267,11 @@ Keep separate rider-mass studies outside public scenarios and identify their mas
 
 ### The roll aid: `[assist]`
 
-The rider cannot balance sideways yet (the joints bend only forward and back), so a roll spring on
-the shell holds it upright:
-`roll_stiffness` (5000 N·m/rad) and `roll_damping` (500 N·m·s/rad). Set `roll_stiffness = 0.0` to
-see the wheel fall over sideways.
+No rider balances sideways by itself yet, so an external roll spring holds the wheel upright:
+`roll_stiffness` (5000 N·m/rad) and `roll_damping` (500 N·m·s/rad). For the rigid and the welded
+articulated rider it acts on the shell; with contact feet the same spring also holds the upper body at
+the wheel's roll target; the lateral rider's spring leans the whole machine about the tire's contact
+([body.md](../models/body.md)). Set `roll_stiffness = 0.0` to see the wheel fall over sideways.
 
 ### A synthetic ground: `[terrain]` and `[[terrain.feature]]`
 

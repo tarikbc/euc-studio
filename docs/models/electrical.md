@@ -10,7 +10,8 @@ stock Begode Extreme firmware drive the motor correctly, and where each default 
 thermal values are reasoned estimates (marked DEFAULT in `plant.toml`). They are consistent with the
 firmware's own constants and with published specifications, and they make the stock firmware's
 current loop and balance behave sensibly, but the real wheel may differ. Replace each one when it is
-measured, and record the measurement here.
+measured, and record the measurement here. Pole pairs and flux are fitted to the owner's ride log
+(INFERRED; "Calibration against the owner's ride log", below).
 
 ## How it runs
 
@@ -284,12 +285,61 @@ What else the runs showed:
   (65.5 A, or 196.6 A for a larger error) instead of following the tilt. Mode 1 does not use the
   term in its balance law. A real controller does the same; the plant does not cause it.
 
+## Calibration against the owner's ride log (2026-10-23)
+
+**Data.** The owner's Extreme on its stock firmware, one 30-minute ride (2026-10-17, EUC Remote CSV,
+4 Hz rows of the wheel's own values: speed, pack voltage, PWM, battery current, plus GPS speed),
+battery 94 to 64 %. Only steady stretches count: 2 s windows whose speed stays within 1 km/h (57 rows;
+the 4 Hz grid smears transients). The log itself stays private; only derived numbers are here.
+
+**Speed scale.** On 54 steady rows GPS reads 0.905 of the displayed speed (quartiles 0.868-0.916). The
+firmware shows speed as electrical turns times 0.0505 m, so the display reads 1.105 times the true
+speed. Two explanations are electrically the same for the firmware: more pole pairs than the 28 the
+tire geometry suggested (31 gives 1.107), or a smaller effective rolling radius (0.204 m) or a display
+scale set above true. 31 pole pairs keeps the measured tire geometry, so the plant uses it. A count of
+hall edges over one wheel turn would settle it. The consequence: **every firmware speed threshold
+triggers at about 0.905 of its displayed value in true speed**, as on the owner's wheel (a 20 km/h
+tiltback at about 18 km/h true, a 69 km/h one at about 62 km/h true).
+
+**Back-EMF.** The firmware's PWM figure is |Vq| / (0.961·Vbus/√3) (the sim reproduces this within 0.3
+points). At steady speed Vq ≈ ψ·ωe + R·Iq, so the log gives ψ directly from PWM, voltage and speed:
+a fit over the steady bands gives 17.9 mWb through zero, or 16.1 mWb with a speed-independent offset
+of 3.0 V. The plant's 20.5 mWb read about 10 % high at 40-74 km/h; 18.0 mWb matches there.
+
+| Displayed speed | Log: PWM, V, Ibat (steady) | Sim before: PWM, Ibat | Sim now: PWM, Ibat |
+|---|---|---|---|
+| 20 km/h | 19 % at 18.7 km/h, 132 V; 24 % at 23.5 km/h, 128 V; 2-3 A | 21.7 %, 1.2 A | 19.0 %, 0.9 A |
+| 30 km/h | 31 % at 29.7 km/h, 128 V, 4.9 A | 32.0 %, 3.1 A | 28.1 %, 2.2 A |
+| 40 km/h | 42 % at 43.9 km/h, 128 V, 10.2 A | 42.9 %, 6.2 A | 37.9 %, 5.4 A |
+| 50 km/h | 49 % at 52.3 km/h, 127 V, 11.3 A | 53.2 %, 10.4 A | 46.7 %, 8.1 A |
+| 60 km/h | 59 % at 61.0 km/h, 126 V, 15.9 A | 63.8 %, 17.6 A | 55.6 %, 15.0 A |
+| 70-74 km/h | 65 % median (62-71 %) at 70-75 km/h, 123.4 V, 23.8 A | cannot reach it | 67.1 % at 74.1 km/h, 123.0 V, 24.1 A |
+
+The sim rows: stock firmware, the mesh tire, the city world's ideal road, 80 % charge (123-127 V), a
+rider of the owner's build (private inputs) held at each speed by a direct lean. At 20-30 km/h the sim
+reads about 10 % low (the log has 10 steady rows there): the real firmware's Vq carries an offset of
+about 3 V. A 2 µs dead time reproduces it, but in the sim it makes the idle wheel hunt (peak pitch
+1.3° instead of 0.5°) and stops the handle button's standstill cut, so the dead time stays at its
+DEFAULT. Battery current is 2-4 A below the log at 40-50 km/h on both plants: the real rolling
+resistance is likely higher (the tire's `crr` is calibrated separately).
+
+**Top speed.** The owner reports 78 km/h displayed on an 80 % pack with headroom left (light rider,
+another ride). With a tucked rider (drag area 0.42 m²) the sim holds 78.2 km/h displayed (70.7 km/h
+true) on an 80 % pack with 70.1 % firmware PWM and 78.4 % true modulation; the plant before could not
+pass 74 km/h. Upright (0.6 m²) the wheel overleans near 77 km/h displayed (69 km/h true, 86 % true
+modulation while it still speeds up). So the 78 km/h report is met with a tuck.
+
+**Still DEFAULT.** Phase resistance, inductance (it sets the gap between the firmware's PWM and the
+true modulation, findings 10), dead time, battery resistance and the OCV curve: the log has only the
+firmware's Vq. A spin test (back-EMF and L) or raw frames with phase current at top speed would
+measure them.
+
 ## Default values and why
 
 | Value | Default | Why |
 |---|---|---|
-| `pole_pairs` | 28 | The firmware counts 118.7 hall edges per metre, so circumference / pole pairs = 0.0505 m (motor.md §4.3). The maintainer's wheel has a 3.00-12 tire (moulded on the sidewall, scanned: free radius 0.2296 m, docs/hardware/geometry.md); 28 is the only pole count whose rolling radius (p × 0.0505 m / 2π = 0.2251 m) fits under that free radius (4.5 mm of tire deflection under load). **The body physics uses the same rolling radius**, so the firmware's speed and odometer match the ground. |
-| `flux_wb` | 0.0205 Wb | Published no-load speed 109 km/h (68 mph) at 134.4 V: 30.4 m/s on 0.2251 m is 135 rad/s, 3780 rad/s electrical (the same with any pole count that keeps 0.0505 m per electrical turn); the linear SVPWM limit is Vbus/√3 = 77.6 V peak per phase: ψ = 77.6 / 3780. Torque constant 1.5·p·ψ = 0.86 N·m/A: 280 A (the firmware's limit) gives 241 N·m, 1070 N at the tire. |
+| `pole_pairs` | 31 | INFERRED from the owner's ride log (2026-10-17): GPS reads 0.905 of the displayed speed over 54 steady rows. The firmware counts 118.7 hall edges per metre (0.0505 m per electrical turn, motor.md §4.3); on the 3.00-12 tire's 0.2251 m loaded radius 31 pole pairs make it show 1.107 × the true speed. Before: 28, the count whose radius p × 0.0505 m / 2π fits the tire if the display were true. |
+| `flux_wb` | 0.0180 Wb | INFERRED from the owner's ride log (2026-10-17): the firmware's PWM at steady speed is \|Vq\| / (0.961·Vbus/√3) with Vq ≈ ψ·ωe + R·Iq; at 18.0 mWb the sim matches the log within 5 % from 40 to 74 km/h displayed. The published 109 km/h no-load speed (one retailer), read as a true speed with 31 pole pairs, gives 18.6 mWb. Torque constant 1.5·p·ψ = 0.84 N·m/A: 280 A (the firmware's limit) gives 234 N·m, 1040 N at the tire. Before: 0.0205 Wb from that no-load speed read as a displayed one. |
 | `resistance_ohm` | 0.080 Ω | Typical for a 3.5 kW nominal, 134 V hub motor. Locked-rotor current at full PWM would be far above the firmware's 280 A limit, as on a real wheel. |
 | `ld_h`, `lq_h` | 0.20 mH | Surface magnets (Ld = Lq). L/R = 2.5 ms. With the firmware's q-axis PI (Kp 2.93 Q15 V per Q15 A = 0.52 V/A at 134 V) the current loop has about 400 Hz bandwidth, well below the 12 kHz PWM. At standstill the q loop is PD only (its integral limit is ±160·|v|), so a held wheel settles about 14 % below its command. |
 | `direction` | −1 | Convention 3 above. |
@@ -314,11 +364,17 @@ What else the runs showed:
 
 ## To measure on a real wheel
 
-1. Pole pairs: count hall edges over one wheel turn (6 per electrical turn), or measure the rolling
-   circumference and divide by 0.0505 m.
+1. Pole pairs: count hall edges over one wheel turn (6 per electrical turn). The rolling circumference
+   divided by 0.0505 m gives them only if the display shows the true speed; the owner's wheel does not.
 2. Flux linkage: spin the wheel by hand (or tow it) and measure the line back-EMF peak and frequency:
    `ψ = V_line,peak / (√3 · ωe)`.
 3. Phase resistance and inductance: line-to-line with an LCR meter (half of the line value each).
 4. Current sensor gain and sign: a known DC current through phase a and the frame 00 phase current.
 5. Hall offset: back-EMF zero crossings against hall edges while spinning.
 6. Battery: rest voltage against SOC, and the voltage step under a known load.
+7. Battery current while riding: the owner's ride log 2026-10-17 reads about -0.8 A at a standstill
+   (motor not driven), and above 15 km/h the wheel draws about 2 A (270-400 W) more than the model
+   at every speed, a gap that rolling resistance cannot make (models/body.md, "Tire"). Log a
+   standstill with the motor on and the rider aboard, and a coast-down or a known climb; a raw
+   capture with phase current (EUC Remote) separates a sensor offset or gain from an unmodelled
+   loss such as PWM current ripple.

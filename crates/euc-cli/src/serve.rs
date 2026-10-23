@@ -91,7 +91,7 @@ const CONNECT_WAIT_S: u64 = 20;
 
 /// Who rides: the scenario until a client takes over.
 enum Driver {
-    Scenario(Box<Scenario>, Ride),
+    Scenario(Box<Scenario>, Box<Ride>),
     Manual { release_s: f64 },
 }
 
@@ -214,7 +214,7 @@ impl Server {
         let driver = match scenario {
             Some(scenario) => {
                 let ride = Ride::new(&scenario, &mut session)?;
-                Driver::Scenario(Box::new(scenario), ride)
+                Driver::Scenario(Box::new(scenario), Box::new(ride))
             }
             None => Driver::Manual { release_s: args.release_s },
         };

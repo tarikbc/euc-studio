@@ -1,12 +1,12 @@
 //! The streaming world as MuJoCo ground (`docs/models/world.md`, "Physics plan").
 //!
-//! A height-field window of 385 × 385 samples at 1/32 m (a 12 m square) sits in a mocap body and
+//! A height-field window of 193 × 193 samples at 1/16 m (a 12 m square) sits in a mocap body and
 //! follows the wheel by whole cells; a pool of mocap boxes carries every vertical face near the
 //! wheel (curbs, steps, plaza walls, ramp sides, buildings, props); a second, 4 m window lies
 //! under a rider who has left the wheel once the rider is near the first window's edge. All of
-//! them move only between steps, on a fixed cadence and on state alone, so a run repeats exactly. A worker thread keeps the
-//! world's chunk cache warm ahead of the wheel; the cache never changes a value, only how soon
-//! it is ready.
+//! them move only between steps, on a fixed cadence and on state alone, so a run repeats exactly.
+//! A worker thread keeps the world's chunk cache warm ahead of the wheel; the cache never changes
+//! a value, only how soon it is ready.
 //!
 //! The physics frame is the world frame moved so that the start lies at the origin heading +x:
 //! `world = start + R(heading) · physics`, `z_world = z_physics + origin_z`.
@@ -23,19 +23,25 @@ use euc_world::{Material, Rect, Solid, Surface, World, WorldSpec};
 use mujoco_rs::prelude::*;
 
 use crate::PhysicsError;
+use crate::mjcf::names;
 
 /// Samples along each side of the window.
-pub const WINDOW_SAMPLES: usize = 385;
-/// Window cell, metres (a power of two, so every sample position is exact).
-pub const WINDOW_CELL_M: f64 = 1.0 / 32.0;
+pub const WINDOW_SAMPLES: usize = 193;
+/// Window cell, metres (a power of two, so every sample position is exact). The faces sit on the
+/// box pool, not in the height field, so 1/16 m loses only sub-cell relief (cracks, the wall of a
+/// pothole drawn over one cell more) and costs the tire's contacts far less than 1/32 m.
+pub const WINDOW_CELL_M: f64 = 1.0 / 16.0;
 /// Half the window's side, metres.
 pub const WINDOW_HALF_M: f64 = (WINDOW_SAMPLES - 1) as f64 / 2.0 * WINDOW_CELL_M;
 /// The window's elevation range, metres (a power of two, so stored heights stay exact).
 pub const WINDOW_RANGE_M: f64 = 8.0;
 /// How far the wheel may drift from the window's centre before it recentres, metres.
 pub const RECENTRE_M: f64 = 1.0;
-/// Faces with a solid step up this far behind their solid's face in the height field, metres.
-pub const FACE_INSET_M: f64 = 1.5 * WINDOW_CELL_M;
+/// Faces with a solid step up this far behind their solid's face in the height field, metres:
+/// 4.7 cm, the most the world's thinnest boxes (curb segments round a tight corner) allow. With
+/// 1/16 m cells the field may start to rise up to 1.6 cm in front of a face, at its foot: the
+/// tire meets the box's top edge before that (for any face lower than the tire's radius).
+pub const FACE_INSET_M: f64 = 1.5 / 32.0;
 /// Boxes in the pool.
 pub const POOL_SIZE: usize = 128;
 /// Solids within this distance of the wheel go into the pool, metres.
@@ -44,7 +50,7 @@ pub const POOL_REACH_M: f64 = 6.0;
 pub const TICK_STEPS: u64 = 20;
 /// Samples along each side of the rider's window: a 4 m square at the window's cells, under a
 /// rider who has left the wheel and lies beyond the wheel's window.
-pub const RIDER_WINDOW_SAMPLES: usize = 129;
+pub const RIDER_WINDOW_SAMPLES: usize = 65;
 /// Half the rider's window's side, metres.
 pub const RIDER_WINDOW_HALF_M: f64 = (RIDER_WINDOW_SAMPLES - 1) as f64 / 2.0 * WINDOW_CELL_M;
 /// A rider off the wheel gets its own window once its body's origin is this far from the
@@ -203,6 +209,11 @@ impl WorldGround {
         );
         xml
     }
+
+    /// The ground geoms a tire can meet: the window's floor and every pool box.
+    pub(crate) fn geom_names() -> Vec<String> {
+        std::iter::once("floor".to_owned()).chain((0..POOL_SIZE).map(|k| format!("{BOX}{k}"))).collect()
+    }
 }
 
 /// One pool slot.
@@ -222,6 +233,7 @@ pub(crate) struct Window {
     z0: f64,
     heights: Vec<f64>,
     slots: Vec<Slot>,
+    /// The tire's ground pairs.
     tires: Vec<usize>,
     /// The tire's own contact friction on asphalt: sliding, spin, rolling (length).
     tire_friction: [f64; 3],
@@ -247,11 +259,7 @@ struct RiderWindow {
 
 impl Window {
     /// Resolves the model's world bodies and fills the window and pool around the origin.
-    pub(crate) fn new(
-        ground: WorldGround,
-        data: &mut MjData<Box<MjModel>>,
-        tire_friction: [f64; 3],
-    ) -> Result<Self, PhysicsError> {
+    pub(crate) fn new(ground: WorldGround, data: &mut MjData<Box<MjModel>>) -> Result<Self, PhysicsError> {
         let model = data.model();
         let missing = |what: &str| PhysicsError::Model(format!("no {what} in the world model"));
         let hfield = model.name_to_id(MjtObj::mjOBJ_HFIELD, WINDOW).ok_or_else(|| missing("window hfield"))?;
@@ -275,12 +283,17 @@ impl Window {
             centre: None,
             heights: Vec::new(),
         };
-        let tires: Vec<usize> = (0..model.geom_friction().len())
-            .filter(|&g| model.id_to_name(MjtObj::mjOBJ_GEOM, g).is_some_and(|n| n == "tire" || n.starts_with("tire_")))
-            .collect();
-        if tires.is_empty() {
-            return Err(missing("tire geom"));
-        }
+        // The tire meets the ground through its own pairs (mjcf.rs `tire_pairs`): their friction is
+        // what each surface scales.
+        let tire = model.name_to_id(MjtObj::mjOBJ_GEOM, names::TIRE).ok_or_else(|| missing("tire geom"))?;
+        let (first, second) = (model.pair_geom1(), model.pair_geom2());
+        let tires: Vec<usize> =
+            (0..first.len()).filter(|&p| first[p] as usize == tire || second[p] as usize == tire).collect();
+        // Every pair carries the tire's friction on asphalt (sliding, sliding, spin, rolling, rolling).
+        let Some(&[mu, _, spin, rolling, _]) = tires.first().map(|&p| &model.pair_friction()[p]) else {
+            return Err(missing("tire pairs"));
+        };
+        let tire_friction = [mu, spin, rolling];
         let (sender, receiver) = mpsc::channel::<[f64; 4]>();
         let world = Arc::clone(ground.world());
         let prefetch = std::thread::Builder::new()
@@ -521,8 +534,8 @@ impl Window {
             let [mu, spin, rolling] = self.tire_friction;
             // SAFETY: friction coefficients only.
             let model = unsafe { data.model_mut() };
-            for &g in &self.tires {
-                model.geom_friction_mut()[g] = [mu * grip, spin, rolling * roll];
+            for &p in &self.tires {
+                model.pair_friction_mut()[p] = [mu * grip, mu * grip, spin, rolling * roll, rolling * roll];
             }
         }
     }

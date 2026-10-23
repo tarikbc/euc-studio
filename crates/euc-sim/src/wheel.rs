@@ -260,9 +260,11 @@ mod tests {
     #[test]
     fn the_begode_extreme_loads_and_builds_a_live_plant() {
         let files = WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
-        // The rolling radius keeps the firmware's 0.0505 m per electrical turn.
+        // The firmware counts 0.0505 m per electrical turn: with this tire and motor it shows 1.107
+        // times the true speed, as the owner's ride log does (GPS 0.905 of the display).
         let pole_pairs = f64::from(files.electrical.motor.pole_pairs);
-        assert!((files.body.tire.radius_m * std::f64::consts::TAU / pole_pairs - 0.0505).abs() < 0.0001);
+        let display = 0.0505 * pole_pairs / (files.body.tire.radius_m * std::f64::consts::TAU);
+        assert!((display - 1.0 / 0.905).abs() < 0.005, "{display}");
         let shapes = files.body.shapes.as_ref().expect("geometry.toml [collision]");
         assert!(shapes.tire.is_some() && shapes.solids.iter().any(|s| s.name() == "pedal_left"));
         let live = files.live(Rider::default(), Assist::default()).unwrap();

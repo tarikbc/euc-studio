@@ -98,13 +98,14 @@ pub struct Tire {
     pub friction: f64,
     /// Rolling resistance coefficient: resisting force over normal load.
     pub crr: f64,
-    /// Contact time constant, seconds (MuJoCo `solref`): how soft the tire is.
+    /// Contact time constant, seconds (MuJoCo `solref` of the tire's ground pairs): how soft the
+    /// tire is. With the pairs' constant impedance, 0.022 s is about 125 kN/m on the Extreme.
     #[serde(default = "default_contact_time_s")]
     pub contact_time_s: f64,
 }
 
 const fn default_contact_time_s() -> f64 {
-    0.02
+    0.022
 }
 
 /// `[body.wheel]`.
@@ -408,6 +409,18 @@ pub struct Articulation {
     /// How much harder the outside leg rests on its pad in a turn, newtons per radian of the
     /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
     pub turn_press_n_per_rad: f64,
+    /// A wheel that slows faster than this, m/s² (over 10 ms), starts an absorb: something stopped
+    /// it, a curb or a pothole's far edge, and the legs give way to the pedals' sudden push
+    /// ([`RiderModel::ArticulatedSagittalV1`] and [`RiderModel::ArticulatedLateralV1`], the welded
+    /// soles; ESTIMATE: hard braking stays under 10, a 15 cm curb at 10 km/h passes 60). `inf`
+    /// turns it off.
+    pub absorb_decel_mps2: f64,
+    /// How long an absorb lasts, seconds: it starts in full and fades out over this time
+    /// (ESTIMATE).
+    pub absorb_time_s: f64,
+    /// How far the knees fold at the start of an absorb, radians, the hips by the crouch's share
+    /// (ESTIMATE).
+    pub absorb_fold_rad: f64,
 }
 
 impl Default for Articulation {
@@ -430,6 +443,9 @@ impl Default for Articulation {
             turn_crouch: 0.5,
             turn_spread: 1.3,
             turn_press_n_per_rad: 100.0,
+            absorb_decel_mps2: 30.0,
+            absorb_time_s: 0.3,
+            absorb_fold_rad: 0.6,
         }
     }
 }
@@ -461,6 +477,19 @@ impl Articulation {
             if !value.is_finite() || value < 0.0 {
                 return Err(ParamError(format!("rider.articulation.{name} must be finite and not negative")));
             }
+        }
+        if self.absorb_decel_mps2.is_nan() || self.absorb_decel_mps2 <= 0.0 {
+            return Err(ParamError("rider.articulation.absorb_decel_mps2 must be positive (inf: off)".into()));
+        }
+        if !self.absorb_time_s.is_finite() || self.absorb_time_s <= 0.0 {
+            return Err(ParamError("rider.articulation.absorb_time_s must be finite and positive".into()));
+        }
+        let fold = self.absorb_fold_rad;
+        if !fold.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&fold) {
+            return Err(ParamError(format!(
+                "rider.articulation.absorb_fold_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
         }
         let offset = self.foot_offset_m;
         if !offset.is_finite() || offset.abs() > MAX_FOOT_OFFSET_M {
@@ -640,6 +669,16 @@ pub struct RiderControl {
     /// measured speed, 1/s (the lead is capped at 0.5 m/s). It holds speed against what the lean
     /// for the drag alone does not cover.
     pub manual_drive_kp: f64,
+    /// Scripted riding only (the articulated riders): how far ahead the rider looks for a step up
+    /// to brace for, seconds at the speed now (0: no brace). By hand a person braces on their own.
+    pub brace_lead_s: f64,
+    /// The smallest step up the rider braces for, metres (DEFAULT: the convex-mesh tire climbs
+    /// 8 cm curbs at every speed and angle without help, 10 cm only at walking pace).
+    pub brace_step_m: f64,
+    /// How far the rider leans back in a brace, degrees (ESTIMATE).
+    pub brace_lean_deg: f64,
+    /// How far the knees bend in a brace, radians of knee flexion (ESTIMATE).
+    pub brace_crouch_rad: f64,
 }
 
 impl Default for RiderControl {
@@ -673,6 +712,10 @@ impl Default for RiderControl {
             manual_lean_rate_deg_s: 30.0,
             manual_drive_lean_max_deg: 22.0,
             manual_drive_kp: 1.2,
+            brace_lead_s: 0.55,
+            brace_step_m: 0.07,
+            brace_lean_deg: 5.7,
+            brace_crouch_rad: 0.3,
         }
     }
 }
@@ -704,6 +747,9 @@ impl RiderControl {
             ("manual_turn_lean_rate_deg_s", self.manual_turn_lean_rate_deg_s),
             ("manual_lean_rate_deg_s", self.manual_lean_rate_deg_s),
             ("manual_drive_kp", self.manual_drive_kp),
+            ("brace_lead_s", self.brace_lead_s),
+            ("brace_step_m", self.brace_step_m),
+            ("brace_lean_deg", self.brace_lean_deg),
         ];
         for (name, value) in nonnegative {
             if !value.is_finite() || value < 0.0 {
@@ -716,6 +762,12 @@ impl RiderControl {
             if !value.is_finite() || !(0.0..90.0).contains(&value) {
                 return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
             }
+        }
+        if !self.brace_crouch_rad.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&self.brace_crouch_rad) {
+            return Err(ParamError(format!(
+                "rider.control.brace_crouch_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
         }
         if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
             return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));

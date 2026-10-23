@@ -1,8 +1,8 @@
 # Procedural world (W1)
 
-Status: W1b, 2026-10-22. The world is integrated: MuJoCo ground in `euc-physics`, `[world]` scenarios, recordings and replay, the studio's 3D view, and Free Ride's default ground.
-W1a (same day) built the design, the `euc-world` generator (city biome), a PNG preview and a MuJoCo feasibility spike.
-The finite 32 m map of [generated-map-implementation.md](generated-map-implementation.md) stays in Free Ride as "Test pad 32 m".
+Status: W2, 2026-10-23. The world is integrated: MuJoCo ground in `euc-physics`, `[world]` scenarios, recordings and replay, the studio's 3D view in daylight (FR4), Free Ride's ground, and since W2 the ground of every shipped scenario. Since then: the rider's window, the ground ray and 1/16 m cells (#13).
+W1a (2026-10-22) built the design, the `euc-world` generator (city biome), a PNG preview and a MuJoCo feasibility spike; W1b (the same day) integrated it.
+The finite 32 m map of [generated-map-implementation.md](generated-map-implementation.md) is no longer offered in Free Ride (play mode); old test-pad recordings still replay.
 
 The owner asked for a more realistic map with roadside objects, generated progressively like Minecraft, with roads, potholes and stairs.
 This document is the design for that world, what W1a and W1b built, and what the spike and the acceptance runs measured.
@@ -26,9 +26,9 @@ Why 16 m:
 - The physics window (12 m, below) overlaps at most 2 × 2 chunks, so a recentre touches at most four chunks.
 - Every local feature fits inside one chunk plus a neighbour: potholes (≤ 1.5 m), crosswalks (3 m), tree pits, curb cuts (≤ 6 m with flares).
 - Generation stays small and parallel: 0.94 ms per chunk with the tile cache (measured, below).
-- A chunk is a power of two in metres, so the physics lattice (1/32 m) divides it exactly (512 cells).
+- A chunk is a power of two in metres, so the physics lattice (1/16 m) divides it exactly (256 cells).
 
-`Chunk::generate(spec, key)` depends only on the `WorldSpec` (seed, generator revision, biome, densities) and the key.
+`Chunk::generate(spec, key)` depends only on the `WorldSpec` (seed, generator revision, biome, densities, incline) and the key.
 Two chunks give bit-identical heights and surfaces on their shared border (tested).
 
 ### Determinism rules
@@ -114,11 +114,11 @@ The physics frame is the world moved so that the start lies at the origin, headi
 
 ### Height-field window
 
-- One MuJoCo `hfield` of 385 × 385 samples at 1/32 m (3.125 cm): a 12 m square, elevation range 8 m, base 0.5 m.
+- One MuJoCo `hfield` of 193 × 193 samples at 1/16 m (6.25 cm): a 12 m square, elevation range 8 m, base 0.5 m. W1b built it at 1/32 m (385 × 385); [Cell size](#cell-size-13) says why it changed.
 - Its geom sits in a **mocap body**. Recentring writes `mocap_pos` and the hfield data. A geom in the world body does not move when `geom_pos` changes at run time in MuJoCo 3.9 (spike A1, B): the wheel falls through.
 - The window recentres when the shell is more than 1 m from its centre (per axis), by whole lattice cells, so the wheel always stays at least 5 m from its edge. A recentre keeps the overlap and samples only the new strips.
 - Exactness: heights are quantized to 2⁻¹⁶ m, the window's z sits on a whole metre below its lowest sample and the range is a power of two, so `pos.z + f32(data) × range` reproduces every stored height exactly. A recentre therefore changes nothing under the wheel: ray heights at 2000 fixed points moved by at most 1.8 × 10⁻¹⁵ m over four recentres (spike E).
-- The window samples `World::fill_points(…, inset = 1.5 cells)`: each curb, step and plaza wall steps up just behind its box's face, inside the box, so the height field never shows a slope in front of a box.
+- The window samples `World::fill_points(…, inset = 4.7 cm)`: each curb, step and plaza wall steps up just behind its box's face, inside the box. 4.7 cm is the most the world's thinnest boxes allow (curb segments round a tight corner: at 9.4 cm the step left some of them). With 1/16 m cells the field may therefore start to rise up to 1.6 cm in front of a face, at its foot and at most a quarter of its height up; the tire meets the box's top edge first.
 
 ### Box pool
 
@@ -130,7 +130,7 @@ The physics frame is the world moved so that the start lies at the origin, headi
 ### Rider's window
 
 A rider who has left the wheel (stepped off, let go after a cut or thrown) can end up farther from the wheel than the window reaches; without ground there it would fall through the world.
-- A second `hfield` of 129 × 129 samples at the same cells (a 4 m square) sits in its own mocap body, parked 1000 m below.
+- A second `hfield` of 65 × 65 samples at the same cells (a 4 m square) sits in its own mocap body, parked 1000 m below.
 - Every tick, once a rider off the wheel has its origin more than 4 m from the window's centre (per axis), the rider's window lies under it, centred on whole cells, and follows it when it drifts more than 0.5 m. It lets go when the rider is back within 3.5 m, or on the wheel.
 - It shows the ground only from the window's edge outwards: its samples inside the window sit at its floor, below the window's ground, so no contact is doubled. Its heights are the window's samples (same lattice, same quantum), so the two meet without a step.
 - No box pool follows the rider; the faces' step behind each box (above) still gives it curbs and steps.
@@ -170,7 +170,20 @@ A throwaway program in `.cache/world-spike` (git-ignored) linked mujoco-rs 5.0.0
 | G: chunk generation | 0.94 ms per chunk through `World` (256 m × 256 m); 29 ms for a lone `Chunk::generate` (no tile cache) |
 | G: the rig on the generated spawn street, 6 m/s, 7 s | 36 recentres at 4.0 ms each (strip sampling and chunk generation on demand); 29.8 µs per step including recentres; axle stayed within 1.0 mm of ground + radius |
 
-Conclusions: the mocap window and the mocap box pool work. Use 1/32 m cells: 1/64 m doubles the contact cost for no visible gain once boxes carry the faces. Boxes are needed for oblique faces. Prefetch strips off the step thread: on demand they cost 4 ms per recentre.
+Conclusions: the mocap window and the mocap box pool work. Use 1/32 m cells: 1/64 m doubles the contact cost for no visible gain once boxes carry the faces (since #13 the cells are 1/16 m: below). Boxes are needed for oblique faces. Prefetch strips off the step thread: on demand they cost 4 ms per recentre.
+
+### Cell size (#13)
+
+The soft tire of bundle P1 sinks about 9.5 mm and spans more cells than the stiff contact, so at 1/32 m the collision narrowphase took about 80 % of the physics time and the world runs fell below real time's budget. The faces sit on the box pool, not in the field, so the cell went to 1/16 m (same 12 m and 4 m windows, same 1 m recentre, inset 4.7 cm). Measured (HEAD f83a800, stiff tire, stock firmware), 1/32 m → 1/16 m:
+
+- The ground as the tire meets it (`ground_ray_m` against the drawn ground, every 5 mm along the path):
+  - the 2 cm city pothole (W2): depth 19.2 mm both; largest field error 3.5 → 6.5 mm, at its wall; the tire's rolling envelope dips 19.2 mm both;
+  - the 5 cm city pothole: depth 48.1 → 48.0 mm; largest error 9.8 → 21 mm, at its steep wall; the envelope dips 47.0 → 47.6 mm;
+  - the W1b stairs: the step boxes carry every riser in both (5 × 16.7 cm, sharp); field within 2 mm of the drawn steps;
+  - small relief, every road point on lines 2 m apart over 100 m × 100 m of a default-density city (cracks, rough patches, manholes, potholes, hills; 304 618 points): field error RMS 1.15 → 1.16 mm, points off by more than 5 mm 0.017 → 0.036 %; the tire's envelope RMS 0.44 mm both, points off by more than 1 mm 0.61 → 0.64 %. Cracks (1-2 cm wide) were already narrower than a cell.
+  - At rest on a level street the tire sits at the same height (shell 224.67 mm both).
+- Runs (stock, quanta 4000, 3000 and 2000): every verdict unchanged (curb up straight on and at 30°: fall at 11.27 s and 11.80 s, 0.02 s sooner; the other four W1b runs and both city potholes pass). Impacts are a little softer: the 2 cm pothole costs 20.1 → 18.8 km/h (18.5 before) with Iq 79 A (95), the 5 cm one 16.2 km/h (15.6) with the shell 4.1° nose down (5.2°) and Iq 241 A (247); down the stairs the suspension takes 72 mm (90) and Iq 145 A (172). The ground is the same within 2 mm there, so the change is in the contacts: fewer simultaneous contacts per impact at 1/16 m (on the stairs the step boxes and the field under them both touch). The tire's impact stiffness is therefore calibrated on this cell (P1).
+- Speed, with today's stiff tire (a quiet machine, one run at a time, quantum 4000, best of two, wall time per 1/120 s of simulated time): the six W1b world runs and the two city potholes take 4.37 ms on average at 1/32 m (1.91 × real time) and 4.10 ms at 1/16 m (2.03 ×), 5–9 % less per run. In the same window the soft tire of bundle P1 went from 6.1–6.8 to 5.2–5.5 ms of CPU per 1/120 s (1.52–1.59 ×): contacts per step 6.3–7.8 → 5.2–6.0, the collision narrow phase 69–74 % → 59–66 % of the physics time.
 
 ### Budgets
 
@@ -194,7 +207,7 @@ The studio's engine crates build at `opt-level = 3` in development too, so the s
 - **Rings.** `WorldStream` keeps level 0 within 30 m of the wheel and level 1 within 104 m (high quality), or 18 m and 56 m (low quality), refreshes the wanted set every 0.25 s, asks for the nearest chunks first (4 per level-0 request, 24 per level-1 request), and drops what falls out of range. Props are one `InstancedMesh` per part and kind (lamp posts, trees, benches, bins, hydrants, bollards).
 - **Frame.** The world group sits in the physics frame like the live bodies. Chunk meshes carry chunk-local vertices, so f32 stays precise far from the spawn without a floating origin.
 - **View.** On a world the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the camera and the grade readout.
-- **Outdoor look (FR4, `app/src/workspaces/ride/outdoor/`).** A world is outdoors; scenarios without a world and the 32 m test pad keep the studio sweep. After EUC Thrills by VibezZzCoder (MIT), re-implemented in our code (`docs/design/free-ride.md`):
+- **Outdoor look (FR4, `app/src/workspaces/ride/outdoor/`).** A world is outdoors; scenarios without a world and old test-pad recordings keep the studio sweep. After EUC Thrills by VibezZzCoder (MIT), re-implemented in our code (`docs/design/free-ride.md`):
   - *Sky.* An equirectangular sky painted once per world in a worker (1024 × 512): a horizon-to-zenith ramp shaped by y^0.62, warm scatter low toward the sun, value-noise clouds on a flat deck seeded from the world seed (a recording shows the same clouds), and the sun's core and glow. It is not tone mapped (sRGB), and it turns with the world group, so the sun is fixed in the world.
   - *Fog.* Linear, in the horizon colour `#BCD4EC`. three.js mixes fog after tone mapping and colour conversion, so a fully fogged pixel is exactly the sky's horizon. The fog ends before the outer ring does (30 to 90 m on high, 12 to 44 m on low), so the ground's edge is never seen.
   - *Sun and fill.* One sun at azimuth 225° (south-west) and 42° up, colour `#FFF0DE`, intensity 3.1, shared by the painted sky and the shadows; a hemisphere light (`#C2CCD6` over `#B2AB97`, 0.6); the sky's PMREM environment (a 256 × 128 painting with ground bounce below the horizon) at 0.2. Tuned under the Neutral tone mapping at exposure 1.5, which stays: sunlit asphalt renders about (122, 121, 124), its shadow about (29, 47, 69), close to the reference.
@@ -208,13 +221,12 @@ The studio's engine crates build at `opt-level = 3` in development too, so the s
 
 ## Free Ride
 
-The Free Ride panel's "World" tab chooses the ground: "City world" (the default) or "Test pad 32 m" (the finite map, with its editor and its edge pause).
-For a world: a seed field, "New world" (a random seed, ridden at once), the main density sliders and "More densities", "Ride this world", and "Default densities".
+Free Ride always rides a city world. Its panel shows the world as "City, seed N" and offers "New world" (a random seed, ridden at once); the densities are the defaults.
 The run starts at the world's spawn. There is no edge: the ground follows the wheel. The status names the ground (`ground: "world"`), and `free_ride_world` gives the view its frame.
 
 ## Recordings and replay
 
-- The recording context (`euc_sim::recording::RecordingContext`) has `world` or `height_map`, never both. `world` is a `WorldRecord`: the `WorldSpec` (seed, revision, biome, densities), the start point and heading, and a digest of the 3 × 3 chunks around the start. It never stores meshes or height grids: a world recording's context is a few hundred bytes.
+- The recording context (`euc_sim::recording::RecordingContext`) has `world` or `height_map`, never both. `world` is a `WorldRecord`: the `WorldSpec` (seed, revision, biome, densities, incline), the start point and heading, and a digest of the 3 × 3 chunks around the start. It never stores meshes or height grids: a world recording's context is a few hundred bytes.
 - Free Ride on a world and every `[world]` scenario record it.
 - Import and playback check it: a revision other than this build's generator is refused with a clear message, and a different digest says that this build generates a different world for the recorded seed.
 - Recordings with the old `generated_heightmap_v1` map keep their `height_map` and replay as before.
@@ -259,14 +271,14 @@ The plain flat floor is allowed only on purpose, as `[world] flat = "<reason>"` 
 
 | Scenario | What it rides | Result |
 | --- | --- | --- |
-| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.29 s at all three quanta: the tire stops at a curb of 60 % of its radius |
-| `world-curb-up-30deg` | the same curb at 30° | falls at 11.82 s |
-| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2.1°, 92–95 A, suspension 76 mm |
-| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.8°, 36 A, suspension 56 mm |
-| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 90–94 mm, 125–172 A |
+| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.27 s at all three quanta: the tire stops at a curb of 60 % of its radius |
+| `world-curb-up-30deg` | the same curb at 30° | falls at 11.80 s |
+| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2.0°, 86–90 A, suspension 76 mm |
+| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.9°, 36–37 A, suspension 54 mm |
+| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 72–73 mm, 130–145 A |
 | `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2.1° |
 
-Quanta 4000 and 2000 give identical results; 3000 differs slightly. The numbers are those after the moving-mass fix (a1951a4: the rider senses air drag in a world run too); before it the curb-up runs fell 0.04 s later.
+Quanta 4000 and 2000 give identical results; 3000 differs slightly. The numbers are those after the moving-mass fix (a1951a4: the rider senses air drag in a world run too; before it the curb-up runs fell 0.04 s later) and on 1/16 m cells ([Cell size](#cell-size-13); at 1/32 m the curb-up runs fell 0.02 s later, and the stairs took 90–94 mm of suspension and 125–172 A).
 The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. The ground works as built (the curb box stops the tire), but a real wheel climbs such a curb: see the open item below. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
 
 **Open item (curbs).** The owner rides straight into curbs of about 15 cm without lifting the wheel; a higher curb needs a jump. So the result above is wrong: the sim throws the rider at a 13.5 cm curb at every quantum. The cause is in the tire and the rider, not the ground: the bundled physics update (tire envelopment and grip, and the rider's knees absorbing the hit) is to fix it. In that update's rerun the acceptance changes to: a 15 cm curb taken straight on at moderate speed is climbed; clearly higher curbs still need a jump. The curb scenarios stay as they are until then.
@@ -299,6 +311,13 @@ The `preview` feature adds two small dependencies (`miniz_oxide` for deflate, `c
 
 ## Tests
 
+How to test the world, from the repository root:
+
+- the generator: `cargo test -p euc-world` (and `--release`, as the `world-golden` CI job does);
+- the ground in the physics: `cargo test -p euc-physics --test world` and the `world::tests` unit tests (`cargo test -p euc-physics --lib world`);
+- a picture of a world: `euc-world-preview` (above);
+- the studio's view on real chunks: `cargo build --release -p euc-world --example payload`, then in `app/`: `WORLD_PAYLOAD_BIN=<target>/release/examples/payload pnpm exec playwright test -c e2e/world-view.config.ts`.
+
 `cargo test -p euc-world` (about 21 s in a debug build, 4 s in release):
 
 - the same seed gives identical chunks, another seed does not;
@@ -316,7 +335,7 @@ The `preview` feature adds two small dependencies (`miniz_oxide` for deflate, `c
 
 W1b added, elsewhere:
 
-- `euc-physics` (`tests/world.rs`): the window follows the wheel down the spawn street with the rigid and the articulated rider (ray heights match the world within 3 mm, no ground past the window); a curb box is climbed or stops the wheel, never passed through.
+- `euc-physics` (`tests/world.rs`): the window follows the wheel down the spawn street with each rider (rigid, articulated, lateral) (ray heights match the world within 3 mm, no ground past the window); a curb box is climbed or stops the wheel, never passed through.
 - `euc-sim`: `[world]` scenarios parse, place their start, and refuse `[terrain]` as well, another generator revision, unknown fields, bad routes and densities out of range; a world recording context round-trips and refuses another revision, a different world, a map as well, and densities out of range.
 - Studio, Rust: the shared world cache; Free Ride status, spec and recording context with a world; ignored tests with the cached stock firmware: Free Ride rides 30 s on world seed 42 through the real factory with both riders (no edge pause, tire within 1 cm of the drawn ground, the step budget above), and a `[world]` scenario sends its frame to the view and records its world.
 - Studio, TypeScript: payload decoding, mesh winding and the view's sampling (`worldMesh.test.ts`), the world choice over IPC (`freeRide.test.ts`), the live engine's world message (`live.test.ts`).

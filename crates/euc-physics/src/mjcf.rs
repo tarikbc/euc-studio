@@ -6,7 +6,8 @@
 //!        │                    the axle (at full extension, with a suspension)
 //!        ├─ carriage (slide "suspension")   only with a suspension: stator, clamps, slider blocks;
 //!        │    │                             spring, damper and travel limits on the joint
-//!        │    └─ wheel (hinge "axle", y)    tire: a torus as a ring of capsules (or an ellipsoid)
+//!        │    └─ wheel (hinge "axle", y)    tire: the measured torus as a convex mesh (or an
+//!        │                                  ellipsoid), on the ground through its own pairs
 //!        └─ feet (hinge "lean", y)    hinged at the ankles, ankle motor "ankle"
 //!   └─ rider (free joint)     the rider's mass and shapes, welded to the feet ("on_pedals") until
 //!                             the rider steps off
@@ -23,12 +24,13 @@
 
 use crate::TIMESTEP_S;
 use crate::anthropometry::{self, FOOT, SHANK, Segment, THIGH, range};
-use crate::params::{Rider, RiderModel, Setup, Solid};
+use crate::params::{Rider, RiderModel, Setup, Solid, Torus};
 
 /// Names the simulator looks up in the compiled model.
 pub(crate) mod names {
     pub const SHELL: &str = "shell";
     pub const WHEEL: &str = "wheel";
+    pub const TIRE: &str = "tire";
     pub const CARRIAGE: &str = "carriage";
     pub const SUSPENSION: &str = "suspension";
     pub const RIDER: &str = "rider";
@@ -248,8 +250,81 @@ pub(crate) fn sag_m(setup: &Setup) -> f64 {
     setup.wheel.suspension.as_ref().map_or(0.0, |s| s.sag_m(sprung, setup.gravity))
 }
 
-/// Capsules in the ring that stands in for a torus: 48 keeps the radius within 0.4 mm.
-const TORUS_SEGMENTS: usize = 48;
+/// The torus tire's mesh: the outer half of the tube (the tread side), sampled this many times
+/// around the axle and across the tube. MuJoCo collides with its convex hull, which stays within
+/// 9 µm of the torus around and 0.5 mm across: the tread rolls smoothly and keeps the measured
+/// crown. (A ring of 48 capsules sat 0.36 mm low between capsules and handed its contact from one
+/// capsule to the next: the shell shook at 48 times the wheel's turn rate and the tire rolled
+/// with about twice the drag; docs/models/body.md.) The hull is built with the model: about
+/// 60 ms here, against 160 ms for 25 points across, which roll the same; 240 points around shake
+/// a wheel without a suspension half as much again.
+const TIRE_MESH_AROUND: usize = 360;
+const TIRE_MESH_ACROSS: usize = 13;
+/// Capsules that draw the torus tire for viewers (they do not collide).
+const TIRE_DRAWN_SEGMENTS: usize = 48;
+
+/// How the tire gives against the ground (MuJoCo `solimp` of its pairs): a constant impedance of
+/// 0.5 from the first touch, so `tire.contact_time_s` alone sets its stiffness. At 0.022 s the
+/// loaded Extreme sinks 9.5 mm, about 125 kN/m: a 3.00-12 tire at 25 psi (docs/models/body.md).
+const TIRE_IMPEDANCE: &str = "0.5 0.5 0.001";
+/// Time constant of the tire's grip (MuJoCo `solreffriction` of its pairs), seconds. A soft normal
+/// contact would let the tread creep under drive and brake torque (MuJoCo softens friction with
+/// the normal); a stiff grip holds it. It needs elliptic friction cones, which the model uses.
+const TIRE_GRIP_TIME_S: f64 = 0.002;
+
+/// The tire's spin (torsional) friction, metres, in its pairs' friction for completeness: condim 3
+/// leaves it out (see `tire_pairs`).
+const TIRE_SPIN_M: f64 = 0.01;
+
+/// The ground geoms the tire can meet: the streaming world's window and pool, a height map's
+/// floor, or the strip's floor and its curbs.
+fn ground_geoms(setup: &Setup) -> Vec<String> {
+    if setup.world.is_some() {
+        crate::world::WorldGround::geom_names()
+    } else if setup.height_map.is_some() {
+        vec!["floor".to_owned()]
+    } else {
+        setup.terrain.geom_names()
+    }
+}
+
+/// The tire's contact with each ground geom (`<pair>`): soft along the normal (`contact_time_s`
+/// with [`TIRE_IMPEDANCE`]: the tire's give), stiff along the ground ([`TIRE_GRIP_TIME_S`]: no
+/// creep), with the tire's grip, spin friction and rolling coefficient (`crr · r`, a length).
+/// Condim 3, sliding only. Rolling resistance is a torque `Physics::step` applies from each
+/// contact's rolling coefficient (the streaming world scales the pairs' friction per surface).
+/// Spin friction stays out: MuJoCo's resists a twist as a pivot would, so a rolling wheel turning
+/// at 0.4 rad/s needed an 11.6 N·m twist aid (5 N·m allowed); a rolling tire's patch renews as it
+/// turns.
+fn tire_pairs(x: &mut Xml, setup: &Setup) {
+    let tire = setup.wheel.tire;
+    let (mu, rolling) = (tire.friction, tire.crr * tire.radius_m);
+    for ground in ground_geoms(setup) {
+        x.line(format!(
+            r#"    <pair geom1="{}" geom2="{ground}" condim="3" friction="{mu} {mu} {TIRE_SPIN_M} {rolling} {rolling}" solref="{} 1" solimp="{TIRE_IMPEDANCE}" solreffriction="{TIRE_GRIP_TIME_S} 1"/>"#,
+            names::TIRE,
+            tire.contact_time_s
+        ));
+    }
+}
+
+/// The tire's mesh asset for the measured torus, in the wheel frame (the axle on y): its outer
+/// radius is the free tire's (0.2296 m on the Extreme); the soft contact lets it sink to its loaded
+/// height.
+fn tire_mesh(torus: Torus) -> String {
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
+    let (major, minor) = (torus.major_m, torus.minor_m);
+    let mut vertices = Vec::with_capacity(TIRE_MESH_AROUND * TIRE_MESH_ACROSS);
+    for i in 0..TIRE_MESH_AROUND {
+        let around = TAU * i as f64 / TIRE_MESH_AROUND as f64;
+        for j in 0..TIRE_MESH_ACROSS {
+            let across = -FRAC_PI_2 + PI * j as f64 / (TIRE_MESH_ACROSS - 1) as f64;
+            let rho = major + minor * across.cos();
+            vertices.push(format!("{:.7} {:.7} {:.7}", rho * around.cos(), minor * across.sin(), rho * around.sin()));
+        }
+    }
+    format!(r#"  <asset><mesh name="tire" vertex="{}"/></asset>"#, vertices.join(" "))
+}
 
 /// MJCF text, one element per line.
 #[derive(Default)]
@@ -269,9 +344,12 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line(r#"<mujoco model="euc">"#);
     x.line(r#"  <compiler angle="radian" autolimits="true"/>"#);
     x.line(format!(
-        r#"  <option timestep="{TIMESTEP_S}" gravity="0 0 {}" integrator="implicitfast" cone="pyramidal"/>"#,
+        r#"  <option timestep="{TIMESTEP_S}" gravity="0 0 {}" integrator="implicitfast" cone="elliptic"/>"#,
         -setup.gravity
     ));
+    if let Some(torus) = setup.wheel.shapes.as_ref().and_then(|s| s.tire) {
+        x.line(tire_mesh(torus));
+    }
     if setup.world.is_some() {
         x.line(crate::world::WorldGround::asset());
     } else if let Some(map) = &setup.height_map {
@@ -336,6 +414,7 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
             ));
         }
     }
+    tire_pairs(&mut x, setup);
     x.line("  </contact>");
     x.line("  <actuator>");
     let max = setup.rider.control.ankle_max_nm;
@@ -463,28 +542,30 @@ fn wheel(x: &mut Xml, setup: &Setup) {
         r#"        <inertial pos="0 0 0" mass="{}" diaginertia="{side} {} {side}"/>"#,
         wheel.mass_kg, wheel.spin_inertia_kgm2
     ));
-    // Rolling friction is a length: resisting torque over normal load, crr times the radius.
-    let contact =
-        format!(r#"condim="6" friction="{} 0.01 {}" solref="{} 1""#, tire.friction, tire.crr * r, tire.contact_time_s);
+    // The tire meets the ground only through its pairs (`tire_pairs`), and nothing else.
+    let alone = r#"contype="0" conaffinity="0""#;
     match setup.wheel.shapes.as_ref().and_then(|s| s.tire) {
         Some(torus) => {
-            // A ring of capsules along the tube's centre circle in the wheel plane, sized so the
-            // tire stands on its loaded rolling radius (MuJoCo's contact barely sinks in).
-            let major = r - torus.minor_m;
+            // The torus as one convex mesh (`tire_mesh`, in the assets): what touches the ground.
+            x.line(format!(r#"        <geom name="{}" type="mesh" mesh="tire" {alone}/>"#, names::TIRE));
+            // For viewers (`Physics::bodies`, which has no mesh shape): the same torus as a ring of
+            // capsules along the tube's centre circle. They never collide; the wheel's inertia is
+            // set directly, so they add no mass.
+            let major = torus.major_m;
             let point = |k: usize| {
-                let angle = std::f64::consts::TAU * k as f64 / TORUS_SEGMENTS as f64;
+                let angle = std::f64::consts::TAU * k as f64 / TIRE_DRAWN_SEGMENTS as f64;
                 (major * angle.cos(), major * angle.sin())
             };
-            for k in 0..TORUS_SEGMENTS {
+            for k in 0..TIRE_DRAWN_SEGMENTS {
                 let ((ax, az), (bx, bz)) = (point(k), point(k + 1));
                 x.line(format!(
-                    r#"        <geom name="tire_{k}" type="capsule" fromto="{ax} 0 {az} {bx} 0 {bz}" size="{}" {contact}/>"#,
+                    r#"        <geom name="tread_{k}" type="capsule" fromto="{ax} 0 {az} {bx} 0 {bz}" size="{}" contype="0" conaffinity="0"/>"#,
                     torus.minor_m
                 ));
             }
         }
         None => {
-            x.line(format!(r#"        <geom name="tire" type="ellipsoid" size="{r} {hw} {r}" {contact}/>"#));
+            x.line(format!(r#"        <geom name="{}" type="ellipsoid" size="{r} {hw} {r}" {alone}/>"#, names::TIRE));
         }
     }
     x.line("      </body>");

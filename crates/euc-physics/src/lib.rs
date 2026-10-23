@@ -108,6 +108,31 @@ const STANCE_PENETRATION_MAX_M: f64 = 0.01;
 /// the knees bent 21° to 30° (0.15 to 0.18).
 const ADDUCTION_PER_SWING: f64 = 0.17;
 
+/// In an absorb, how stiff the hips and knees hold their posture, as a share of `joint_kp` at
+/// its start (ESTIMATE: legs that give).
+const ABSORB_STIFFNESS: f64 = 0.15;
+
+/// How often the scripted rider looks ahead for a step up, steps (every 10 ms).
+const BRACE_LOOK_STEPS: u64 = 20;
+
+/// The farthest apart the points the scripted rider looks at are, metres: a rise of
+/// `brace_step_m` within it is a step, not a slope.
+const BRACE_SPACING_M: f64 = 0.15;
+
+/// The most points the scripted rider looks at (0.55 s at 30 km/h).
+const BRACE_SAMPLES_MAX: usize = 32;
+
+/// The slowest speed the scripted rider braces at, m/s: at walking pace a curb is stepped over.
+const BRACE_SPEED_MIN_MPS: f64 = 1.0;
+
+/// How long the wheel's speed, and then its fall, are averaged over for the absorb's trigger,
+/// seconds.
+const ABSORB_DECEL_TIME_S: f64 = 0.01;
+
+/// In an absorb, how much of `joint_kd` the legs keep at its start (ESTIMATE: with the full
+/// damping the ankles still turned the pedals over).
+const ABSORB_DAMPING: f64 = 0.2;
+
 /// How fast a lateral knee swings out or in, radians per second.
 const SWING_RATE_RAD_S: f64 = 2.0;
 
@@ -141,10 +166,11 @@ const LEG_PAD_GAP_MAX_M: f64 = 0.2;
 /// pull, a real one cannot.
 const SOLE_PULL_N: f64 = 5.0;
 
-/// Time constant over which a welded sole's load is averaged, seconds. The tire's ring of 48
-/// capsules ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on a wheel without
-/// suspension each weld's load then swings by up to ±250 N about its mean (±17 N on the Extreme's
-/// profile with its suspension). 20 ms takes the ripple out and keeps a step's or a bump's load.
+/// Time constant over which a welded sole's load is averaged, seconds: 20 ms keeps a step's or a
+/// bump's load and takes out the fast part (on a wheel without a suspension the tire's mesh still
+/// ripples the load near 1 kHz, 41 N RMS). Until 2026-10 the tire's ring of 48 capsules rippled the
+/// wheel at 48 times its turn rate (144 Hz at 15 km/h), swinging a weld's load by up to ±250 N
+/// without a suspension (±17 N on the Extreme's profile with its suspension).
 const SOLE_LOAD_TIME_S: f64 = 0.02;
 
 /// How the rider left the pedals.
@@ -255,9 +281,15 @@ pub struct RiderState {
     pub ankle_saturated: bool,
     /// Total simulated time at the ankle torque cap, seconds.
     pub ankle_saturation_s: f64,
+    /// How far the legs give way now, 0 to 1, after something stopped the wheel (see
+    /// [`Articulation::absorb_decel_mps2`]); zero for the rigid and contact-feet riders.
+    pub absorb: f64,
+    /// How far the scripted rider leans back for a step up ahead now, radians; 0 without a brace
+    /// (see [`RiderControl::brace_lead_s`]).
+    pub brace_lean_rad: f64,
     /// Command minus measured lean, radians.
     pub lean_error_rad: f64,
-    /// Last external yaw aid on the shell (and the lateral rider's upper body), N·m, left
+    /// Last external yaw aid on the shell, N·m, left
     /// positive. Heading twist fades with speed; yaw-rate damping remains active at every speed.
     pub yaw_aid_torque_nm: f64,
     /// Last external roll aid torque, N·m, excluding the artificial step-off kick.
@@ -297,7 +329,7 @@ pub struct SoleLoad {
     /// `left` or `right`.
     pub name: &'static str,
     /// How hard the pedal pushes the sole along the deck's normal, newtons, averaged over the
-    /// last 20 ms (the tire's ripple). Negative: the foot pulls the pedal, which only the weld can
+    /// last 20 ms (its fast part dropped). Negative: the foot pulls the pedal, which only the weld can
     /// do.
     pub normal_n: f64,
     /// The ankle's roll moment on the foot, N·m, inversion positive (zero without ankle roll).
@@ -498,6 +530,8 @@ pub struct FootState {
 struct Ids {
     shell: usize,
     wheel: usize,
+    /// The tire's geom.
+    tire: usize,
     rider: usize,
     root_qpos: usize,
     root_dof: usize,
@@ -535,6 +569,8 @@ struct Attitude {
     yaw_rate: f64,
     /// Ground speed of the axle along the heading, m/s.
     speed: f64,
+    /// Ground speed of the axle in any direction across the ground, m/s.
+    ground_speed: f64,
 }
 
 /// The lateral legs' stance against the shell (`Physics::stance`).
@@ -556,6 +592,20 @@ struct Stance {
     offset_rad: [f64; MAX_LEG_JOINTS],
 }
 
+/// The articulated rider's answer to a curb: a brace before it (scripted riding), legs that give
+/// way when it stops the wheel (the welded riders).
+#[derive(Debug, Clone, Copy, Default)]
+struct Absorb {
+    /// The scripted rider braces for a step up ahead (its look ahead, every 10 ms).
+    brace: bool,
+    /// How far the legs give way now, 0 to 1.
+    level: f64,
+    /// How fast `speed` falls, m/s², averaged over [`ABSORB_DECEL_TIME_S`].
+    decel: f64,
+    /// The axle's speed across the ground, m/s, averaged over [`ABSORB_DECEL_TIME_S`].
+    speed: f64,
+}
+
 /// The mechanical model and its state.
 pub struct Physics {
     data: MjData<Box<MjModel>>,
@@ -567,6 +617,9 @@ pub struct Physics {
     /// Every body of wheel and rider with mass (the trees of the shell's and the rider's free
     /// joints): what the lateral rider's roll aid leans as one.
     machine: Vec<usize>,
+    /// The tire's rolling resistance from the last step's contacts, N·m against the spin
+    /// ([`Self::rolling_resistance_nm`]); the next step applies it.
+    rolling_nm: f64,
     /// Requested crouch, radians of knee flexion.
     crouch_target_rad: f64,
     /// The crouch the legs are moving to now: the request at [`CROUCH_RATE_RAD_S`].
@@ -596,6 +649,8 @@ pub struct Physics {
     motor_torque: f64,
     ankle_torque: f64,
     ankle_saturation_s: f64,
+    /// The welded rider's absorb.
+    absorb: Absorb,
     /// The rider's lean from vertical as of the last step, radians, forward positive: for the
     /// articulated rider the upper-body pitch along the shell heading, for the rigid one its pitch.
     lean: f64,
@@ -651,16 +706,14 @@ impl Physics {
         };
         let articulated_ids = articulated.then(|| ArticulatedIds::resolve(&model, &setup)).transpose()?;
         let mut body_ids = vec![(wheel, BodyRole::Wheel, names::WHEEL), (shell, BodyRole::Shell, names::SHELL)];
-        if articulated {
-            for name in HUMAN_BODIES {
-                body_ids.push((id(MjtObj::mjOBJ_BODY, name)?, BodyRole::Rider, name));
-            }
-        } else {
-            body_ids.push((rider, BodyRole::Rider, names::RIDER));
+        let riders: &[&'static str] = if articulated { &HUMAN_BODIES } else { &[names::RIDER] };
+        for &name in riders {
+            body_ids.push((id(MjtObj::mjOBJ_BODY, name)?, BodyRole::Rider, name));
         }
         let ids = Ids {
             shell,
             wheel,
+            tire: id(MjtObj::mjOBJ_GEOM, names::TIRE)?,
             rider,
             root_qpos: qpos(root),
             root_dof: dof(root),
@@ -680,11 +733,8 @@ impl Physics {
         };
         let (total_mass, machine) = (moving_mass(&model), machine_bodies(&model, [shell, rider]));
         let mut data = MjData::new(Box::new(model));
-        let tire = setup.wheel.tire;
-        // The tire's contact friction on asphalt; the world scales it by the surface under it.
-        let tire_friction = [tire.friction, 0.01, tire.crr * tire.radius_m];
-        let world =
-            setup.world.clone().map(|ground| world::Window::new(ground, &mut data, tire_friction)).transpose()?;
+        // The world scales the tire's ground pairs by the surface under it.
+        let world = setup.world.clone().map(|ground| world::Window::new(ground, &mut data)).transpose()?;
         let rider = RiderController::new(setup.rider.control);
         let half_weight = 0.5 * setup.rider.mass_kg * setup.gravity;
         let mut physics = Self {
@@ -695,6 +745,7 @@ impl Physics {
             total_mass,
             body_ids,
             machine,
+            rolling_nm: 0.0,
             crouch_target_rad: 0.0,
             crouch_rad: 0.0,
             stance_rad: 0.0,
@@ -711,6 +762,7 @@ impl Physics {
             motor_torque: 0.0,
             ankle_torque: 0.0,
             ankle_saturation_s: 0.0,
+            absorb: Absorb::default(),
             lean: 0.0,
             yaw_aid_torque: 0.0,
             roll_aid_torque: 0.0,
@@ -796,7 +848,7 @@ impl Physics {
     /// What resists motion, as the rider senses it: rolling resistance and air drag.
     fn drag(&self) -> rider::Drag {
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
+        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
         rider::Drag { rolling: setup.wheel.tire.crr * setup.gravity, aero: drag_area / self.total_mass }
     }
 
@@ -936,10 +988,10 @@ impl Physics {
         torque
     }
 
-    /// The lateral rider's roll aid: `torque`, N·m about the heading through the tire's contact,
-    /// leans wheel and rider as one rigid machine. Each body takes the force and the moment of
-    /// its own part of that lean (its mass times its acceleration about the line, its own inertia
-    /// about the heading), so the aid loads no joint, pad or pedal, and the legs hold only the
+    /// The roll aid of every rider but contact feet: `torque`, N·m about the heading through the
+    /// tire's contact, leans wheel and rider as one rigid machine. Each body takes the force and
+    /// the moment of its own part of that lean (its mass times its acceleration about the line,
+    /// its inertia times its turn), so the aid loads no joint, pad or pedal, and the legs hold only the
     /// posture.
     fn lean_as_one(&mut self, heading: [f64; 2], torque: f64) {
         let axis = [heading[0], heading[1], 0.0];
@@ -947,7 +999,7 @@ impl Physics {
         let mut inertia = 0.0;
         for index in 0..self.machine.len() {
             let (mass, lever, spin) = self.lean_part(self.machine[index], axis, contact);
-            inertia += mass * dot(lever, lever) + spin;
+            inertia += mass * dot(lever, lever) + dot(spin, axis);
         }
         let acceleration = torque / inertia;
         for index in 0..self.machine.len() {
@@ -956,21 +1008,24 @@ impl Physics {
             let applied = &mut self.data.xfrc_applied_mut()[body];
             for i in 0..3 {
                 applied[i] += mass * acceleration * lever[i];
-                applied[3 + i] += spin * acceleration * axis[i];
+                applied[3 + i] += acceleration * spin[i];
             }
         }
     }
 
     /// One body's part in a lean about `axis` through `contact`: its mass, the direction and
-    /// length of its centre's path per radian (`axis` × arm, metres) and its own moment of
-    /// inertia about `axis`, kg·m² (its principal moments, weighted by how far each principal
-    /// axis lies along `axis`).
-    fn lean_part(&self, body: usize, axis: [f64; 3], contact: [f64; 3]) -> (f64, [f64; 3], f64) {
+    /// length of its centre's path per radian (`axis` × arm, metres) and its own inertia applied
+    /// to `axis` in the world, `I·axis`, kg·m²: the moment its own turn about `axis` takes per
+    /// rad/s². A body tilted in that turn (a rider leaning back) needs a moment off the axis too;
+    /// without it the lean also yawed such a body.
+    fn lean_part(&self, body: usize, axis: [f64; 3], contact: [f64; 3]) -> (f64, [f64; 3], [f64; 3]) {
         let model = self.data.model();
         let at = self.data.xipos()[body];
         let lever = cross(axis, [at[0] - contact[0], at[1] - contact[1], at[2] - contact[2]]);
         let (principal, frame) = (model.body_inertia()[body], self.data.ximat()[body]);
-        let spin = (0..3).map(|k| principal[k] * dot([frame[k], frame[3 + k], frame[6 + k]], axis).powi(2)).sum();
+        // The axis in the body's principal frame, scaled by the principal moments, back in the world.
+        let local: [f64; 3] = std::array::from_fn(|k| principal[k] * dot([frame[k], frame[3 + k], frame[6 + k]], axis));
+        let spin = std::array::from_fn(|i| (0..3).map(|k| frame[3 * i + k] * local[k]).sum());
         (model.body_mass()[body], lever, spin)
     }
 
@@ -1010,6 +1065,8 @@ impl Physics {
             ankle_torque_nm: self.ankle_torque,
             ankle_saturated: self.ankle_saturated(),
             ankle_saturation_s: self.ankle_saturation_s,
+            absorb: self.absorb.level,
+            brace_lean_rad: self.rider.brace_lean(),
             lean_error_rad: self.rider.lean_command() - measured_lean,
             yaw_aid_torque_nm: self.yaw_aid_torque,
             roll_aid_torque_nm: self.roll_aid_torque,
@@ -1180,7 +1237,7 @@ impl Physics {
         };
         self.lean = lean;
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
+        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
         let aero = drag_area * att.speed * att.speed.abs();
         let drag = self.drag();
         let sense = rider::Sense {
@@ -1196,7 +1253,11 @@ impl Physics {
             yaw_rate: att.yaw_rate,
         };
         let rider_off = self.rider_off();
-        self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
+        self.update_absorb(rider_off, att.ground_speed);
+        self.look_ahead(&att, rider_off);
+        // In an absorb the ankles give way too: holding the body upright over feet that stopped
+        // with the wheel would turn the body's momentum into a nose-down moment on the pedals.
+        self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) * (1.0 - self.absorb.level) };
         // Steering: the roll aid holds the turn lean, standing in for the hips. The heading
         // twist fades with speed; yaw-rate damping remains active. Both yaw terms are external.
         let steer = if rider_off { rider::Steer::default() } else { self.rider.steer(&sense) };
@@ -1209,10 +1270,16 @@ impl Physics {
         // The rigid rider's stepping foot is an external roll torque on the shell; the articulated
         // rider's right foot presses its own pedal (an internal force pair, below).
         let kick = if pushing_off && ids.articulated.is_none() { STEP_OFF_KICK_NM } else { 0.0 };
-        // The lateral rider's upper body has the shell's roll spring too (`upper_body_aids`), and
-        // the two lean wheel and rider together (`lean_as_one`, below): the aid does not pull the
-        // shell away from the body the legs hold.
-        let as_one = self.setup.rider.model.has_lateral_legs();
+        // The roll aid leans wheel and rider together about the tire's contact (`lean_as_one`,
+        // below) for every rider held to the wheel by a weld or by its legs. As a bare torque on
+        // the shell it also yawed a machine whose mass lies far behind the contact (a rider leaning
+        // back in a hard brake), and the heading loop answered that yaw with more lean until the
+        // wheel fell. Leaned as one, the aid turns the whole machine about the contact, so it is twice
+        // as stiff (for the lateral rider: the shell's spring and the upper body's, `upper_body_aids`):
+        // with the single gains a rigid rider's full manual turn rolled in too slowly, overleaned and
+        // the firmware cut out. Contact feet hold no body to the shell: their aid stays a torque on
+        // the shell, with the upper body's own.
+        let as_one = !self.setup.rider.model.has_contact_feet();
         let springs = if as_one { 2.0 } else { 1.0 };
         self.roll_aid_torque =
             -springs * (assist.roll_stiffness * (att.roll - steer.roll) + assist.roll_damping * att.roll_rate);
@@ -1253,8 +1320,14 @@ impl Physics {
         if as_one {
             self.lean_as_one(att.heading, self.roll_aid_torque);
         }
+        // Rolling resistance turns the wheel against the ground about its axle.
+        let axis = self.data.xmat()[ids.wheel];
+        let rolling = self.rolling_nm;
+        self.data.xfrc_applied_mut()[ids.wheel] =
+            [0.0, 0.0, 0.0, -rolling * axis[1], -rolling * axis[4], -rolling * axis[7]];
         let before = self.position_m();
         self.data.step2();
+        self.rolling_nm = self.rolling_resistance_nm();
         let after = self.position_m();
         self.path_length_m += (after[0] - before[0]).hypot(after[1] - before[1]);
         self.distance_m += att.speed * TIMESTEP_S;
@@ -1293,7 +1366,9 @@ impl Physics {
             *lift += (target - *lift).clamp(-step, step);
         }
         let crouch_step = CROUCH_RATE_RAD_S * TIMESTEP_S;
-        self.crouch_rad += (self.crouch_target_rad - self.crouch_rad).clamp(-crouch_step, crouch_step);
+        let brace = if self.absorb.brace { self.setup.rider.control.brace_crouch_rad } else { 0.0 };
+        let crouch = self.crouch_target_rad.max(brace);
+        self.crouch_rad += (crouch - self.crouch_rad).clamp(-crouch_step, crouch_step);
         self.stance_rad += (self.soft_knee_rad() - self.stance_rad).clamp(-crouch_step, crouch_step);
         let lifted = self.foot_lift_rad.map(|lift| lift > 0.0);
         for (index, joint) in legs.joints().iter().enumerate() {
@@ -1305,13 +1380,23 @@ impl Physics {
             // With a spring at the ankle too, the three joints shared the lean, the legs leaned
             // a third as far as the upper body, and the centre of mass leaned (and the wheel
             // accelerated) about half as much as asked. A lifted foot keeps its spring.
-            let stiffness = if ankle && !lifted[leg] { 0.0 } else { config.joint_kp };
+            let stiffness = if ankle && !lifted[leg] {
+                0.0
+            } else if matches!(joint.kind, JointKind::Hip | JointKind::Knee) {
+                config.joint_kp * (1.0 - self.absorb.level * (1.0 - ABSORB_STIFFNESS))
+            } else {
+                config.joint_kp
+            };
             let target = self.posture_target(index, joint);
             // Contact feet damp their ankles in the joint itself (implicit; see mjcf.rs). A foot that
             // rocks off its deck turns on the ankle alone, and this explicit damping on its small
             // inertia (about 0.01 kg·m², above the step's stability limit) made it chatter at the
             // torque cap: the soles hopped on their decks and slid back.
-            let damping = if ankle && legs.pairs.is_some() { 0.0 } else { config.joint_kd };
+            let damping = if ankle && legs.pairs.is_some() {
+                0.0
+            } else {
+                config.joint_kd * (1.0 - self.absorb.level * (1.0 - ABSORB_DAMPING))
+            };
             let posture = stiffness * (target - self.data.qpos()[joint.qpos]) - damping * self.data.qvel()[joint.dof];
             let mut limit = joint.kind.cap(&self.setup.rider);
             if joint.kind == JointKind::AnkleRoll {
@@ -1392,6 +1477,25 @@ impl Physics {
         }
     }
 
+    /// The tire's rolling resistance, N·m against the wheel's spin: each tire contact's normal
+    /// force times its pair's rolling coefficient (`crr · r`, which the streaming world scales per
+    /// surface), faded out near standstill as the rider's drag is, so it never turns a wheel at
+    /// rest. Read after a step, when its contacts and forces belong together.
+    fn rolling_resistance_nm(&self) -> f64 {
+        let mut torque = 0.0;
+        for (index, contact) in self.data.contact().iter().enumerate() {
+            if contact.geom[0] as usize == self.ids.tire || contact.geom[1] as usize == self.ids.tire {
+                // A degenerate contact can come back without a finite force; it carries none.
+                let normal = self.data.contact_force(index)[0].abs();
+                if normal.is_finite() {
+                    torque += normal * contact.friction[3];
+                }
+            }
+        }
+        let speed = self.data.qvel()[self.ids.axle_dof] * self.setup.wheel.tire.radius_m;
+        torque * (speed / rider::Drag::ROLLING_FADE_MPS).tanh()
+    }
+
     /// How hard the shell pushes each lateral leg, newtons (left, right): the normal forces of the
     /// leg-on-shell contacts of the last step.
     fn leg_shell_forces(&self, legs: &ArticulatedIds) -> [f64; 2] {
@@ -1430,6 +1534,73 @@ impl Physics {
                 applied[axis] += value;
             }
         }
+    }
+
+    /// The welded rider's absorb, once a step: a wheel that slows faster than `absorb_decel_mps2`
+    /// starts it in full, and it fades out over `absorb_time_s`. A rider meets a curb on legs
+    /// that give: the knees and hips fold and go soft, and the ankles let the body go on over the
+    /// feet, so the body's momentum does not turn the pedals over. A sole's load would not do as
+    /// the trigger: the sagittal rider's soles take short peaks of over three times their share
+    /// in a hard turn.
+    fn update_absorb(&mut self, rider_off: bool, speed: f64) {
+        let config = self.setup.rider.articulation;
+        // The axle's speed across the ground in any direction: in a hard turn the speed along the
+        // heading drops by a tenth for a few milliseconds whenever the shell's heading jumps,
+        // and that is not a stop. The speed and its fall are each averaged over
+        // ABSORB_DECEL_TIME_S.
+        let absorb = &mut self.absorb;
+        let follow = TIMESTEP_S / ABSORB_DECEL_TIME_S;
+        let before = absorb.speed;
+        absorb.speed += (speed.abs() - absorb.speed) * follow;
+        absorb.decel += ((before - absorb.speed) / TIMESTEP_S - absorb.decel) * follow;
+        let welded = self.ids.articulated.is_some_and(|legs| legs.welds.is_some());
+        if !welded || rider_off || self.data.eq_active()[self.ids.stand] {
+            absorb.level = 0.0;
+        } else if absorb.decel > config.absorb_decel_mps2 {
+            absorb.level = 1.0;
+        } else {
+            absorb.level = (absorb.level - TIMESTEP_S / config.absorb_time_s).max(0.0);
+        }
+    }
+
+    /// The scripted articulated rider looks ahead every [`BRACE_LOOK_STEPS`] steps and braces
+    /// while a step up lies within `brace_lead_s` at the speed now: from the ground just in front
+    /// of the tire, points at most [`BRACE_SPACING_M`] apart along the heading, and a rise of more
+    /// than `brace_step_m` between two neighbours (a step, not a slope: that slope would be steeper
+    /// than any road). Once the tire meets the step the ground in front of it is the step's top,
+    /// and the brace ends: the absorb takes over. A step down needs no brace. By hand (Free Ride)
+    /// a person braces on their own, so the physics never does.
+    fn look_ahead(&mut self, att: &Attitude, rider_off: bool) {
+        let c = self.setup.rider.control;
+        if !((self.time_s() / TIMESTEP_S).round() as u64).is_multiple_of(BRACE_LOOK_STEPS) {
+            return;
+        }
+        let scripted = self.setup.rider.model.is_articulated() && !self.rider.manual() && c.brace_lead_s > 0.0;
+        if !scripted || rider_off || self.held() || att.speed < BRACE_SPEED_MIN_MPS {
+            self.absorb.brace = false;
+            self.rider.set_brace(false);
+            return;
+        }
+        let axle = self.data.xpos()[self.ids.wheel];
+        let [hx, hy] = att.heading;
+        let front = self.setup.wheel.tire.radius_m;
+        let reach = att.speed * c.brace_lead_s;
+        let samples = ((reach / BRACE_SPACING_M).ceil() as usize).clamp(1, BRACE_SAMPLES_MAX);
+        let mut last = self.ground_ray_m([axle[0] + hx * front, axle[1] + hy * front]);
+        let mut brace = false;
+        for k in 1..=samples {
+            let d = front + reach * k as f64 / samples as f64;
+            let height = self.ground_ray_m([axle[0] + hx * d, axle[1] + hy * d]);
+            if let (Some(before), Some(now)) = (last, height)
+                && now - before > c.brace_step_m
+            {
+                brace = true;
+                break;
+            }
+            last = height;
+        }
+        self.absorb.brace = brace;
+        self.rider.set_brace(brace);
     }
 
     /// Simulated seconds since the model was built.
@@ -1540,18 +1711,6 @@ impl Physics {
         self.crouch_rad
     }
 
-    /// The drag area of rider and wheel now, m²: `cda_m2` upright; by hand
-    /// ([`RiderController::set_manual`]) it falls with the crouch to `tuck_cda_m2` at a full crouch.
-    /// Scripted riding keeps `cda_m2`.
-    pub fn drag_area_m2(&self) -> f64 {
-        let rider = &self.setup.rider;
-        if !self.rider.manual() {
-            return rider.cda_m2;
-        }
-        let share = (self.crouch_rad / CROUCH_MAX_RAD).clamp(0.0, 1.0);
-        rider.cda_m2 + (rider.tuck_cda_m2 - rider.cda_m2) * share
-    }
-
     /// Lifts one articulated foot off its pedal by bending that leg: `lift_rad` more hip flexion,
     /// twice that at the knee and the ankle keeping the sole level (0.3 rad lifts it about 4 cm at
     /// the default leg length); 0 puts it back down. One foot at a time, with contact feet and an
@@ -1582,13 +1741,15 @@ impl Physics {
     /// The knees' bend the legs hold now, radians: the stance's, deeper in a turn (the lateral
     /// rider's), and the crouch from there to the deepest crouch.
     fn knee_bend_rad(&self) -> f64 {
+        let config = self.setup.rider.articulation;
         let turn = if self.setup.rider.model.has_lateral_legs() {
-            self.setup.rider.articulation.turn_crouch * self.rider.turn_lean().abs()
+            config.turn_crouch * self.rider.turn_lean().abs()
         } else {
             0.0
         };
-        let stance = self.stance_rad + turn;
-        stance + self.crouch_rad * (1.0 - (self.soft_knee_rad() + turn) / CROUCH_MAX_RAD).max(0.0)
+        let bend = turn + self.absorb.level * config.absorb_fold_rad;
+        let stance = self.stance_rad + bend;
+        stance + self.crouch_rad * (1.0 - (self.soft_knee_rad() + bend) / CROUCH_MAX_RAD).max(0.0)
     }
 
     /// How far leg `leg`'s knee swings out in all (the lateral rider's), radians: the stance's
@@ -1783,6 +1944,7 @@ impl Physics {
             // The vertical component of that rate in the world: the shell's axes' heights weigh it.
             yaw_rate: vel[3] * fwd[2] + vel[4] * left[2] + vel[5] * cross(fwd, left)[2],
             speed: axle_vel[0] * heading[0] + axle_vel[1] * heading[1],
+            ground_speed: axle_vel[0].hypot(axle_vel[1]),
         }
     }
 }
@@ -1820,27 +1982,6 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod articulated_tests {
     use super::*;
-
-    #[test]
-    fn the_drag_area_follows_the_crouch_by_hand_only() {
-        let mut upright = setup();
-        upright.rider.cda_m2 = 0.6;
-        let mut physics = Physics::new(upright).unwrap();
-        assert_eq!(physics.drag_area_m2(), 0.6);
-        physics.set_crouch(1.2).unwrap();
-        for _ in 0..1000 {
-            physics.step(0.0);
-        }
-        assert!((physics.crouch_rad() - 1.2).abs() < 1e-12, "{}", physics.crouch_rad());
-        assert_eq!(physics.drag_area_m2(), 0.6, "scripted riding keeps the upright drag area");
-        physics.rider().set_manual(true);
-        assert!((physics.drag_area_m2() - 0.42).abs() < 1e-12, "a full tuck by hand");
-        physics.set_crouch(0.6).unwrap();
-        for _ in 0..1000 {
-            physics.step(0.0);
-        }
-        assert!((physics.drag_area_m2() - 0.51).abs() < 1e-12, "half way: {}", physics.drag_area_m2());
-    }
 
     fn setup() -> Setup {
         let plant: toml::Value = toml::from_str(include_str!("../../../profiles/begode-extreme/plant.toml")).unwrap();
@@ -2105,5 +2246,55 @@ mod articulated_tests {
         assert!(roll > 0.05, "{roll} rad");
         assert!(as_one - stance < 0.002, "{moved:?}");
         assert!(shell > 0.2, "{moved:?}");
+    }
+
+    #[test]
+    fn the_roll_aid_leans_a_rider_far_back_without_yawing_the_wheel() {
+        // A hard brake: the rigid rider leans far back (about 29° here, 31° in the full-effort stop),
+        // so the machine's mass lies behind and above the tire's contact. In free flight without
+        // gravity, 2000 N·m of roll aid leaned as one about the contact rolls the machine and turns
+        // it by almost nothing; the same torque on the shell alone also yaws it.
+        let mut turned = Vec::new();
+        for as_one in [true, false] {
+            let mut setup = setup();
+            setup.rider.model = RiderModel::RigidAnkleV1;
+            setup.rider.control.lean_max_deg = 35.0;
+            setup.rider.control.lean_rate_deg_s = 60.0;
+            let mut p = Physics::new(setup).unwrap();
+            p.rider().set_intent(Intent::Lean(-0.45));
+            for _ in 0..(2.0 / TIMESTEP_S).round() as usize {
+                p.step(0.0);
+            }
+            assert!(p.lean < -0.4, "on the stand the rider leans back: {}", p.lean);
+            let mut weightless = Box::new(MjModel::clone(p.data.model()));
+            weightless.opt_mut().gravity = [0.0; 3];
+            p.data.swap_model(weightless);
+            p.set_held(false);
+            for root in [p.ids.root_qpos, p.ids.rider_qpos] {
+                p.data.qpos_mut()[root + 2] += 3.0;
+            }
+            p.data.forward();
+            let lean = p.data.qpos()[p.ids.lean_qpos];
+            for _ in 0..200 {
+                p.data.step1();
+                let (q, v) = (p.data.qpos()[p.ids.lean_qpos], p.data.qvel()[p.ids.lean_dof]);
+                p.data.ctrl_mut()[p.ids.ankle] = 6000.0 * (lean - q) - 900.0 * v;
+                p.data.xfrc_applied_mut().fill([0.0; 6]);
+                let [hx, hy] = p.attitude().heading;
+                if as_one {
+                    p.lean_as_one([hx, hy], 2000.0);
+                } else {
+                    p.data.xfrc_applied_mut()[p.ids.shell] = [0.0, 0.0, 0.0, 2000.0 * hx, 2000.0 * hy, 0.0];
+                }
+                p.data.step2();
+            }
+            let att = p.attitude();
+            println!("as one {as_one}: roll {:.4} rad, yaw rate {:.4} rad/s", att.roll, att.yaw_rate);
+            turned.push((att.roll, att.yaw_rate));
+        }
+        let [(roll, yaw), (_, shell_yaw)] = turned[..] else { unreachable!() };
+        assert!(roll > 0.05, "the machine rolls: {roll} rad");
+        assert!(shell_yaw.abs() > 0.1, "a bare torque on the shell yaws it: {shell_yaw} rad/s");
+        assert!(yaw.abs() < 0.01 * shell_yaw.abs(), "leaned as one it barely yaws: {yaw} rad/s against {shell_yaw}");
     }
 }
