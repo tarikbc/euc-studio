@@ -23,6 +23,11 @@ The simulator helps you inspect behavior under stated conditions. It does not es
 through a left turn at 20 km/h in drive mode, on the neutral pedal preset. Chase camera, with the HUD, the pitch
 gauge and the wheel's display replica; replayed from a recording. Some physical parameters are estimates.</sub>
 
+![The firmware inspector: named variables, register bit fields, and a pin to scope](app/docs/screenshots/firmware-inspector.png)
+
+<sub>The firmware inspector: named variables live, register bit fields decoded, and any value pinned to a scope.
+Filmed headless the same way as the rest ([video/](video/README.md)).</sub>
+
 > [!WARNING]
 > Custom firmware can make a wheel cut out, injure its rider or destroy its power stage. Read [SAFETY.md](SAFETY.md)
 > before you build, flash or ride anything from this repository. Today no build of this repository flashes a real
