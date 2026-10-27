@@ -183,6 +183,42 @@ fn reads_captures_with_a_recorder_header_and_ends_with_the_capture() {
 }
 
 #[test]
+fn replays_a_brand_through_its_radio_only_profile() {
+    // A synthetic LeaperKim-style capture (2 s, 20-byte notifications): no simulated wheel exists
+    // for the brand, only profiles/leaperkim/ble.toml.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("leaperkim.hex");
+    let lines = (0..40)
+        .map(|i| {
+            format!("{:.3} dc 5a 5c 20 {i:02x} 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n", f64::from(i) * 0.05)
+        })
+        .collect::<Vec<_>>()
+        .concat();
+    let header = "# euc-capture v1\n# brand: LeaperKim\n# wheel: leaperkim\n# name: LK12345\n";
+    std::fs::write(&path, format!("{header}{lines}")).unwrap();
+
+    let mut replay = Replay::start(&[path.to_str().unwrap(), "--bridge", "tcp://127.0.0.1:0"]);
+    let mut client = Client::connect(&replay.line("bridge"));
+    let messages = client.messages(1.0);
+    assert_eq!((messages[0]["type"].as_str(), messages[0]["wheel"].as_str()), (Some("hello"), Some("leaperkim")));
+    let notifications: Vec<Vec<u8>> = messages.iter().filter_map(bytes).collect();
+    assert!(!notifications.is_empty(), "the capture plays");
+    assert!(notifications.iter().all(|n| n.len() == 20 && n.starts_with(&[0xDC, 0x5A, 0x5C])), "bytes as captured");
+    replay.line("ble end t=");
+    assert!(replay.child.wait().unwrap().success());
+
+    // A name that is neither a wheel nor a radio profile is still refused.
+    let output = Command::new(env!("CARGO_BIN_EXE_euc"))
+        .args(["replay", path.to_str().unwrap(), "--wheel", "nope", "--bridge", "tcp://127.0.0.1:0"])
+        .env_remove("EUC_PROFILES")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no wheel profile \"nope\""));
+}
+
+#[test]
 fn needs_somewhere_to_replay_and_a_valid_capture() {
     let output =
         Command::new(env!("CARGO_BIN_EXE_euc")).args(["replay", CAPTURE]).env("NO_COLOR", "1").output().unwrap();

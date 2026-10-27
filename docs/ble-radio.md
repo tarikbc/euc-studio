@@ -193,10 +193,27 @@ So expect a gap of about three group times (0.9 to 1.1 s with a real capture's s
 real wheel does the same. An app that treats 1 s without bytes as stale can see the link stale right after a
 write.
 
+## Brand radios
+
+A brand without a simulated wheel can still be replayed: its folder in `profiles/` holds only a `ble.toml`, a
+**radio-only profile**. `euc replay` presents it when no wheel of that name exists (`--wheel <id>`, or the
+capture's `# wheel: <id>` header). It sends the capture's notifications at their times; with no protocol crate
+it answers no writes, and `euc sim serve` does not apply (there is no controller behind it). Apps under test
+see the brand's advertisement and GATT table, so they pick the brand's decoder.
+
+| Id | Brand | GATT | Writes | Emulator name | Apps accept |
+|---|---|---|---|---|---|
+| `leaperkim` | LeaperKim / Veteran | `FFE0` / `FFE1` both ways | without response | `LK_EMU` | a lower-case name that starts with `lk` or `nf` |
+
+The facts come from the EUC Remote project's clean-room fact sheets (one per family; transport rows marked
+confirmed there). `--name` advertises another name, for example the model prefix a capture came from.
+
 ## Adding a brand
 
 1. **Profile.** Write `profiles/<wheel>/ble.toml` (and register it in `crates/euc-profile/src/builtin.rs`):
-   advertisement, GATT table with `tx` and `rx` roles, module. A Nordic UART module, for example:
+   advertisement, GATT table with `tx` and `rx` roles, module. A brand without a simulated wheel stops here
+   with a radio-only profile (see [Brand radios](#brand-radios)) and adds a row to that table. A Nordic UART
+   module, for example:
 
    ```toml
    schema = 1
