@@ -203,6 +203,7 @@ see the brand's advertisement and GATT table, so they pick the brand's decoder.
 
 | Id | Brand | GATT | Writes | Emulator name | Apps accept |
 |---|---|---|---|---|---|
+| `inmotion-v1` | InMotion, older protocol (V5, V8, V10 and others) | notify `FFE4` in service `FFE0`, write `FFE9` in service `FFE5` | with response | `V10F-EMU` | no name rule: both services decide; a `V10F-`, `V10-` or `V8F-` prefix sets the model |
 | `inmotion-v2` | InMotion, newer protocol (V11 to V14 and others) | Nordic UART: notify `6E400003`, write `6E400002` | with response | `V11-EMU` | a case-sensitive model prefix (`V11-`, `V12-`, `V12Pro-`, `V13-`, `V14-`, ...); `--name` sets another model |
 | `kingsong` | KingSong | `FFE0` / `FFE1` both ways | without response | `KS-EMU` | manufacturer data, an `FFF0` service, or a lower-case name that starts with `ks` (never a name that starts with `NO`) |
 | `leaperkim` | LeaperKim / Veteran | `FFE0` / `FFE1` both ways | without response | `LK_EMU` | a lower-case name that starts with `lk` or `nf` |

@@ -23,6 +23,7 @@ const FILES: &[(&str, &str, &str)] = &[
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
     // Radio-only profiles: a brand's BLE module for `euc replay`, without a simulated wheel.
+    ("inmotion-v1", "ble.toml", include_str!("../../../profiles/inmotion-v1/ble.toml")),
     ("inmotion-v2", "ble.toml", include_str!("../../../profiles/inmotion-v2/ble.toml")),
     ("kingsong", "ble.toml", include_str!("../../../profiles/kingsong/ble.toml")),
     ("leaperkim", "ble.toml", include_str!("../../../profiles/leaperkim/ble.toml")),
