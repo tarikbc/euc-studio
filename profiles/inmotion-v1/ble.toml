@@ -1,0 +1,41 @@
+# InMotion wheels with the older protocol (V5, V8, V10 and others): a BLE module with two services,
+# notifications on FFE0/FFE4 and writes on FFE5/FFE9. Radio only: there is no simulated InMotion
+# wheel, so `euc replay --wheel inmotion-v1` (or a capture with the header `# wheel: inmotion-v1`)
+# serves their captures, and `euc sim serve` does not apply (docs/ble-radio.md, "Brand radios").
+# Facts: the EUC Remote project's clean-room fact sheet for the family, 2026-10-23 (services,
+# characteristics and write type all "confirmed" there).
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "inmotion-v1"
+
+[advertising]
+# Apps need no name: both services decide. A V10F-, V10- or V8F- prefix only sets the model; V10F- here.
+# This name is never a real wheel.
+name = "V10F-EMU"
+name_pattern = "V*"
+services = ["FFE0", "FFE5"]
+manufacturer = ""
+
+[[service]]
+uuid = "FFE0"
+
+[[service.characteristic]]
+uuid = "FFE4"
+properties = ["notify"]
+roles = ["tx"]
+
+[[service]]
+uuid = "FFE5"
+
+# The apps write with response.
+[[service.characteristic]]
+uuid = "FFE9"
+properties = ["write"]
+roles = ["rx"]
+
+[module]
+kind = "node"
+# A replay sends each capture line whole; only answers to writes would be cut to this size (ESTIMATE).
+chunk = 20

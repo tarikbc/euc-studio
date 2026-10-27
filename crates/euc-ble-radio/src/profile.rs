@@ -495,6 +495,8 @@ mod tests {
 
     #[test]
     fn the_split_brand_radios_notify_on_one_characteristic_and_take_writes_on_another() {
+        // InMotion V1: notifications in one service (FFE0), writes in another (FFE5).
+        assert_split_radio(include_str!("../../../profiles/inmotion-v1/ble.toml"), "V10F-EMU", "FFE4", "FFE9", false);
         assert_split_radio(
             include_str!("../../../profiles/inmotion-v2/ble.toml"),
             "V11-EMU",
