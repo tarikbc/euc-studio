@@ -1,0 +1,39 @@
+# InMotion wheels with the newer protocol (V11, V12, V13, V14 and others): a BLE chip with firmware
+# of its own, on the Nordic UART service. Radio only: there is no simulated InMotion wheel, so
+# `euc replay --wheel inmotion-v2` (or a capture with the header `# wheel: inmotion-v2`) serves their
+# captures, and `euc sim serve` does not apply (docs/ble-radio.md, "Brand radios"). Facts: the EUC
+# Remote project's clean-room fact sheet for the family, 2026-10-23 (service, characteristics, write
+# type and name prefixes all "confirmed" there).
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "inmotion-v2"
+
+[advertising]
+# Apps require a case-sensitive model prefix (V11-, V12-, V12Pro-, V13-, V14-, ...); V11- gives a V11.
+# Use --name to advertise the model a capture came from. This name is never a real wheel.
+name = "V11-EMU"
+name_pattern = "V1*-*"
+services = ["6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]
+manufacturer = ""
+
+[[service]]
+uuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+
+[[service.characteristic]]
+uuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+properties = ["notify"]
+roles = ["tx"]
+
+# The apps write with response.
+[[service.characteristic]]
+uuid = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+properties = ["write"]
+roles = ["rx"]
+
+[module]
+kind = "node"
+# A replay sends each capture line whole; only answers to writes would be cut to this size (ESTIMATE:
+# the BLE 4 minimum, as the negotiated size is not known).
+chunk = 20

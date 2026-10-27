@@ -481,6 +481,29 @@ mod tests {
         }
     }
 
+    /// A brand radio that notifies on `tx` and takes writes on `rx` (with response, and also
+    /// without when `without_response`), on a chip of its own.
+    fn assert_split_radio(text: &str, name: &str, tx: &str, rx: &str, without_response: bool) {
+        let profile = BleProfile::from_toml(text).unwrap();
+        assert_eq!(profile.advertising.name, name);
+        assert_eq!((profile.uuid(profile.tx()), profile.uuid(profile.rx())), (tx, rx), "{name}");
+        let write = profile.characteristic(profile.rx()).unwrap().properties;
+        assert!(write.write, "{name}: writes with response");
+        assert_eq!(write.write_without_response, without_response, "{name}");
+        assert_eq!(profile.module, Module::Node { chunk: 20 }, "{name}");
+    }
+
+    #[test]
+    fn the_split_brand_radios_notify_on_one_characteristic_and_take_writes_on_another() {
+        assert_split_radio(
+            include_str!("../../../profiles/inmotion-v2/ble.toml"),
+            "V11-EMU",
+            "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+            "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+            false,
+        );
+    }
+
     #[test]
     fn a_nordic_uart_layout_has_split_characteristics_and_more_services() {
         let profile = BleProfile::from_toml(NUS).unwrap();
