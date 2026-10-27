@@ -383,6 +383,56 @@ the `V` and `N` identity replies, and in the clean profile the `SERVICE:CONFIRM`
 `SERVICE:DENIED` replies to the service sequences. When our image runs in lock-step with the stock one, the comparator checks the
 frames and the `V` / `N` replies byte for byte, and marks any other stock text as "debug text, ignored".
 
+### IMU frame (option, type `20`)
+
+An optional build of our firmware pushes one more frame type with the controller's own attitude and IMU data, for
+real-wheel inclination logs (epic #69). It is off in both profiles by default; the format is fixed here, the firmware
+option is #66, the decoder #67. The stock firmware never sends it.
+
+| Byte | Content |
+|---|---|
+| 0-1 | header `55 AA` |
+| 2-3 | pitch, s16, 0.01°: the attitude filter's pitch, the angle the balance loop uses; **positive nose down** |
+| 4-5 | roll, s16, 0.01°: the filter's roll; positive right side down (the sign on a real wheel is not confirmed yet) |
+| 6-7 | gyro x (roll rate), s16, 0.1 °/s |
+| 8-9 | gyro y (pitch rate), s16, 0.1 °/s; positive while the nose goes down |
+| 10-11 | gyro z (yaw rate), s16, 0.1 °/s |
+| 12-13 | accel x (forward), s16, 1 mg |
+| 14-15 | accel y (left), s16, 1 mg |
+| 16-17 | accel z (up), s16, 1 mg; about +1000 at rest |
+| 18 | type `20` |
+| 19 | sequence number, 0-255, +1 per frame, wraps |
+| 20-23 | footer `5A 5A 5A 5A` |
+
+- **Axes** are the board's: +x forward, +y left along the axle, +z up (the simulator's IMU site; on the real board
+  x forward is inferred, see `firmware/core/include/euc/attitude/attitude.h`). Note that the simulator's own
+  telemetry channel `pitch_deg` uses the opposite sign (nose up positive).
+- **Values.** Gyro and accel are the calibrated sample the attitude filter receives in that control tick, before any
+  low-pass, converted to the units above in the main loop. Fixed units, not raw counts: compat reads the gyro at
+  ±500 °/s and clean at ±2000 °/s (quirk `GYRO_500DPS_CLIP`), so raw counts would be ambiguous. The steps (0.1 °/s,
+  1 mg) sit at about the sensor's noise; the ranges (±3276 °/s, ±32 g) hold both settings.
+- **Rate.** The control interrupt takes a snapshot every 5th tick (99.2 Hz nominal); the main loop sends it. The
+  stock frame group always goes first: an IMU frame that does not fit the transmit buffer is dropped, and the
+  sequence number shows the gap. The BLE module's real limit is measured on the bench (#68); 49.6 Hz is the fallback.
+- **Pushed unprompted.** No request byte starts it: every inbound byte pauses the stock telemetry for about 0.6 s,
+  and the stock debug dump (`k`) answers about once a second with blocking text.
+- **No `55 AA` in bytes 2-17.** WheelLog restarts a frame on it, also across a field boundary. When an encoded
+  payload contains it, the encoder adds 1 to the field that holds the `55` byte (one step, below the noise).
+- **Quiet after inbound bytes.** Until it knows the firmware name, WheelLog reads each BLE chunk as text and changes
+  mode on a chunk that starts with `GW`, `CF`, `BF`, `JN`, `NAME` or `MPU`; a dense binary stream could match by
+  chance. So the IMU frames pause while the stock telemetry pauses after an inbound byte, and for 1 s after a `V` or
+  `N` reply.
+
+Decoders seen in public sources (2026-10-23 and 2026-10-27) ignore type `20` safely: WheelLog (any unknown type
+changes nothing; the unpacker checks header and footer only), WheelDash (drops a frame whose byte 19 is not `18` and
+finds the next `55 AA` cleanly), eucWatch (dispatches on byte 18 only), eucplanet (drops and logs unknown types) and
+the Home Assistant integration (ignores them). Types `00`-`04`, `07` (stock) and `FF` (SmirnoV-style firmware) are
+taken; `05` and `06` are avoided as a precaution. EUC World and DarknessBot are closed source: they need a replay test
+on a phone with `euc replay --ble` and the synthetic capture below (#65).
+
+Test data: `tests/data/begode-extreme/imu-frame-synthetic.hex` (stock groups with IMU frames at the full rate, one
+dropped frame, one adjusted `55 AA`), made by `make_imu_synthetic.py` next to it.
+
 ## Open questions
 
 1. Meaning of `W M`, frame `01` bytes 4-5 and 14-15, frame `04` bytes 16-17 (`0012`), and BMS reply bytes 42-43.
