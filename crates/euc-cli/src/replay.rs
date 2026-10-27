@@ -22,8 +22,8 @@ pub(crate) struct Args {
     /// Capture file: one notification per line, `<seconds> <hex bytes>`; `#` lines are comments
     /// (docs/ble-radio.md has the optional `# euc-capture v1` header).
     file: PathBuf,
-    /// Wheel profile, or radio-only brand profile (`leaperkim`), whose BLE module the replay
-    /// presents [default: the capture's `wheel` header, else begode-extreme]
+    /// Wheel profile, or radio-only brand profile (docs/ble-radio.md, "Brand radios"), whose BLE
+    /// module the replay presents [default: the capture's `wheel` header, else begode-extreme]
     #[arg(long)]
     wheel: Option<String>,
     #[command(flatten)]

@@ -468,12 +468,17 @@ mod tests {
     }
 
     #[test]
-    fn the_leaperkim_radio_is_the_same_bridge_under_its_own_name() {
-        let profile = BleProfile::from_toml(include_str!("../../../profiles/leaperkim/ble.toml")).unwrap();
-        let mut expected = BleProfile::hm10("LK_EMU");
-        expected.protocol = "leaperkim".into();
-        expected.advertising.name_pattern = Some("LK*".into());
-        assert_eq!(profile, expected);
+    fn the_ffe0_brand_radios_are_the_same_bridge_under_their_own_names() {
+        for (text, name, protocol, pattern) in [
+            (include_str!("../../../profiles/kingsong/ble.toml"), "KS-EMU", "kingsong", "KS*"),
+            (include_str!("../../../profiles/leaperkim/ble.toml"), "LK_EMU", "leaperkim", "LK*"),
+        ] {
+            let profile = BleProfile::from_toml(text).unwrap();
+            let mut expected = BleProfile::hm10(name);
+            expected.protocol = protocol.into();
+            expected.advertising.name_pattern = Some(pattern.into());
+            assert_eq!(profile, expected, "{protocol}");
+        }
     }
 
     #[test]
