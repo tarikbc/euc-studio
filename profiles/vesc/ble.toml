@@ -1,0 +1,37 @@
+# VESC-based boards and wheels: a BLE chip with firmware of its own, on the Nordic UART service.
+# Radio only: there is no simulated VESC vehicle, so `euc replay --wheel vesc` (or a capture with the
+# header `# wheel: vesc`) serves VESC captures, and `euc sim serve` does not apply (docs/ble-radio.md,
+# "Brand radios"). Facts: the EUC Remote project's clean-room fact sheet for the family, 2026-10-23
+# (service, characteristics, write type and name prefixes all "confirmed" there).
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "vesc"
+
+[advertising]
+# Apps require a name whose upper-case form starts with VESC, UNITY, FOCBOX, LITTLE FOCER, FOCSTROT or
+# BKB; this one is never a real board.
+name = "VESC_EMU"
+name_pattern = "VESC*"
+services = ["6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]
+manufacturer = ""
+
+[[service]]
+uuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+
+[[service.characteristic]]
+uuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+properties = ["notify"]
+roles = ["tx"]
+
+# The apps write without response.
+[[service.characteristic]]
+uuid = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+properties = ["write", "write-without-response"]
+roles = ["rx"]
+
+[module]
+kind = "node"
+# A replay sends each capture line whole; only answers to writes would be cut to this size (ESTIMATE).
+chunk = 20
