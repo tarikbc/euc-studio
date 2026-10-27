@@ -28,6 +28,7 @@ and `euc sim run`, and a scenario may name one with `settings = "<preset>"`.
 | Preset | Settings |
 |---|---|
 | `neutral` (default for `serve`) | The firmware's factory defaults with level pedals: medium pedals, pedal trim 4, tiltback 20 km/h, PWM alarm 80 %, speed alarms all on, roll cut-off mode 0, turn compensation 3, volume 6, voltage-mode drive, km, odometer 0. |
+| `tiltback-69` | `neutral` with a 69 km/h tiltback and current-mode drive (12 kHz), for runs above the factory 20 km/h tiltback (used by `tools/ride-log/cruise-flat.toml`). |
 | `tarik-2026-10-15` | The maintainer's wheel, decoded from the capture `tests/data/begode-extreme/idle-2026-10-15.hex`: hard pedals, pedal trim 5, tiltback 69 km/h, speed-alarm mode 2, roll cut-off mode 0, PWM tiltback on, PWM alarm 80 %, turn compensation 5, `W M` 1, volume 9, current-mode drive (12 kHz), km, odometer 1,468,670. The simulated wheel then sends the same settings fields as the capture (frame 00 echo `14A9`, frame 04 modes `4800`). |
 | `blank` | Nothing seeded: the empty journal of a factory-fresh controller (pedal trim 0, so the pedals sit 4.8° nose down). `euc sim run` without a scenario uses it, as the reference emulator does. |
 

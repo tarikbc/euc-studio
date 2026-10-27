@@ -1,0 +1,29 @@
+# Steady cruises on a level, ideal road at 22, 32, 42, 52 and 57 km/h (true speed), 20 s each, for
+# `tools/ride-log/compare.py --sim`: each cruise sits inside one 5 km/h band of the comparison table.
+# Not a shipped scenario (it lives outside scenarios/, so CI does not run it) and it has no checks.
+#
+# Rider: the default rider. Settings: `tiltback-69` (level pedals, tiltback 69 km/h, current-mode drive), as ride
+# logs come from wheels ridden above the factory 20 km/h tiltback.
+schema = 1
+name = "cruise-flat"
+description = "Steady cruises at 22 to 57 km/h on a level ideal road, for the ride-log comparison."
+wheel = "begode-extreme"
+seconds = 128.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [10, 22], [30, 22], [34, 32], [54, 32], [58, 42], [78, 42], [82, 52], [102, 52],
+             [106, 57], [126, 57]]
+settings = "tiltback-69"
+
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial heading east; an ideal,
+# level road (no hills, no road defects).
+[world]
+seed = 42
+revision = 2
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0

@@ -19,6 +19,12 @@ journal = 0x0800_F000
 description = "Factory defaults with level pedals: medium pedals, tiltback 20 km/h, voltage-mode drive, pedal trim 4."
 pedal_trim = 4
 
+[preset.tiltback-69]
+description = "Factory defaults with level pedals, a 69 km/h tiltback and current-mode drive: for runs above 20 km/h."
+pedal_trim = 4
+tiltback_kmh = 69
+drive_mode = "current"
+
 [preset.tarik-2026-10-15]
 description = "The maintainer's wheel as captured on 2026-10-15 (tests/data/begode-extreme/idle-2026-10-15.hex)."
 # Frame 04: odometer, modes 0x4800, tiltback 69, `W M` 1. Frame 00: settings echo 0x14A9, volume 9.

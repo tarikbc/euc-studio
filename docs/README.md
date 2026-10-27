@@ -72,6 +72,7 @@ true now.
 | [Free Ride acceptance](models/free-ride-acceptance.md) | Native Free Ride checks: play mode, drive mode, respawn |
 | [Recording acceptance](models/recording-acceptance.md) | Capture, replay and import limits |
 | [Tune acceptance](models/tune-acceptance.md) | Native Tune checks |
+| [Ride-log analysis](models/ride-log-analysis.md) | What one real ride says about the plant: speed scale, extra draw, current reading, battery, headroom |
 | [Generated map](models/generated-map-implementation.md) | The finite 32 m test pad that preceded the city (old recordings) |
 | [Human and Free Ride plan](models/human-and-free-ride.md) | The 2026-10-16 plan for the human model and Free Ride (historical) |
 
@@ -106,6 +107,7 @@ true now.
 | [python/README.md](../python/README.md), [python/DESIGN.md](../python/DESIGN.md) | The Python package and its design |
 | [Vendor guard](../tools/vendor-guard/README.md) | What the guard blocks and allows, how to run it |
 | [MuJoCo fetch](../tools/fetch-mujoco/README.md) | The pinned MuJoCo download |
+| [Ride-log compare](../tools/ride-log/README.md) | A real ride log against a simulated run, per speed band |
 | [Test data](../tests/data/begode-extreme/README.md) | Real-wheel captures used as test data |
 
 ## Historical plans and reviews

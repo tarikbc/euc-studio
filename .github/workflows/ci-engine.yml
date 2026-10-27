@@ -10,6 +10,7 @@ on:
       # The SIL library's C ABI and board side, which the SIL tests load.
       - "firmware/ports/sim/**"
       - "tools/fetch-mujoco/**"
+      - "tools/ride-log/**"
       - ".cargo/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -45,6 +46,7 @@ jobs:
       - name: Fetch MuJoCo
         run: python tools/fetch-mujoco/fetch.py --github
       - run: python -m unittest discover -s tools/fetch-mujoco -p 'test_*.py'
+      - run: python -m unittest discover -s tools/ride-log -p 'test_*.py'
       - run: cargo fmt --all --check
       # All features: the Unicorn backend (GPL-2.0, dev only) is linted too.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

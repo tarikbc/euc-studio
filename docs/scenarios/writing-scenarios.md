@@ -53,7 +53,7 @@ Record the timing settings with each result. See [CPU timing](../models/cpu-timi
 | `speed_kmh` | yes | The rider's target speed as `[seconds, km/h]` points, in time order, linear in between and held after the last. Negative is backwards. |
 | `phase_start_s` | no | Start time for measured-speed lean phases, at or after release. Defaults to `release_s`. |
 | `[[phase]]` | no | Ordered lean commands with measured-speed gates and finite timeouts. See below. |
-| `settings` | no | Settings preset the wheel boots with, from `profiles/<wheel>/settings.toml` (`neutral`, `tarik-2026-10-15`). Without it the settings journal is blank, which tilts the stock pedals 4.8° nose down. |
+| `settings` | no | Settings preset the wheel boots with, from `profiles/<wheel>/settings.toml` (`neutral`, `tiltback-69`, `tarik-2026-10-15`). Without it the settings journal is blank, which tilts the stock pedals 4.8° nose down. |
 | `step_off_s` | no | When the rider steps off the pedals (between `release_s` and the end); the wheel goes on alone. |
 | `push` | no | Pushes on the rider, `[[start s, newtons forward, duration s], ...]`; overlapping pushes add up. |
 | `[rider]`, `[rider.control]` | no | The rider, below. |
