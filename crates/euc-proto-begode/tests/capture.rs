@@ -8,7 +8,11 @@ use euc_proto_begode::{
 /// One BLE notification per line: `<seconds> <hex bytes>`; empty lines and `#` lines (a
 /// recorder's header) are skipped.
 fn notifications() -> Vec<Vec<u8>> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/begode-extreme/idle-2026-10-15.hex");
+    notifications_of("idle-2026-10-15.hex")
+}
+
+fn notifications_of(file: &str) -> Vec<Vec<u8>> {
+    let path = format!("{}/../../tests/data/begode-extreme/{file}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(path).expect("capture file");
     text.lines()
         .map(str::trim)
@@ -18,9 +22,13 @@ fn notifications() -> Vec<Vec<u8>> {
 }
 
 fn frames() -> Vec<Frame> {
+    frames_of("idle-2026-10-15.hex")
+}
+
+fn frames_of(file: &str) -> Vec<Frame> {
     let mut assembler = Assembler::new();
     let mut frames = Vec::new();
-    for notification in notifications() {
+    for notification in notifications_of(file) {
         assembler.push(&notification);
         for segment in assembler.by_ref() {
             match segment {
@@ -32,6 +40,29 @@ fn frames() -> Vec<Frame> {
     assert_eq!(assembler.finish(), None, "nothing left over");
     assert_eq!(assembler.stats().text_bytes, 0);
     frames
+}
+
+/// The synthetic capture with our firmware's optional IMU frames (type 20, docs/protocol/begode.md
+/// "IMU frame"; made by `make_imu_synthetic.py`): the stock groups still decode, and the IMU
+/// frames pass through as an unknown type, with their sequence, units and the no-`55 AA` rule.
+#[test]
+fn imu_frames_pass_through_between_the_stock_groups() {
+    let frames = frames_of("imu-frame-synthetic.hex");
+    let (imu, stock): (Vec<&Frame>, Vec<&Frame>) = frames.iter().partition(|f| f.kind() == 0x20);
+    assert_eq!((stock.len(), imu.len()), (50, 296));
+    for group in stock.chunks(5) {
+        let kinds: Vec<u8> = group.iter().map(|f| f.kind()).collect();
+        assert!(kinds == [0x00, 0x01, 0x02, 0x04, 0x07] || kinds == [0x00, 0x01, 0x03, 0x04, 0x07], "{kinds:02x?}");
+    }
+    assert!(imu.iter().all(|f| matches!(Telemetry::decode(f), Telemetry::Other(_))));
+
+    let gaps: Vec<(u8, u8)> =
+        imu.windows(2).filter(|w| w[1].sub().wrapping_sub(w[0].sub()) != 1).map(|w| (w[0].sub(), w[1].sub())).collect();
+    assert_eq!(gaps, [(99, 101)], "one dropped frame");
+    // The first sample, t = 0: level, roll rate 3.8 deg/s, pitch rate 15.1 deg/s, 1 g up.
+    let first = imu[0];
+    assert_eq!([2, 4, 6, 8, 10, 12, 14, 16].map(|at| first.i16_at(at)), [0, 0, 38, 151, 0, 0, 0, 1000]);
+    assert!(imu.iter().all(|f| !f.as_bytes()[2..18].windows(2).any(|w| w == [0x55, 0xAA])), "no 55 AA");
 }
 
 #[test]
