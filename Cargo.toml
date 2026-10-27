@@ -119,7 +119,7 @@ unicorn-engine = { version = "=2.1.5", default-features = false, features = ["ar
 # rustls with the bundled Mozilla roots: the same trust store on every OS, no OpenSSL.
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # Recordings (euc-telemetry): zstd chunks. The bundled C library, no legacy formats.
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 
 [workspace.lints.rust]
 missing_docs = "warn"
