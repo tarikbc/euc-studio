@@ -1,0 +1,36 @@
+# Ninebot One wheels (C, E, P): the BLE module, a transparent UART bridge on FFE0/FFE1.
+# Radio only: there is no simulated Ninebot wheel, so `euc replay --wheel ninebot-one` (or a capture
+# with the header `# wheel: ninebot-one`) serves Ninebot One captures, and `euc sim serve` does not
+# apply (docs/ble-radio.md, "Brand radios"). Facts: the EUC Remote project's clean-room fact sheet for
+# the family, 2026-10-23 (service, characteristic, write type and name rule all "confirmed" there).
+# Newer Ninebot families (encrypted sessions) are not covered.
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "ninebot-one"
+
+[advertising]
+# Apps require a case-sensitive name that starts with NOC, NOE or NOP (the model); this one is never
+# a real wheel.
+name = "NOE_EMU"
+name_pattern = "NO[CEP]*"
+services = ["FFE0"]
+manufacturer = ""
+
+[[service]]
+uuid = "FFE0"
+
+# One characteristic both ways: notifications out, writes (without response) in.
+[[service.characteristic]]
+uuid = "FFE1"
+properties = ["notify", "write", "write-without-response"]
+roles = ["tx", "rx"]
+
+[module]
+kind = "uart-bridge"
+# 20-byte notifications. The idle and pacing values are the Begode module's (ESTIMATE); only
+# `euc sim serve` uses them, never a replay.
+chunk = 20
+idle_ms = 1
+interval_ms = 0

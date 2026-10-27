@@ -27,6 +27,7 @@ const FILES: &[(&str, &str, &str)] = &[
     ("inmotion-v2", "ble.toml", include_str!("../../../profiles/inmotion-v2/ble.toml")),
     ("kingsong", "ble.toml", include_str!("../../../profiles/kingsong/ble.toml")),
     ("leaperkim", "ble.toml", include_str!("../../../profiles/leaperkim/ble.toml")),
+    ("ninebot-one", "ble.toml", include_str!("../../../profiles/ninebot-one/ble.toml")),
     ("vesc", "ble.toml", include_str!("../../../profiles/vesc/ble.toml")),
 ];
 
