@@ -38,6 +38,9 @@ if(NOT sil_flash_line MATCHES "ORIGIN = (0x[0-9A-Fa-f]+)")
     message(FATAL_ERROR "link_app.ld of ${EUC_SIL_BOARD} has no FLASH origin")
 endif()
 list(APPEND sil_definitions "SIL_IMAGE_ADDRESS=${CMAKE_MATCH_1}U")
+if(EUC_FEATURE_IMU_TLM)
+    list(APPEND sil_definitions "EUC_FEATURE_IMU_TLM=1")
+endif()
 
 # The probe list (tools/gen_probes.py, the source of profiles/begode-extreme/probes.toml), as a C X-macro.
 set(sil_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")

@@ -570,8 +570,12 @@ bool stm32f1_reset_was_watchdog(void)
 
 #define BLE_BRR_115200 625U
 #define BMS_BRR_9600   3750U
-#define TX_RING_BYTES  256U
-#define BMS_DMA        (&DMA1->CH[2]) /* channel 3 */
+#if defined(EUC_FEATURE_IMU_TLM)
+#define TX_RING_BYTES 512U
+#else
+#define TX_RING_BYTES 256U
+#endif
+#define BMS_DMA (&DMA1->CH[2]) /* channel 3 */
 /* The BMS reply buffer the DMA fills, in emulated SRAM. */
 #define BMS_DMA_ADDRESS EUC_SIL_DMA_RAM_ADDRESS
 
@@ -609,6 +613,11 @@ bool stm32f1_ble_send(const uint8_t *bytes, uint32_t count)
     tx_head = head;
     set_bits(REG(USART1->CR1), USART_CR1_TXEIE);
     return true;
+}
+
+uint32_t stm32f1_ble_free(void)
+{
+    return TX_RING_BYTES - (tx_head - tx_tail);
 }
 
 bool stm32f1_ble_service(uint8_t *received)

@@ -104,6 +104,7 @@ bool stm32f1_reset_was_watchdog(void);
 /* USART1 115200 8N1 (PA9 TX, PA10 RX) with receive interrupt and a transmit ring. */
 void stm32f1_ble_init(void);
 bool stm32f1_ble_send(const uint8_t *bytes, uint32_t count); /* false when the ring has no room */
+uint32_t stm32f1_ble_free(void);                             /* free bytes in the transmit ring */
 /* Interrupt body: returns true with a received byte; drains the transmit ring. */
 bool stm32f1_ble_service(uint8_t *received);
 

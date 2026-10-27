@@ -24,6 +24,10 @@
 # Every check both runs judge must give the same verdict.
 same_checks = true
 
+# Our firmware's optional IMU frame (type 20, preset target-compat-imu) is left out on both sides; stock and the
+# plain compat image never send it, so the shipped comparisons do not change.
+ignore_frame_types = [0x20]
+
 [channels]            # largest |stock - compat|, in the channel's unit
 speed_kmh = 0.5
 wheel_rad_s = 1.5     # the wheel's speed relative to the shell also carries the pitch rate

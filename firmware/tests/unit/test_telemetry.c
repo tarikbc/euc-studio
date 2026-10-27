@@ -5,6 +5,8 @@
  * maintainer's wheel). Every frame is decoded into struct euc_tlm_in by a small helper here, encoded again by
  * the firmware encoder, and must come back byte for byte. The group order is checked against the capture too.
  */
+#include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -292,6 +294,122 @@ static void test_cell_pages_map_to_cell_numbers(void)
     TEST_ASSERT_EQUAL_HEX8(0x01U, frame[19]);
 }
 
+/* IMU frame (option, docs/protocol/begode.md "IMU frame") -------------------------------------------------
+ */
+
+static struct euc_tlm_imu imu_at_rest(void)
+{
+    struct euc_tlm_imu imu;
+    memset(&imu, 0, sizeof(imu));
+    imu.accel[2] = 8192; /* 1 g up */
+    imu.gyro_config = EUC_TLM_GYRO_500DPS;
+    return imu;
+}
+
+static bool payload_holds_a_frame_start(const uint8_t *frame)
+{
+    for (size_t at = 2U; (at + 1U) < 18U; at++) {
+        if ((frame[at] == 0x55U) && (frame[at + 1U] == 0xAAU)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void test_imu_frame_layout_and_units(void)
+{
+    struct euc_tlm_imu imu = imu_at_rest();
+    imu.pitch_deg = 1.234F;
+    imu.roll_deg = -0.5F;
+    imu.gyro[0] = 655;    /* 10.0 deg/s at 65.5 counts per deg/s */
+    imu.gyro[1] = -131;   /* -2.0 deg/s */
+    imu.gyro[2] = 66;     /* 1.008 deg/s */
+    imu.accel[0] = -4096; /* -0.5 g */
+    imu.accel[1] = 1;     /* 0.12 mg */
+    imu.sequence = 0xABU;
+    uint8_t frame[EUC_TLM_FRAME_BYTES];
+    euc_tlm_encode_imu(&imu, frame);
+
+    TEST_ASSERT_EQUAL_HEX8(0x55U, frame[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xAAU, frame[1]);
+    const int16_t expected[8] = {123, -50, 100, -20, 10, -500, 0, 1000};
+    for (size_t field = 0U; field < 8U; field++) {
+        TEST_ASSERT_EQUAL_INT16(expected[field], field_s16(frame, field));
+    }
+    TEST_ASSERT_EQUAL_HEX8(EUC_TLM_FRAME_IMU, frame[18]);
+    TEST_ASSERT_EQUAL_HEX8(0xABU, frame[19]);
+    for (size_t at = 20U; at < 24U; at++) {
+        TEST_ASSERT_EQUAL_HEX8(0x5AU, frame[at]);
+    }
+}
+
+static void test_imu_gyro_scale_follows_the_range(void)
+{
+    struct euc_tlm_imu imu = imu_at_rest();
+    imu.gyro_config = 0x18U; /* +-2000 deg/s, 16.4 counts per deg/s (the clean profile) */
+    imu.gyro[0] = 164;
+    imu.gyro[1] = INT16_MIN;
+    uint8_t frame[EUC_TLM_FRAME_BYTES];
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_EQUAL_INT16(100, field_s16(frame, 2U));
+    TEST_ASSERT_EQUAL_INT16(-19980, field_s16(frame, 3U)); /* -1998.0 deg/s: the full range fits */
+
+    imu.gyro_config = EUC_TLM_GYRO_500DPS;
+    imu.gyro[1] = INT16_MAX;
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_EQUAL_INT16(5003, field_s16(frame, 3U)); /* 500.3 deg/s */
+}
+
+static void test_imu_values_round_and_clamp(void)
+{
+    struct euc_tlm_imu imu = imu_at_rest();
+    imu.pitch_deg = 0.006F;
+    imu.roll_deg = -0.006F;
+    uint8_t frame[EUC_TLM_FRAME_BYTES];
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_EQUAL_INT16(1, field_s16(frame, 0U));
+    TEST_ASSERT_EQUAL_INT16(-1, field_s16(frame, 1U));
+
+    imu.pitch_deg = 400.0F;
+    imu.roll_deg = -400.0F;
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_EQUAL_INT16(INT16_MAX, field_s16(frame, 0U));
+    TEST_ASSERT_EQUAL_INT16(INT16_MIN, field_s16(frame, 1U));
+
+    imu.pitch_deg = NAN;
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_EQUAL_INT16(0, field_s16(frame, 0U));
+}
+
+/* Real values never make 55 AA (accel +-4000 mg, gyro +-20000, pitch +-9000, roll +-18000 never have the high
+ * byte 55 or AA); angles outside the physical range reach the rule. */
+static void test_imu_payload_never_holds_a_frame_start(void)
+{
+    struct euc_tlm_imu imu = imu_at_rest();
+    imu.pitch_deg = 219.30F; /* 21930 = 55 AA inside one field */
+    uint8_t frame[EUC_TLM_FRAME_BYTES];
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_FALSE(payload_holds_a_frame_start(frame));
+    TEST_ASSERT_EQUAL_INT16(21931, field_s16(frame, 0U));
+
+    imu.pitch_deg = 0.85F;  /* 85 = 00 55 */
+    imu.roll_deg = -219.5F; /* -21950 = AA 42: 55 AA across two fields */
+    euc_tlm_encode_imu(&imu, frame);
+    TEST_ASSERT_FALSE(payload_holds_a_frame_start(frame));
+    TEST_ASSERT_EQUAL_INT16(86, field_s16(frame, 0U));
+    TEST_ASSERT_EQUAL_INT16(-21950, field_s16(frame, 1U));
+}
+
+static void test_imu_frames_yield_to_the_stock_telemetry(void)
+{
+    const uint32_t enough = EUC_TLM_FRAME_BYTES + EUC_TLM_IMU_RESERVE_BYTES;
+    TEST_ASSERT_TRUE(euc_tlm_imu_may_send(enough, false, UINT32_MAX));
+    TEST_ASSERT_FALSE(euc_tlm_imu_may_send(enough - 1U, false, UINT32_MAX)); /* the next group goes first */
+    TEST_ASSERT_FALSE(euc_tlm_imu_may_send(512U, true, UINT32_MAX));         /* telemetry paused */
+    TEST_ASSERT_FALSE(euc_tlm_imu_may_send(512U, false, EUC_TLM_IMU_QUIET_TICKS - 1U)); /* after V or N */
+    TEST_ASSERT_TRUE(euc_tlm_imu_may_send(512U, false, EUC_TLM_IMU_QUIET_TICKS));
+}
+
 int main(void)
 {
     load_capture_stream();
@@ -307,5 +425,10 @@ int main(void)
     RUN_TEST(test_pwm_percent_is_sign_extended);
     RUN_TEST(test_status_frame_packs_modes_and_alerts);
     RUN_TEST(test_cell_pages_map_to_cell_numbers);
+    RUN_TEST(test_imu_frame_layout_and_units);
+    RUN_TEST(test_imu_gyro_scale_follows_the_range);
+    RUN_TEST(test_imu_values_round_and_clamp);
+    RUN_TEST(test_imu_payload_never_holds_a_frame_start);
+    RUN_TEST(test_imu_frames_yield_to_the_stock_telemetry);
     return UNITY_END();
 }

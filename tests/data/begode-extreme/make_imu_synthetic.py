@@ -8,7 +8,8 @@ IMU frame every 5 control ticks (99.2 Hz) with a known motion:
 - pitch 3.00° sin(2π 0.8 t), nose down positive; roll 1.50° sin(2π 0.4 t), right side down positive;
 - gyro x and y the angles' rates, gyro z 0; accel the gravity those angles give (x = -sin pitch, y = sin roll,
   z = cos pitch cos roll, in mg);
-- frame 100 is dropped (its sequence number is skipped), frame 150 carries an impact sample whose payload holds
+- frame 100 is dropped (its sequence number is skipped), frame 150 carries a sample beyond the sensor's range
+  (accel z about -22 g, which the ±4 g sensor cannot read; real values never need the rule) whose payload holds
   `55 AA` across two fields, so the encoder adds 1 to the field that holds the `55`.
 
 The bytes go out as our firmware would send them: the UART at 115200 baud (86.8 µs a byte), a frame group first
@@ -91,7 +92,7 @@ def imu_frame(n, t):
         s16(-1000 * math.sin(p)), s16(1000 * math.sin(r)), s16(1000 * math.cos(p) * math.cos(r)),
     ]
     if n == IMPACT:
-        # An impact sample: accel y low byte 55, then accel z high byte AA (about -22 g).
+        # Beyond the sensor's range, to reach the rule: accel y low byte 55, then accel z high byte AA (-22 g).
         fields[6], fields[7] = 0x0155, s16(-21984)
     fields, payload = no_55aa(fields)
     return b"\x55\xaa" + payload + bytes([TYPE_IMU, n & 0xFF]) + b"\x5a" * 4

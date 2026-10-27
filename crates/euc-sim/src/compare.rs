@@ -79,6 +79,10 @@ pub struct Tolerances {
     /// The BLE streams must carry the same telemetry frames (text between them is not judged).
     #[serde(default)]
     pub ble_identical: bool,
+    /// Frame types left out of the BLE comparison on both sides, e.g. `[0x20]` for the optional IMU
+    /// frame of our firmware (docs/protocol/begode.md, "IMU frame").
+    #[serde(default)]
+    pub ignore_frame_types: Vec<u8>,
     /// Every check of the scenario that both runs judge must give the same verdict.
     #[serde(default)]
     pub same_checks: bool,
@@ -106,6 +110,8 @@ pub struct Adjustment {
     pub vars: Section,
     /// As in [`Tolerances::ble_identical`].
     pub ble_identical: Option<bool>,
+    /// As in [`Tolerances::ignore_frame_types`].
+    pub ignore_frame_types: Option<Vec<u8>>,
     /// As in [`Tolerances::same_checks`].
     pub same_checks: Option<bool>,
     /// As in [`Tolerances::until_s`].
@@ -172,6 +178,7 @@ impl Tolerances {
             channels_rms: self.channels_rms.merged(&adj.channels_rms),
             vars: self.vars.merged(&adj.vars),
             ble_identical: adj.ble_identical.unwrap_or(self.ble_identical),
+            ignore_frame_types: adj.ignore_frame_types.clone().unwrap_or_else(|| self.ignore_frame_types.clone()),
             same_checks: adj.same_checks.unwrap_or(self.same_checks),
             until_s: adj.until_s.or(self.until_s),
             scenario: BTreeMap::new(),
@@ -341,7 +348,7 @@ pub fn compare(a: &Trace, b: &Trace, tol: &Tolerances) -> Result<Comparison, Str
     vars_unpaired.sort();
     vars_unpaired.dedup();
 
-    let ble = ble_diff(a, b, until);
+    let ble = ble_diff(a, b, until, &tol.ignore_frame_types);
     let mut first: Option<Divergence> = None;
     let mut consider = |candidate: Divergence| {
         if first.as_ref().is_none_or(|f| candidate.t_s < f.t_s) {
@@ -452,11 +459,11 @@ fn series(name: &str, unit: &str, t: &[f64], a: &[f64], b: &[f64], limits: (Opti
     }
 }
 
-fn ble_diff(a: &Trace, b: &Trace, until: f64) -> BleDiff {
+fn ble_diff(a: &Trace, b: &Trace, until: f64, ignore_types: &[u8]) -> BleDiff {
     let (mut fa, ta) = split_stream(a);
     let (mut fb, tb) = split_stream(b);
-    fa.retain(|f| f.0 < until);
-    fb.retain(|f| f.0 < until);
+    fa.retain(|f| f.0 < until && !ignore_types.contains(&f.1[18]));
+    fb.retain(|f| f.0 < until && !ignore_types.contains(&f.1[18]));
     let first = fa
         .iter()
         .zip(&fb)
@@ -559,6 +566,9 @@ fn field_at(frame: &[u8], offset: usize) -> String {
             _ => "zero",
         }
         .to_owned(),
+        (0x20, o) => {
+            ["pitch", "roll", "gyro x", "gyro y", "gyro z", "accel x", "accel y", "accel z"][(o - 2) / 2].to_owned()
+        }
         _ => format!("byte {offset}"),
     };
     format!("frame {kind:02x} byte {offset}: {name}")
@@ -612,6 +622,25 @@ mod tests {
         let first = c.first_divergence.unwrap();
         assert_eq!((first.kind.as_str(), first.t_s), ("ble", 0.0), "the frame starts at 0 ms, before 20 ms");
         assert!(!c.within_tolerance);
+    }
+
+    #[test]
+    fn ignored_frame_types_leave_the_ble_comparison() {
+        // Run B also sends our firmware's optional IMU frame (type 20) between two stock frames.
+        let a = trace(&[0.0, 1.0], &[frame(0, 1), frame(7, 2)].concat());
+        let b = trace(&[0.0, 1.0], &[frame(0, 1), frame(0x20, 3), frame(7, 2)].concat());
+        let plain = Tolerances::from_toml("ble_identical = true").unwrap();
+        let c = compare(&a, &b, &plain).unwrap();
+        assert!(!c.ble.frames_identical && !c.within_tolerance);
+        assert_eq!(c.ble.first_frame.as_ref().map(|f| f.field.as_str()), Some("frame 07 byte 2: battery current"));
+
+        let tol = Tolerances::from_toml("ble_identical = true\nignore_frame_types = [0x20]").unwrap();
+        let c = compare(&a, &b, &tol).unwrap();
+        assert!(c.ble.frames_identical && c.within_tolerance);
+        assert_eq!((c.ble.frames_a, c.ble.frames_b), (2, 2));
+        let adjusted = Tolerances::from_toml("[scenario.imu]\nignore_frame_types = [0x20]").unwrap();
+        assert_eq!(adjusted.for_scenario("imu").ignore_frame_types, [0x20]);
+        assert_eq!(adjusted.for_scenario("other").ignore_frame_types, Vec::<u8>::new());
     }
 
     #[test]

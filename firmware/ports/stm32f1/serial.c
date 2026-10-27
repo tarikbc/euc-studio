@@ -10,7 +10,11 @@
 
 #define BLE_BRR_115200 625U  /* 72 MHz / 115200 */
 #define BMS_BRR_9600   3750U /* 36 MHz / 9600 */
-#define TX_RING_BYTES  256U  /* power of two */
+#if defined(EUC_FEATURE_IMU_TLM)
+#define TX_RING_BYTES 512U /* power of two; the IMU frames ride next to the stock groups */
+#else
+#define TX_RING_BYTES 256U /* power of two */
+#endif
 
 /* USART1 transmit ring: the main loop writes the head, the interrupt reads the tail. */
 static uint8_t tx_ring[TX_RING_BYTES];
@@ -43,6 +47,11 @@ bool stm32f1_ble_send(const uint8_t *bytes, uint32_t count)
     tx_head = head;
     USART1->CR1 |= USART_CR1_TXEIE;
     return true;
+}
+
+uint32_t stm32f1_ble_free(void)
+{
+    return TX_RING_BYTES - (tx_head - tx_tail);
 }
 
 bool stm32f1_ble_service(uint8_t *received)
