@@ -487,6 +487,45 @@ static void supervise(void)
     }
 }
 
+#if defined(EUC_FEATURE_IMU_TLM)
+/* The optional IMU frame (docs/protocol/begode.md, "IMU frame"). Every 5th tick the RTC interrupt only copies
+ * the filter's angles and the raw IMU sample with its calibration offsets; the main loop converts, encodes
+ * and queues the frame (the transmit ring has one writer, the main loop). File statics, not struct app
+ * fields: the probe map (tools/gen_probes.py) measures struct app without this option. */
+struct imu_capture {
+    float pitch_deg;
+    float roll_deg;
+    int16_t gyro_raw[EUC_IMU_AXES];
+    int16_t gyro_offset[EUC_IMU_AXES];
+    int16_t accel_raw[EUC_IMU_AXES];
+    int16_t accel_offset[EUC_IMU_AXES];
+};
+
+static volatile struct imu_capture imu_capture;
+/* A sequence lock: odd while the interrupt writes. Half of it is the snapshot number. */
+static volatile uint32_t imu_capture_count;
+static uint32_t imu_handled_count;
+static uint32_t imu_text_tick;
+static bool imu_text_seen;
+
+static void imu_capture_take(void)
+{
+    if ((app.rtc_ticks % EUC_TLM_IMU_PERIOD_TICKS) != 0U) {
+        return;
+    }
+    imu_capture_count = imu_capture_count + 1U;
+    imu_capture.pitch_deg = app.balance.attitude.pitch_deg;
+    imu_capture.roll_deg = app.balance.attitude.roll_deg;
+    for (uint32_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
+        imu_capture.gyro_raw[axis] = app.balance_in.gyro_raw[axis];
+        imu_capture.gyro_offset[axis] = app.balance_in.gyro_offset[axis];
+        imu_capture.accel_raw[axis] = app.balance_in.accel_raw[axis];
+        imu_capture.accel_offset[axis] = app.balance_in.accel_offset[axis];
+    }
+    imu_capture_count = imu_capture_count + 1U;
+}
+#endif
+
 void app_rtc_tick(void)
 {
     app.rtc_ticks++;
@@ -503,6 +542,9 @@ void app_rtc_tick(void)
     app_apply_commands(&cmd_out);
 
     balance();
+#if defined(EUC_FEATURE_IMU_TLM)
+    imu_capture_take();
+#endif
     service();
     alarms();
     lights_and_buttons();
@@ -599,6 +641,12 @@ static void telemetry(void)
     }
     struct euc_cmd_slot_out slot;
     euc_cmd_telemetry_slot(&app.commands, &slot);
+#if defined(EUC_FEATURE_IMU_TLM)
+    if ((slot.reply == EUC_CMD_REPLY_VERSION) || (slot.reply == EUC_CMD_REPLY_NAME)) {
+        imu_text_tick = app.rtc_ticks;
+        imu_text_seen = true;
+    }
+#endif
     send_reply(slot.reply);
     send_service_reply();
     if (slot.send_frames) {
@@ -611,6 +659,57 @@ static void telemetry(void)
         }
     }
 }
+
+#if defined(EUC_FEATURE_IMU_TLM)
+/* Copies the latest snapshot; false while the interrupt writes it (the next pass tries again). */
+static bool imu_capture_read(struct imu_capture *out, uint32_t *count)
+{
+    const uint32_t before = imu_capture_count;
+    if ((before & 1U) != 0U) {
+        return false;
+    }
+    out->pitch_deg = imu_capture.pitch_deg;
+    out->roll_deg = imu_capture.roll_deg;
+    for (uint32_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
+        out->gyro_raw[axis] = imu_capture.gyro_raw[axis];
+        out->gyro_offset[axis] = imu_capture.gyro_offset[axis];
+        out->accel_raw[axis] = imu_capture.accel_raw[axis];
+        out->accel_offset[axis] = imu_capture.accel_offset[axis];
+    }
+    *count = before / 2U;
+    return imu_capture_count == before;
+}
+
+/* Each snapshot once: queued, or dropped when the stock telemetry needs the line (the number shows the gap).
+ */
+static void imu_telemetry(void)
+{
+    struct imu_capture capture;
+    uint32_t count = 0U;
+    if (!imu_capture_read(&capture, &count) || (count == imu_handled_count)) {
+        return;
+    }
+    imu_handled_count = count;
+    const bool paused = app.commands.telemetry_holdoff_groups > 0U;
+    const uint32_t since_text = imu_text_seen ? (app.rtc_ticks - imu_text_tick) : UINT32_MAX;
+    if (!euc_tlm_imu_may_send(stm32f1_ble_free(), paused, since_text)) {
+        return;
+    }
+    struct euc_tlm_imu imu = {
+        .pitch_deg = capture.pitch_deg,
+        .roll_deg = capture.roll_deg,
+        .gyro_config = euc_imu_gyro_config(),
+        .sequence = (uint8_t)(count & 0xFFU),
+    };
+    for (uint32_t axis = 0U; axis < EUC_IMU_AXES; axis++) {
+        imu.gyro[axis] = euc_imu_correct(capture.gyro_raw[axis], capture.gyro_offset[axis]);
+        imu.accel[axis] = euc_imu_correct(capture.accel_raw[axis], capture.accel_offset[axis]);
+    }
+    uint8_t frame[EUC_TLM_FRAME_BYTES];
+    euc_tlm_encode_imu(&imu, frame);
+    (void)stm32f1_ble_send(frame, EUC_TLM_FRAME_BYTES);
+}
+#endif
 
 static void bms_link(void)
 {
@@ -665,6 +764,9 @@ void app_main_loop_pass(void)
     }
     bms_link();
     telemetry();
+#if defined(EUC_FEATURE_IMU_TLM)
+    imu_telemetry();
+#endif
     strip_render_queued();
 
     if (app.storage_write_pending) {

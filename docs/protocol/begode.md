@@ -386,8 +386,9 @@ frames and the `V` / `N` replies byte for byte, and marks any other stock text a
 ### IMU frame (option, type `20`)
 
 An optional build of our firmware pushes one more frame type with the controller's own attitude and IMU data, for
-real-wheel inclination logs (epic #69). It is off in both profiles by default; the format is fixed here, the firmware
-option is #66, the decoder #67. The stock firmware never sends it.
+real-wheel inclination logs (epic #69). It is off in both profiles by default: the CMake option `EUC_FEATURE_IMU_TLM`,
+built by the preset `target-compat-imu` (compat behaviour plus the frame; +1.1 KB flash, +0.3 KB RAM). Without the
+option the images do not change by a byte. The decoder is #67. The stock firmware never sends it.
 
 | Byte | Content |
 |---|---|
@@ -401,7 +402,7 @@ option is #66, the decoder #67. The stock firmware never sends it.
 | 14-15 | accel y (left), s16, 1 mg |
 | 16-17 | accel z (up), s16, 1 mg; about +1000 at rest |
 | 18 | type `20` |
-| 19 | sequence number, 0-255, +1 per frame, wraps |
+| 19 | sequence number, 0-255: the snapshot's number, so a snapshot that was not sent shows as a gap; wraps |
 | 20-23 | footer `5A 5A 5A 5A` |
 
 - **Axes** are the board's: +x forward, +y left along the axle, +z up (the simulator's IMU site; on the real board
@@ -411,13 +412,20 @@ option is #66, the decoder #67. The stock firmware never sends it.
   low-pass, converted to the units above in the main loop. Fixed units, not raw counts: compat reads the gyro at
   ±500 °/s and clean at ±2000 °/s (quirk `GYRO_500DPS_CLIP`), so raw counts would be ambiguous. The steps (0.1 °/s,
   1 mg) sit at about the sensor's noise; the ranges (±3276 °/s, ±32 g) hold both settings.
-- **Rate.** The control interrupt takes a snapshot every 5th tick (99.2 Hz nominal); the main loop sends it. The
-  stock frame group always goes first: an IMU frame that does not fit the transmit buffer is dropped, and the
-  sequence number shows the gap. The BLE module's real limit is measured on the bench (#68); 49.6 Hz is the fallback.
+- **Rate.** The control interrupt copies a snapshot every 5th tick (99.2 Hz nominal) and does nothing else for it;
+  the main loop converts, encodes and queues the frame (the transmit ring has one writer). The stock telemetry always
+  goes first: an IMU frame is queued only if the 512-byte ring keeps room for a whole group and a text reply after
+  it (152 bytes); otherwise it is dropped, and the sequence number shows the gap. The BLE module's real limit is
+  measured on the bench (#68); 49.6 Hz is the fallback.
+- **Time a sample by its number, not by its arrival.** Snapshots waiting behind a stock group leave right after it,
+  so a frame can arrive up to about 40 ms after its sample (in the simulator, `ride-20kmh-stop`: 99.4 Hz, no
+  snapshot missing, a few 40 ms waits next to groups). The sample period is 5 ticks, 10.08 ms.
 - **Pushed unprompted.** No request byte starts it: every inbound byte pauses the stock telemetry for about 0.6 s,
   and the stock debug dump (`k`) answers about once a second with blocking text.
 - **No `55 AA` in bytes 2-17.** WheelLog restarts a frame on it, also across a field boundary. When an encoded
-  payload contains it, the encoder adds 1 to the field that holds the `55` byte (one step, below the noise).
+  payload contains it, the encoder adds 1 to the field that holds the `55` byte (one step, below the noise). Real
+  values cannot make it (accel within ±4000 mg, gyro within ±20000, pitch within ±9000 and roll within ±18000 never
+  have the high byte `55` or `AA`), so the rule is a safety net.
 - **Quiet after inbound bytes.** Until it knows the firmware name, WheelLog reads each BLE chunk as text and changes
   mode on a chunk that starts with `GW`, `CF`, `BF`, `JN`, `NAME` or `MPU`; a dense binary stream could match by
   chance. So the IMU frames pause while the stock telemetry pauses after an inbound byte, and for 1 s after a `V` or
@@ -431,7 +439,8 @@ taken; `05` and `06` are avoided as a precaution. EUC World and DarknessBot are 
 on a phone with `euc replay --ble` and the synthetic capture below (#65).
 
 Test data: `tests/data/begode-extreme/imu-frame-synthetic.hex` (stock groups with IMU frames at the full rate, one
-dropped frame, one adjusted `55 AA`), made by `make_imu_synthetic.py` next to it.
+dropped frame, one adjusted `55 AA` from a sample beyond the sensor's range), made by `make_imu_synthetic.py` next to
+it. The comparator leaves the frame out with `ignore_frame_types = [0x20]` ([compare](../compare.md)).
 
 ## Open questions
 

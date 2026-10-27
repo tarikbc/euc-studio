@@ -20,6 +20,8 @@ set_property(CACHE EUC_PROFILE PROPERTY STRINGS compat clean)
 option(EUC_DEV_BUILD "Set the dev flag in the .euc_info block (unsigned image)" ON)
 option(EUC_SANITIZERS "Host builds: compile with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(EUC_CLANG_TIDY "Run clang-tidy on every firmware source while it compiles" OFF)
+option(EUC_FEATURE_IMU_TLM
+    "Push the optional IMU frame (type 20, docs/protocol/begode.md) next to the stock telemetry" OFF)
 
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
 
@@ -34,6 +36,9 @@ if(CMAKE_CROSSCOMPILING)
     string(TOUPPER "${EUC_PROFILE}" profile_upper)
     add_library(euc_profile INTERFACE)
     target_compile_definitions(euc_profile INTERFACE EUC_PROFILE_${profile_upper}=1)
+    if(EUC_FEATURE_IMU_TLM)
+        target_compile_definitions(euc_profile INTERFACE EUC_FEATURE_IMU_TLM=1)
+    endif()
 endif()
 
 add_subdirectory(core)

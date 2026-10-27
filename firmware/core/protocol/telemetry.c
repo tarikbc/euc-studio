@@ -186,3 +186,108 @@ void euc_tlm_build_group(struct euc_tlm_state *state, const struct euc_tlm_in *i
         state->cell_pack_b = !state->cell_pack_b;
     }
 }
+
+/* IMU frame (option) ----------------------------------------------------------------------------------- */
+
+/* Gyro counts to 0.1 deg/s: x 10 / 65.5 = x 20 / 131 at +-500 deg/s, x 10 / 16.4 = x 25 / 41 at +-2000. */
+#define IMU_GYRO_500_NUM  20
+#define IMU_GYRO_500_DEN  131
+#define IMU_GYRO_2000_NUM 25
+#define IMU_GYRO_2000_DEN 41
+/* Accel counts to mg: x 1000 / 8192 = x 125 / 1024. */
+#define IMU_ACCEL_NUM 125
+#define IMU_ACCEL_DEN 1024
+#define IMU_FIELDS    8U
+
+static int16_t clamp_s16(int32_t value)
+{
+    if (value > INT16_MAX) {
+        return INT16_MAX;
+    }
+    if (value < INT16_MIN) {
+        return INT16_MIN;
+    }
+    return (int16_t)value;
+}
+
+/* value x numerator / denominator, rounded half away from zero, clamped to s16. */
+static int16_t scale_counts(int16_t value, int32_t numerator, int32_t denominator)
+{
+    const int32_t product = (int32_t)value * numerator;
+    const int32_t half = denominator / 2;
+    const int32_t quotient =
+        (product >= 0) ? ((product + half) / denominator) : -((half - product) / denominator);
+    return clamp_s16(quotient);
+}
+
+/* Degrees to 0.01 deg, rounded half away from zero and clamped; not a number gives 0. */
+static int16_t centidegrees(float degrees)
+{
+    const float scaled = degrees * 100.0F;
+    if (!(scaled == scaled)) {
+        return 0;
+    }
+    if (scaled >= (float)INT16_MAX) {
+        return INT16_MAX;
+    }
+    if (scaled <= (float)INT16_MIN) {
+        return INT16_MIN;
+    }
+    return (int16_t)((scaled >= 0.0F) ? (scaled + 0.5F) : (scaled - 0.5F));
+}
+
+static uint16_t field_u16(const uint8_t frame[EUC_TLM_FRAME_BYTES], size_t field_index)
+{
+    const size_t offset = FIELD_BYTES_OFFSET + (2U * field_index);
+    return (uint16_t)(((uint16_t)frame[offset] << 8U) | frame[offset + 1U]);
+}
+
+/* No 55 AA in bytes 2-17 (a decoder could take it for a frame start): add 1 to the field that holds the 55.
+ * Each step changes only that field's low byte and can make no new pair, so this ends within 8 steps. */
+static void no_header_in_payload(uint8_t frame[EUC_TLM_FRAME_BYTES])
+{
+    size_t at = FIELD_BYTES_OFFSET;
+    while ((at + 1U) < TYPE_BYTE) {
+        if ((frame[at] == FRAME_HEADER_0) && (frame[at + 1U] == FRAME_HEADER_1)) {
+            const size_t field_index = (at - FIELD_BYTES_OFFSET) / 2U;
+            put_u16be(frame, field_index, (uint16_t)(field_u16(frame, field_index) + 1U));
+            at = FIELD_BYTES_OFFSET;
+        } else {
+            at++;
+        }
+    }
+}
+
+void euc_tlm_encode_imu(const struct euc_tlm_imu *imu, uint8_t frame[EUC_TLM_FRAME_BYTES])
+{
+    const bool gyro_500 = imu->gyro_config == EUC_TLM_GYRO_500DPS;
+    const int32_t gyro_num = gyro_500 ? IMU_GYRO_500_NUM : IMU_GYRO_2000_NUM;
+    const int32_t gyro_den = gyro_500 ? IMU_GYRO_500_DEN : IMU_GYRO_2000_DEN;
+    const int16_t fields[IMU_FIELDS] = {
+        centidegrees(imu->pitch_deg),
+        centidegrees(imu->roll_deg),
+        scale_counts(imu->gyro[0], gyro_num, gyro_den),
+        scale_counts(imu->gyro[1], gyro_num, gyro_den),
+        scale_counts(imu->gyro[2], gyro_num, gyro_den),
+        scale_counts(imu->accel[0], IMU_ACCEL_NUM, IMU_ACCEL_DEN),
+        scale_counts(imu->accel[1], IMU_ACCEL_NUM, IMU_ACCEL_DEN),
+        scale_counts(imu->accel[2], IMU_ACCEL_NUM, IMU_ACCEL_DEN),
+    };
+    for (size_t index = 0U; index < IMU_FIELDS; index++) {
+        put_u16be(frame, index, from_signed(fields[index]));
+    }
+    no_header_in_payload(frame);
+    frame[0] = FRAME_HEADER_0;
+    frame[1] = FRAME_HEADER_1;
+    frame[TYPE_BYTE] = (uint8_t)EUC_TLM_FRAME_IMU;
+    frame[SUB_INDEX_BYTE] = imu->sequence;
+    for (size_t index = 0U; index < FOOTER_BYTES; index++) {
+        frame[FOOTER_OFFSET + index] = FRAME_FOOTER;
+    }
+}
+
+bool euc_tlm_imu_may_send(uint32_t tx_free_bytes, bool telemetry_paused, uint32_t ticks_since_text)
+{
+    return !telemetry_paused && (ticks_since_text >= EUC_TLM_IMU_QUIET_TICKS) &&
+           (tx_free_bytes >= (EUC_TLM_FRAME_BYTES + EUC_TLM_IMU_RESERVE_BYTES));
+}

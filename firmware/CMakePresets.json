@@ -29,6 +29,12 @@
       "cacheVariables": { "EUC_PROFILE": "compat" }
     },
     {
+      "name": "target-compat-imu",
+      "displayName": "Target image, compat profile with the optional IMU frame (type 20; simulator and bench only)",
+      "inherits": "target-compat",
+      "cacheVariables": { "EUC_FEATURE_IMU_TLM": "ON" }
+    },
+    {
       "name": "target-clean",
       "displayName": "Target image, clean profile (known stock defects fixed)",
       "inherits": "target-base",
@@ -54,6 +60,7 @@
   ],
   "buildPresets": [
     { "name": "target-compat", "configurePreset": "target-compat" },
+    { "name": "target-compat-imu", "configurePreset": "target-compat-imu" },
     { "name": "target-clean", "configurePreset": "target-clean" },
     { "name": "host-debug", "configurePreset": "host-debug" },
     { "name": "host-sil", "configurePreset": "host-sil" }
@@ -78,6 +85,13 @@
       "steps": [
         { "type": "configure", "name": "target-compat" },
         { "type": "build", "name": "target-compat" }
+      ]
+    },
+    {
+      "name": "target-compat-imu",
+      "steps": [
+        { "type": "configure", "name": "target-compat-imu" },
+        { "type": "build", "name": "target-compat-imu" }
       ]
     },
     {

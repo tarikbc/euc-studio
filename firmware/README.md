@@ -53,6 +53,7 @@ fetched at configure time from pinned release archives with sha256 checks.
 cd firmware
 cmake --workflow --preset target-compat   # build/target-compat/euc-fw-begode-extreme.{elf,bin,map}
 cmake --workflow --preset target-clean    # build/target-clean/euc-fw-begode-extreme.{elf,bin,map}
+cmake --workflow --preset target-compat-imu  # compat + the optional IMU frame (simulator and bench only)
 cmake --workflow --preset host-debug      # unit tests with AddressSanitizer + UBSan
 cmake --workflow --preset host-sil        # build/host-sil/libeuc_sil.{dylib,so} + tests
 ```
@@ -61,6 +62,7 @@ cmake --workflow --preset host-sil        # build/host-sil/libeuc_sil.{dylib,so}
 |---|---|---|
 | `target-compat` | image, compat profile | `-Os`, `-ffunction-sections -fdata-sections`, `--gc-sections`, `-nostdlib` + libgcc |
 | `target-clean` | image, clean profile | same flags |
+| `target-compat-imu` | image, compat profile with `EUC_FEATURE_IMU_TLM`: the IMU frame (type `20`, [protocol](../docs/protocol/begode.md#imu-frame-option-type-20)) next to the stock telemetry, a 512-byte transmit ring | same flags; +1.1 KB flash, +0.3 KB RAM |
 | `host-debug` | unit tests | Debug, `-fsanitize=address,undefined` |
 | `host-sil` | SIL shared library + tests | RelWithDebInfo, runtime quirk profile; the app and core built for the host, the storage pages aliased to host arrays |
 

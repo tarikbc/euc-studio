@@ -61,6 +61,7 @@ a variable or a frame.
 # Allowed differences; anything listed and exceeded fails the comparison (exit code 1).
 same_checks = true           # every scenario check both runs judge must give the same verdict
 ble_identical = false        # true: the two runs must send the same telemetry frames
+ignore_frame_types = []      # frame types left out on both sides, e.g. [0x20] for our optional IMU frame
 until_s = 30.0               # optional: compare only before this simulated second
 
 [channels]                   # largest |A - B| of telemetry channels, in the channel's unit

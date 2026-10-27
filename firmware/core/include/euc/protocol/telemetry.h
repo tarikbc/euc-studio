@@ -121,4 +121,32 @@ void euc_tlm_build_group(struct euc_tlm_state *state, const struct euc_tlm_in *i
 void euc_tlm_encode_frame(const struct euc_tlm_in *in, enum euc_tlm_frame_type type, uint8_t page,
                           uint8_t frame[EUC_TLM_FRAME_BYTES]);
 
+/* The optional IMU frame (docs/protocol/begode.md, "IMU frame"): sent only by images built with
+ * EUC_FEATURE_IMU_TLM, outside the stock group, one per control-tick snapshot. The encoder below is always
+ * built (the unit tests use it); the stock images never call it. */
+#define EUC_TLM_FRAME_IMU        0x20U
+#define EUC_TLM_IMU_PERIOD_TICKS 5U   /* a snapshot every 5th RTC tick: 99.2 Hz */
+#define EUC_TLM_IMU_QUIET_TICKS  496U /* no IMU frame for 1 s after a V or N reply */
+#define EUC_TLM_IMU_REPLY_BYTES  32U  /* room for the longest text reply */
+/* Free transmit bytes an IMU frame must leave behind: the next group and a text reply go first. */
+#define EUC_TLM_IMU_RESERVE_BYTES ((EUC_TLM_GROUP_FRAMES * EUC_TLM_FRAME_BYTES) + EUC_TLM_IMU_REPLY_BYTES)
+#define EUC_TLM_GYRO_500DPS       0x08U /* MPU-6500 GYRO_CONFIG: +-500 deg/s, 65.5 counts per deg/s */
+
+struct euc_tlm_imu {
+    float pitch_deg;     /* attitude filter, positive nose down */
+    float roll_deg;      /* attitude filter, positive right side down */
+    int16_t gyro[3];     /* calibrated counts, x y z */
+    int16_t accel[3];    /* calibrated counts, x y z; 8192 per g (+-4 g) */
+    uint8_t gyro_config; /* GYRO_CONFIG in use: 0x08 (+-500 deg/s) or 0x18 (+-2000 deg/s, 16.4 per deg/s) */
+    uint8_t sequence;    /* snapshot number, wraps */
+};
+
+/* Encodes the IMU frame: angles in 0.01 deg, gyro in 0.1 deg/s, accel in 1 mg, each rounded and clamped to
+ * s16; then no 55 AA in bytes 2-17 (adds 1 to the field that holds the 55, until none is left). */
+void euc_tlm_encode_imu(const struct euc_tlm_imu *imu, uint8_t frame[EUC_TLM_FRAME_BYTES]);
+
+/* Whether the main loop may queue an IMU frame now: the stock telemetry is not paused, no V or N reply went
+ * out in the last second, and the transmit buffer keeps EUC_TLM_IMU_RESERVE_BYTES after the frame. */
+bool euc_tlm_imu_may_send(uint32_t tx_free_bytes, bool telemetry_paused, uint32_t ticks_since_text);
+
 #endif

@@ -22,7 +22,7 @@ change.
 
 - The IMU frames carry a known motion: pitch 3.00° sin(2π 0.8 t), roll 1.50° sin(2π 0.4 t), their rates on gyro y and
   x, and the gravity those angles give on the accel axes.
-- Frame 100 is dropped (sequence 99 → 101), and frame 150 holds an impact sample whose payload needed the `55 AA`
-  adjustment.
+- Frame 100 is dropped (sequence 99 → 101), and frame 150 holds a synthetic sample beyond the sensor's range (accel z
+  about -22 g; the ±4 g sensor cannot read it) whose payload needed the `55 AA` adjustment. Real values never need it.
 - The notifications follow the module model of `profiles/begode-extreme/ble.toml` (20 bytes, a shorter one after 1 ms
   of idle line) on a 115200-baud UART: 646 notifications, 50 stock frames and 296 IMU frames.
