@@ -49,10 +49,12 @@ bool stm32f1_ble_send(const uint8_t *bytes, uint32_t count)
     return true;
 }
 
+#if defined(EUC_FEATURE_IMU_TLM)
 uint32_t stm32f1_ble_free(void)
 {
     return TX_RING_BYTES - (tx_head - tx_tail);
 }
+#endif
 
 bool stm32f1_ble_service(uint8_t *received)
 {
