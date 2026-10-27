@@ -203,6 +203,7 @@ see the brand's advertisement and GATT table, so they pick the brand's decoder.
 
 | Id | Brand | GATT | Writes | Emulator name | Apps accept |
 |---|---|---|---|---|---|
+| `kingsong` | KingSong | `FFE0` / `FFE1` both ways | without response | `KS-EMU` | manufacturer data, an `FFF0` service, or a lower-case name that starts with `ks` (never a name that starts with `NO`) |
 | `leaperkim` | LeaperKim / Veteran | `FFE0` / `FFE1` both ways | without response | `LK_EMU` | a lower-case name that starts with `lk` or `nf` |
 
 The facts come from the EUC Remote project's clean-room fact sheets (one per family; transport rows marked
