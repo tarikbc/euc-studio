@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use euc_ble_radio::{Action, Control, Entry, Link, Replayer, capture};
+use euc_profile::ProfileError;
 use euc_sim::bridge::{self, ClientMessage, ServerMessage};
 
 use crate::ble::{self, BleArgs, WheelLink};
@@ -21,8 +22,8 @@ pub(crate) struct Args {
     /// Capture file: one notification per line, `<seconds> <hex bytes>`; `#` lines are comments
     /// (docs/ble-radio.md has the optional `# euc-capture v1` header).
     file: PathBuf,
-    /// Wheel profile whose BLE module the replay presents [default: the capture's `wheel`
-    /// header, else begode-extreme]
+    /// Wheel profile, or radio-only brand profile (`leaperkim`), whose BLE module the replay
+    /// presents [default: the capture's `wheel` header, else begode-extreme]
     #[arg(long)]
     wheel: Option<String>,
     #[command(flatten)]
@@ -45,6 +46,16 @@ pub(crate) struct Args {
 /// The wheel a capture without a `wheel` header is replayed as.
 const DEFAULT_WHEEL: &str = "begode-extreme";
 
+/// The profile a replay presents: wheel `id`, or, when no such wheel exists, a radio-only profile
+/// (a brand's BLE module in `profiles/<id>/ble.toml`, with no simulated wheel behind it).
+fn profile_id(ctx: &Context, id: &str) -> anyhow::Result<String> {
+    match ctx.profiles().load(id) {
+        Ok(wheel) => Ok(wheel.id),
+        Err(ProfileError::UnknownWheel { .. }) if ble::has_profile(ctx, id) => Ok(id.to_owned()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// How often the replay loop runs. A capture's timestamps have 1 ms steps; every line goes out
 /// within a few ms of its time.
 const POLL: Duration = Duration::from_millis(2);
@@ -62,9 +73,9 @@ pub(crate) fn run(ctx: &Context, args: &Args) -> anyhow::Result<Verdict> {
     }
     let capture = capture::load(&args.file).with_context(|| format!("cannot read {}", ui::path(&args.file)))?;
     let wheel_id = args.wheel.clone().or_else(|| capture.header.wheel.clone()).unwrap_or_else(|| DEFAULT_WHEEL.into());
-    let wheel = ctx.wheel(&wheel_id)?;
-    let mut bridge = args.bridge.as_deref().map(|url| Bridge::bind(url, &wheel.id, &args.file)).transpose()?;
-    let mut link = WheelLink::start(ctx, &wheel.id, &args.radio)?;
+    let wheel_id = profile_id(ctx, &wheel_id)?;
+    let mut bridge = args.bridge.as_deref().map(|url| Bridge::bind(url, &wheel_id, &args.file)).transpose()?;
+    let mut link = WheelLink::start(ctx, &wheel_id, &args.radio)?;
     let profile = link.link.profile();
     let mut replayer = Replayer::new(&capture, profile, ble::responder(&profile.protocol), args.from, args.looping)?;
     let tx = profile.tx();

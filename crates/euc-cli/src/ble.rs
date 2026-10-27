@@ -54,6 +54,12 @@ fn known_protocol(name: &str) -> bool {
     name == "begode"
 }
 
+/// Whether `id` has a BLE profile (`profiles/<id>/ble.toml`): a wheel with its module, or a
+/// radio-only brand profile that `euc replay` presents without a simulated wheel behind it.
+pub(crate) fn has_profile(ctx: &Context, id: &str) -> bool {
+    ctx.profiles().read(id, BLE_FILE).is_ok()
+}
+
 /// Wheel `id`'s BLE profile, from its `ble.toml`. A wheel without one gets the common HM-10
 /// layout, enough for the log and the TCP bridge; it cannot go on the radio.
 fn profile(ctx: &Context, id: &str, args: &BleArgs) -> anyhow::Result<BleProfile> {

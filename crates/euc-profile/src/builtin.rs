@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use crate::dir::from_text;
 use crate::{Origin, ProfileError, WHEEL_FILE, WheelProfile};
 
-/// `(wheel id, file name, text)` for every file in the repo's `profiles/<wheel>/`, sorted.
+/// `(wheel id, file name, text)` for every file in the repo's `profiles/<id>/`, sorted: the wheels,
+/// and the radio-only brand profiles (a `ble.toml` alone, for `euc replay`).
 ///
 /// Embedding them means a plain `euc fetch` trusts only pins that were reviewed and built with
 /// the code, never a `profiles/` folder it happens to find on disk. A new wheel or file is added
@@ -21,6 +22,8 @@ const FILES: &[(&str, &str, &str)] = &[
     ("begode-extreme", "settings.toml", include_str!("../../../profiles/begode-extreme/settings.toml")),
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
+    // Radio-only profiles: a brand's BLE module for `euc replay`, without a simulated wheel.
+    ("leaperkim", "ble.toml", include_str!("../../../profiles/leaperkim/ble.toml")),
 ];
 
 pub(crate) fn ids() -> Vec<String> {
@@ -47,7 +50,6 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::ProfileDir;
 
     fn repo_profiles() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles")
@@ -65,12 +67,18 @@ mod tests {
     }
 
     /// The binary must carry exactly what is on disk: a profile file edited, added or removed
-    /// without rebuilding (or without registering it in `FILES`) fails here.
+    /// without rebuilding (or without registering it in `FILES`) fails here. Every folder counts,
+    /// wheels and radio-only brand profiles alike.
     #[test]
     fn embedded_profiles_match_the_repo() {
         let mut on_disk = Vec::new();
-        for id in ProfileDir::new(repo_profiles()).ids().unwrap() {
-            for entry in fs::read_dir(repo_profiles().join(&id)).unwrap() {
+        for folder in fs::read_dir(repo_profiles()).unwrap() {
+            let folder = folder.unwrap().path();
+            if !folder.is_dir() {
+                continue;
+            }
+            let id = folder.file_name().unwrap().to_string_lossy().into_owned();
+            for entry in fs::read_dir(&folder).unwrap() {
                 let path = entry.unwrap().path();
                 if path.extension().is_some_and(|ext| ext == "toml") {
                     let name = path.file_name().unwrap().to_string_lossy().into_owned();

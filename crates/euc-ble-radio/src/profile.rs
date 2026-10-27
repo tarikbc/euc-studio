@@ -468,6 +468,15 @@ mod tests {
     }
 
     #[test]
+    fn the_leaperkim_radio_is_the_same_bridge_under_its_own_name() {
+        let profile = BleProfile::from_toml(include_str!("../../../profiles/leaperkim/ble.toml")).unwrap();
+        let mut expected = BleProfile::hm10("LK_EMU");
+        expected.protocol = "leaperkim".into();
+        expected.advertising.name_pattern = Some("LK*".into());
+        assert_eq!(profile, expected);
+    }
+
+    #[test]
     fn a_nordic_uart_layout_has_split_characteristics_and_more_services() {
         let profile = BleProfile::from_toml(NUS).unwrap();
         assert_eq!(profile.characteristics().count(), 3);
