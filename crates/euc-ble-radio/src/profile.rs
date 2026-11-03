@@ -470,6 +470,7 @@ mod tests {
     #[test]
     fn the_ffe0_brand_radios_are_the_same_bridge_under_their_own_names() {
         for (text, name, protocol, pattern) in [
+            (include_str!("../../../profiles/eway/ble.toml"), "E-EMU", "eway", "E-*"),
             (include_str!("../../../profiles/kingsong/ble.toml"), "KS-EMU", "kingsong", "KS*"),
             (include_str!("../../../profiles/leaperkim/ble.toml"), "LK_EMU", "leaperkim", "LK*"),
             (include_str!("../../../profiles/ninebot-one/ble.toml"), "NOE_EMU", "ninebot-one", "NO[CEP]*"),
