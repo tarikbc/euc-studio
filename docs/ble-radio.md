@@ -209,6 +209,7 @@ see the brand's advertisement and GATT table, so they pick the brand's decoder.
 | `leaperkim` | LeaperKim / Veteran | `FFE0` / `FFE1` both ways | without response | `LK_EMU` | a lower-case name that starts with `lk` or `nf` |
 | `ninebot-one` | Ninebot One (C, E, P) | `FFE0` / `FFE1` both ways | without response | `NOE_EMU` | a case-sensitive name that starts with `NOC`, `NOE` or `NOP` (the model); newer Ninebot families with encrypted sessions are not covered |
 | `vesc` | VESC-based boards and wheels | Nordic UART: notify `6E400003`, write `6E400002` | without response | `VESC_EMU` | an upper-case name that starts with `VESC`, `UNITY`, `FOCBOX`, `LITTLE FOCER`, `FOCSTROT` or `BKB` |
+| `xiaomi` | ACTON electric skateboards (the "Xiaomi" family of ride-logging apps) | `FFE0` / `FFE1` both ways | without response | `AX1_EMU` | a case-sensitive name that starts with `AX1`, `BLINK`, `BS2`, `BQ4`, `AR1` or `R0` (the model); a name that contains `gotway`, `begode`, `master`, `sv134`, `sv151` or `sv168` goes to a Begode decoder first |
 
 The facts come from the EUC Remote project's clean-room fact sheets (one per family; transport rows marked
 confirmed there). `--name` advertises another name, for example the model prefix a capture came from.

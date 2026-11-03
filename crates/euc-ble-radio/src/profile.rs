@@ -473,6 +473,7 @@ mod tests {
             (include_str!("../../../profiles/kingsong/ble.toml"), "KS-EMU", "kingsong", "KS*"),
             (include_str!("../../../profiles/leaperkim/ble.toml"), "LK_EMU", "leaperkim", "LK*"),
             (include_str!("../../../profiles/ninebot-one/ble.toml"), "NOE_EMU", "ninebot-one", "NO[CEP]*"),
+            (include_str!("../../../profiles/xiaomi/ble.toml"), "AX1_EMU", "xiaomi", "{AX1,BLINK,BS2,BQ4,AR1,R0}*"),
         ] {
             let profile = BleProfile::from_toml(text).unwrap();
             let mut expected = BleProfile::hm10(name);
