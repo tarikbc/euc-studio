@@ -1,0 +1,37 @@
+# E-Way electric scooters: the BLE module, a transparent UART bridge on FFE0/FFE1. Radio only: there is no
+# simulated scooter, so `euc replay --wheel eway` (or a capture with the header `# wheel: eway`) serves
+# its captures, and `euc sim serve` does not apply (docs/ble-radio.md, "Brand radios"). Facts: the EUC
+# Remote project's clean-room fact sheet for the family, 2026-10-27 (service, characteristic, write type
+# and name rule "confirmed" or "corrected" there). The physical GATT layout of E-Way scooters is still
+# unknown: a real scooter may differ.
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "eway"
+
+[advertising]
+# Apps require a name whose upper-case form starts with E- (E-350, E-500 and E-600 pick the model). An
+# FFE0/FFE1 device with such a name can still go to an earlier FFE0 family in some apps; pick the family
+# by hand there. This one is never a real scooter.
+name = "E-EMU"
+name_pattern = "E-*"
+services = ["FFE0"]
+manufacturer = ""
+
+[[service]]
+uuid = "FFE0"
+
+# One characteristic both ways: notifications out, writes (without response) in.
+[[service.characteristic]]
+uuid = "FFE1"
+properties = ["notify", "write", "write-without-response"]
+roles = ["tx", "rx"]
+
+[module]
+kind = "uart-bridge"
+# 20-byte notifications. The idle and pacing values are the Begode module's (ESTIMATE); only
+# `euc sim serve` uses them, never a replay.
+chunk = 20
+idle_ms = 1
+interval_ms = 0
