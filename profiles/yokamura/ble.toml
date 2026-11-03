@@ -1,0 +1,38 @@
+# Yokamura electric scooters: a BLE serial module on the vendor service FFF0, notifications on FFF7 and
+# writes on FFF6. Radio only: there is no simulated scooter, so `euc replay --wheel yokamura` (or a
+# capture with the header `# wheel: yokamura`) serves its captures, and `euc sim serve` does not apply
+# (docs/ble-radio.md, "Brand radios"). Facts: the EUC Remote project's clean-room fact sheet for the
+# family, 2026-10-27 (service, characteristics, roles and write type all "confirmed" there).
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "yokamura"
+
+[advertising]
+# No name rule: apps pick the family from FFF0 with FFF6 and FFF7. A name that starts with NO, or one
+# with Begode or Egret words, can send it to another family first; this one is never a real scooter.
+name = "YOKAMURA_EMU"
+services = ["FFF0"]
+manufacturer = ""
+
+[[service]]
+uuid = "FFF0"
+
+[[service.characteristic]]
+uuid = "FFF7"
+properties = ["notify"]
+roles = ["tx"]
+
+# The apps write without response.
+[[service.characteristic]]
+uuid = "FFF6"
+properties = ["write", "write-without-response"]
+roles = ["rx"]
+
+[module]
+# FFF0/FFF6/FFF7 is a common generic serial module (the fact sheet's inference). Modelled like the
+# other split brand radios: a replay never uses the module model, only `euc sim serve` would.
+kind = "node"
+# A replay sends each capture line whole; only answers to writes would be cut to this size (ESTIMATE).
+chunk = 20

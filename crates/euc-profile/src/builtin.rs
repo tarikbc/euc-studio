@@ -31,6 +31,7 @@ const FILES: &[(&str, &str, &str)] = &[
     ("ninebot-one", "ble.toml", include_str!("../../../profiles/ninebot-one/ble.toml")),
     ("vesc", "ble.toml", include_str!("../../../profiles/vesc/ble.toml")),
     ("xiaomi", "ble.toml", include_str!("../../../profiles/xiaomi/ble.toml")),
+    ("yokamura", "ble.toml", include_str!("../../../profiles/yokamura/ble.toml")),
 ];
 
 pub(crate) fn ids() -> Vec<String> {

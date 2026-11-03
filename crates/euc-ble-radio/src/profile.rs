@@ -514,6 +514,8 @@ mod tests {
             "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
             true,
         );
+        // Yokamura: a vendor service (FFF0) with split characteristics, writes without response.
+        assert_split_radio(include_str!("../../../profiles/yokamura/ble.toml"), "YOKAMURA_EMU", "FFF7", "FFF6", true);
     }
 
     #[test]
