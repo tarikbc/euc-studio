@@ -1,0 +1,36 @@
+# ACTON electric skateboards (the "Xiaomi" family of ride-logging apps): the BLE module, a transparent
+# UART bridge on FFE0/FFE1. Radio only: there is no simulated board, so `euc replay --wheel xiaomi` (or a
+# capture with the header `# wheel: xiaomi`) serves its captures, and `euc sim serve` does not apply
+# (docs/ble-radio.md, "Brand radios"). Facts: the EUC Remote project's clean-room fact sheet for the
+# family, 2026-10-27 (service, characteristic, write type and name prefixes all "confirmed" there).
+
+schema = 1
+
+# No protocol crate yet: the replay sends the capture's notifications but answers no writes.
+protocol = "xiaomi"
+
+[advertising]
+# Apps require a case-sensitive name that starts with AX1, BLINK, BS2, BQ4, AR1 or R0 (the prefix picks
+# the model), and a name that contains "gotway", "begode", "master", "sv134", "sv151" or "sv168" goes
+# to a Begode decoder first; this one is never a real board.
+name = "AX1_EMU"
+name_pattern = "{AX1,BLINK,BS2,BQ4,AR1,R0}*"
+services = ["FFE0"]
+manufacturer = ""
+
+[[service]]
+uuid = "FFE0"
+
+# One characteristic both ways: notifications out, writes (without response) in.
+[[service.characteristic]]
+uuid = "FFE1"
+properties = ["notify", "write", "write-without-response"]
+roles = ["tx", "rx"]
+
+[module]
+kind = "uart-bridge"
+# 20-byte notifications. The idle and pacing values are the Begode module's (ESTIMATE); only
+# `euc sim serve` uses them, never a replay.
+chunk = 20
+idle_ms = 1
+interval_ms = 0

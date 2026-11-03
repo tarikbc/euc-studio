@@ -470,9 +470,11 @@ mod tests {
     #[test]
     fn the_ffe0_brand_radios_are_the_same_bridge_under_their_own_names() {
         for (text, name, protocol, pattern) in [
+            (include_str!("../../../profiles/eway/ble.toml"), "E-EMU", "eway", "E-*"),
             (include_str!("../../../profiles/kingsong/ble.toml"), "KS-EMU", "kingsong", "KS*"),
             (include_str!("../../../profiles/leaperkim/ble.toml"), "LK_EMU", "leaperkim", "LK*"),
             (include_str!("../../../profiles/ninebot-one/ble.toml"), "NOE_EMU", "ninebot-one", "NO[CEP]*"),
+            (include_str!("../../../profiles/xiaomi/ble.toml"), "AX1_EMU", "xiaomi", "{AX1,BLINK,BS2,BQ4,AR1,R0}*"),
         ] {
             let profile = BleProfile::from_toml(text).unwrap();
             let mut expected = BleProfile::hm10(name);
@@ -512,6 +514,8 @@ mod tests {
             "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
             true,
         );
+        // Yokamura: a vendor service (FFF0) with split characteristics, writes without response.
+        assert_split_radio(include_str!("../../../profiles/yokamura/ble.toml"), "YOKAMURA_EMU", "FFF7", "FFF6", true);
     }
 
     #[test]

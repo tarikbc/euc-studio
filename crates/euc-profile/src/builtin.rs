@@ -23,12 +23,15 @@ const FILES: &[(&str, &str, &str)] = &[
     ("begode-extreme", "stockmap.toml", include_str!("../../../profiles/begode-extreme/stockmap.toml")),
     ("begode-extreme", "wheel.toml", include_str!("../../../profiles/begode-extreme/wheel.toml")),
     // Radio-only profiles: a brand's BLE module for `euc replay`, without a simulated wheel.
+    ("eway", "ble.toml", include_str!("../../../profiles/eway/ble.toml")),
     ("inmotion-v1", "ble.toml", include_str!("../../../profiles/inmotion-v1/ble.toml")),
     ("inmotion-v2", "ble.toml", include_str!("../../../profiles/inmotion-v2/ble.toml")),
     ("kingsong", "ble.toml", include_str!("../../../profiles/kingsong/ble.toml")),
     ("leaperkim", "ble.toml", include_str!("../../../profiles/leaperkim/ble.toml")),
     ("ninebot-one", "ble.toml", include_str!("../../../profiles/ninebot-one/ble.toml")),
     ("vesc", "ble.toml", include_str!("../../../profiles/vesc/ble.toml")),
+    ("xiaomi", "ble.toml", include_str!("../../../profiles/xiaomi/ble.toml")),
+    ("yokamura", "ble.toml", include_str!("../../../profiles/yokamura/ble.toml")),
 ];
 
 pub(crate) fn ids() -> Vec<String> {
